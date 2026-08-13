@@ -1,0 +1,6 @@
+{
+  "name": "J Smart Services",
+  "description": "Plataforma para conectar clientes e profissionais de serviços em Angola.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

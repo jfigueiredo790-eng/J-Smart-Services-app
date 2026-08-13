@@ -1,0 +1,198 @@
+{
+  "entities": {
+    "Cliente": {
+      "title": "Cliente",
+      "description": "Perfil de utilizador cliente registado para solicitar serviços",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string", "maxLength": 30 },
+        "role": { "type": "string", "enum": ["cliente"] },
+        "province": { "type": "string" },
+        "city": { "type": "string" },
+        "walletBalanceKz": { "type": "number" },
+        "verified": { "type": "boolean" },
+        "blocked": { "type": "boolean" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "phone", "role", "ownerId", "createdAt", "updatedAt"]
+    },
+    "Profissional": {
+      "title": "Profissional",
+      "description": "Perfil de prestador de serviços qualificado",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string", "maxLength": 30 },
+        "role": { "type": "string", "enum": ["profissional"] },
+        "categories": { "type": "array" },
+        "bio": { "type": "string", "maxLength": 2000 },
+        "hourlyRateKz": { "type": "number" },
+        "experienceYears": { "type": "number" },
+        "rating": { "type": "number" },
+        "reviewCount": { "type": "number" },
+        "completedJobs": { "type": "number" },
+        "documentsVerified": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["disponivel", "ocupado"] },
+        "province": { "type": "string" },
+        "address": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "phone", "role", "categories", "ownerId", "createdAt", "updatedAt"]
+    },
+    "Administrador": {
+      "title": "Administrador",
+      "description": "Perfil de gestor ou funcionário administrativo da plataforma",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string", "maxLength": 30 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "adminSubRole": { "type": "string", "enum": ["super_admin", "atendimento", "gestao_profissionais", "financeiro"] },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role", "adminSubRole", "ownerId", "createdAt", "updatedAt"]
+    },
+    "Servico": {
+      "title": "Servico",
+      "description": "Categoria de serviço disponível na plataforma",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 500 },
+        "iconName": { "type": "string" },
+        "color": { "type": "string" },
+        "popularCount": { "type": "number" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "ownerId", "createdAt", "updatedAt"]
+    },
+    "Pedido": {
+      "title": "Pedido",
+      "description": "Solicitação de serviço efetuada por cliente",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "professionalId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "categoryId": { "type": "string" },
+        "province": { "type": "string" },
+        "address": { "type": "string" },
+        "budgetKz": { "type": "number" },
+        "urgency": { "type": "string" },
+        "status": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "clientId", "title", "categoryId", "province", "budgetKz", "ownerId", "createdAt", "updatedAt"]
+    },
+    "Pagamento": {
+      "title": "Pagamento",
+      "description": "Transação financeira, comissão ou carregamento de carteira",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "type": { "type": "string" },
+        "amountKz": { "type": "number" },
+        "description": { "type": "string" },
+        "status": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "amountKz", "type", "ownerId", "createdAt", "updatedAt"]
+    },
+    "Avaliacao": {
+      "title": "Avaliacao",
+      "description": "Classificação e comentário deixado ao profissional",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "requestId": { "type": "string" },
+        "professionalId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string", "maxLength": 1000 },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "requestId", "professionalId", "clientId", "rating", "ownerId", "createdAt", "updatedAt"]
+    },
+    "Mensagem": {
+      "title": "Mensagem",
+      "description": "Mensagem do chat entre cliente e profissional",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "requestId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderRole": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string", "maxLength": 2000 },
+        "timestamp": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "requestId", "senderId", "text", "ownerId", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/clientes/{clientId}": {
+      "schema": { "$ref": "#/entities/Cliente" },
+      "description": "Coleção de clientes da plataforma"
+    },
+    "/profissionais/{proId}": {
+      "schema": { "$ref": "#/entities/Profissional" },
+      "description": "Coleção de profissionais prestadores de serviços"
+    },
+    "/administradores/{adminId}": {
+      "schema": { "$ref": "#/entities/Administrador" },
+      "description": "Coleção de administradores e funcionários de apoio"
+    },
+    "/servicos/{serviceId}": {
+      "schema": { "$ref": "#/entities/Servico" },
+      "description": "Coleção de categorias e tipos de serviços oferecidos"
+    },
+    "/pedidos/{requestId}": {
+      "schema": { "$ref": "#/entities/Pedido" },
+      "description": "Coleção de pedidos de serviço solicitados"
+    },
+    "/pagamentos/{paymentId}": {
+      "schema": { "$ref": "#/entities/Pagamento" },
+      "description": "Coleção de transações e pagamentos"
+    },
+    "/avaliacoes/{reviewId}": {
+      "schema": { "$ref": "#/entities/Avaliacao" },
+      "description": "Coleção de avaliações de serviços prestados"
+    },
+    "/mensagens/{messageId}": {
+      "schema": { "$ref": "#/entities/Mensagem" },
+      "description": "Coleção de mensagens do chat"
+    }
+  }
+}

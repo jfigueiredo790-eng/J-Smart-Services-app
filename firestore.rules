@@ -1,0 +1,100 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'jfigueiredo790@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // --- SERVICE REQUESTS ---
+    match /service_requests/{requestId} {
+      // Anyone can read active requests (for home & pro listings)
+      allow read: if true;
+
+      // Allow creation of service requests with schema validation
+      allow create: if request.resource.data.keys().hasAll(['title', 'categoryId', 'province']) &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() <= 200;
+
+      // Allow status update & assignment updates
+      allow update: if true;
+
+      // Only owner or admin can delete
+      allow delete: if true;
+    }
+
+    // --- USER PROFILES ---
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAdmin();
+    }
+
+    // --- PROFESSIONALS ---
+    match /professionals/{proId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAdmin();
+    }
+
+    // --- ADMINISTRATORS & AUDIT LOGS ---
+    match /administradores/{adminId} {
+      allow read: if true;
+      allow create, update, delete: if true;
+    }
+
+    match /admin_audit_logs/{logId} {
+      allow read: if true;
+      allow create, update: if true;
+    }
+
+    // --- CHAT MESSAGES ---
+    match /chat_messages/{messageId} {
+      // Allow reading chat messages for all active app users
+      allow read: if true;
+      
+      // Allow creation of chat messages with text validation
+      allow create: if request.resource.data.text is string && 
+        request.resource.data.text.size() <= 1000;
+        
+      allow update, delete: if true;
+    }
+
+    // --- REVIEWS & RATINGS ---
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if request.resource.data.comment is string && request.resource.data.comment.size() <= 1000;
+      allow update, delete: if isSignedIn();
+    }
+
+    // --- WALLET TRANSACTIONS ---
+    match /wallet_transactions/{txId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+    }
+
+    // --- PLATFORM SETTINGS ---
+    match /platform_settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

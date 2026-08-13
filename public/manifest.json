@@ -1,0 +1,22 @@
+{
+  "short_name": "J Smart",
+  "name": "J Smart Services - Angola",
+  "description": "Plataforma de Prestação de Serviços em Angola para Clientes e Profissionais",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#059669",
+  "display": "standalone",
+  "orientation": "portrait"
+}
