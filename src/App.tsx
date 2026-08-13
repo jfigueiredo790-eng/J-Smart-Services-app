@@ -11,7 +11,6 @@ import { ChatView } from './components/ChatView';
 import { ReviewModal } from './components/ReviewModal';
 import { ProfileView } from './components/ProfileView';
 import { AdminDashboard } from './components/AdminDashboard';
-import { AdminLoginPage } from './components/AdminLoginPage';
 import { ProDashboard } from './components/ProDashboard';
 import { WalletView } from './components/WalletView';
 import { SplashScreen } from './components/SplashScreen';
@@ -668,12 +667,38 @@ function MainContent() {
             <ProfileView />
           )}
 
-          {/* VIEW: ADMIN DASHBOARD / ADMIN LOGIN (PROTECTED) */}
+          {/* VIEW: ADMIN DASHBOARD (PROTECTED ROUTE GUARD) */}
           {activeTab === 'admin' && (
-            isLoggedIn && userRole === 'admin' ? (
+            isLoggedIn && (currentUser.role === 'admin' || userRole === 'admin') ? (
               <AdminDashboard />
             ) : (
-              <AdminLoginPage onCancel={() => setActiveTab('home')} />
+              <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xl max-w-lg mx-auto my-8 text-center space-y-4">
+                <div className="w-16 h-16 bg-slate-100 text-slate-700 rounded-2xl flex items-center justify-center mx-auto text-2xl font-bold shadow-inner border border-slate-200">
+                  🛡️
+                </div>
+                <h2 className="text-xl font-black text-slate-900">Acesso Restrito ao Administrador</h2>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Esta área é restrita e exclusiva para a equipa de administração da J Smart Services.
+                  Para aceder, utilize a sua conta no ecrã de início de sessão da plataforma.
+                </p>
+                <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+                  <button
+                    onClick={() => {
+                      setActiveTab('home');
+                      setShowAuthModal(true);
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-5 py-2.5 rounded-xl text-xs transition-all shadow-md"
+                  >
+                    Iniciar Sessão
+                  </button>
+                  <button
+                    onClick={() => setActiveTab(isLoggedIn && userRole === 'profissional' ? 'pro_dashboard' : 'home')}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold px-5 py-2.5 rounded-xl text-xs transition-all"
+                  >
+                    Voltar ao Início
+                  </button>
+                </div>
+              </div>
             )
           )}
 

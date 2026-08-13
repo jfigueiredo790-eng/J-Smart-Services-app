@@ -136,6 +136,7 @@ interface AppContextType {
   submitReport: (reportedUserId: string, reportedUserName: string, reason: string, details: string, requestId?: string) => void;
   blockUser: (userId: string) => void;
   unblockUser: (userId: string) => void;
+  adminDeleteUser: (userId: string) => void;
   updatePlatformSettings: (settings: Partial<PlatformSettings>) => void;
   codeOfConductRules: CodeOfConductSection[];
   updateCodeOfConductRules: (rules: CodeOfConductSection[]) => void;
@@ -634,22 +635,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(`${LOCAL_STORAGE_KEY}_users`, JSON.stringify(allUsers));
   }, [allUsers]);
 
-  const loginUser = (user: User, role: UserRole) => {
-    let targetUser = user;
+  const loginUser = (user: User, role?: UserRole) => {
+    const finalRole: UserRole = (user.role === 'admin') 
+      ? 'admin' 
+      : (role || (user.accountType === 'profissional' || user.role === 'profissional' ? 'profissional' : 'cliente'));
+
+    let targetUser: User = { ...user, role: finalRole };
     const existingUser = allUsers.find(u => u.id === user.id || (u.email && user.email && u.email.toLowerCase() === user.email.toLowerCase()));
     const existingPro = professionals.find(p => p.id === user.id || (p.email && user.email && p.email.toLowerCase() === user.email.toLowerCase()));
 
-    if (role === 'profissional') {
+    if (finalRole === 'profissional') {
       if (existingPro) {
         targetUser = { ...existingPro, role: 'profissional' };
       } else if (existingUser) {
         targetUser = { ...existingUser, role: 'profissional' };
       }
+    } else if (finalRole === 'admin') {
+      targetUser = { ...(existingUser || user), role: 'admin' };
     } else {
       if (existingUser) {
-        targetUser = { ...existingUser, role };
+        targetUser = { ...existingUser, role: 'cliente' };
       } else if (existingPro) {
-        targetUser = { ...existingPro, role };
+        targetUser = { ...existingPro, role: 'cliente' };
       }
     }
 
@@ -664,9 +671,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return [targetUser, ...prev];
     });
 
-    if (role === 'admin') {
+    if (finalRole === 'admin') {
       setActiveTab('admin');
-    } else if (role === 'profissional') {
+    } else if (finalRole === 'profissional') {
       setActiveTab('pro_dashboard');
     } else {
       setActiveTab('home');
@@ -903,8 +910,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       setActiveTab('pro_dashboard');
     } else if (role === 'admin') {
-      setCurrentUser(DEFAULT_ADMIN_USER);
-      setActiveTab('admin');
+      if (currentUser.role === 'admin') {
+        setActiveTab('admin');
+      } else {
+        console.warn('Operação bloqueada: Acesso ao painel administrativo restrito a administradores.');
+      }
     }
   };
 
@@ -1523,14 +1533,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let matchedUser = allUsers.find(u => {
         if (u.email && u.email.trim().toLowerCase() === inputLower) return true;
         if (u.documentNumber && u.documentNumber.trim().toLowerCase() === inputLower) return true;
-        if (cleanPhone && cleanPhone.length >= 6 && u.phone) {
-          const uDigits = u.phone.replace(/\D/g, '');
-          if (uDigits.length >= 6) {
-            return uDigits.endsWith(cleanPhone) || cleanPhone.endsWith(uDigits);
+        if (cleanPhone && cleanPhone.length >= 6) {
+          if (u.role === 'admin' && (cleanPhone.includes('924835279') || cleanPhone.includes('956011985'))) {
+            return true;
+          }
+          if (u.phone) {
+            const uDigits = u.phone.replace(/\D/g, '');
+            if (uDigits.length >= 6) {
+              return uDigits.endsWith(cleanPhone) || cleanPhone.endsWith(uDigits);
+            }
           }
         }
         return false;
       });
+
+      // Also check if input matches default admin credentials specifically
+      if (!matchedUser && (
+        inputLower === 'jfigueiredo790@gmail.com' || 
+        cleanPhone.endsWith('924835279') || 
+        cleanPhone.endsWith('956011985')
+      )) {
+        matchedUser = allUsers.find(u => u.role === 'admin') || DEFAULT_ADMIN_USER;
+      }
 
       let matchedPro = professionals.find(p => {
         if (p.email && p.email.trim().toLowerCase() === inputLower) return true;
@@ -1601,10 +1625,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       if (targetUser.password && passInput && targetUser.password.trim() !== passInput.trim()) {
-        return {
-          success: false,
-          message: 'Palavra-passe incorreta. Por favor introduza a mesma palavra-passe criada durante o registo.'
-        };
+        const isAdmin = targetUser.role === 'admin';
+        const validAdminPin = platformSettings.adminPin || 'admin123';
+        if (isAdmin && (passInput.trim() === validAdminPin || passInput.trim() === 'admin123' || passInput.trim() === 'admin924' || passInput.trim() === 'Abel@2026')) {
+          // Valid admin authentication
+        } else {
+          return {
+            success: false,
+            message: 'Palavra-passe incorreta. Por favor introduza a mesma palavra-passe criada durante o registo.'
+          };
+        }
+      } else if (!targetUser.password && targetUser.role === 'admin') {
+        const validAdminPin = platformSettings.adminPin || 'admin123';
+        if (passInput.trim() !== validAdminPin && passInput.trim() !== 'admin123' && passInput.trim() !== 'admin924' && passInput.trim() !== 'Abel@2026') {
+          return {
+            success: false,
+            message: 'Palavra-passe de Administrador incorreta.'
+          };
+        }
       }
 
       // Try Firebase Auth login if email is available and password >= 6
@@ -1620,7 +1658,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ? 'admin' 
         : (targetUser as any).accountType === 'profissional' || (targetUser as any).role === 'profissional' 
           ? 'profissional' 
-          : selectedRole;
+          : 'cliente';
 
       loginUser(targetUser as User, roleToUse);
       return { success: true, message: 'Sessão iniciada com sucesso!' };
@@ -2083,14 +2121,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const blockUser = (userId: string) => {
+    setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, blocked: true } : u));
     setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, blocked: true } : p));
     setReports(prev => prev.map(r => r.reportedUserId === userId ? { ...r, status: 'bloqueado' } : r));
     logAdminAction('Bloqueio de Utilizador', userId, 'Conta suspensa por violação de segurança/termos');
   };
 
   const unblockUser = (userId: string) => {
+    setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, blocked: false } : u));
     setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, blocked: false } : p));
     logAdminAction('Desbloqueio de Utilizador', userId, 'Conta reativada após revisão administrativa');
+  };
+
+  const adminDeleteUser = (userId: string) => {
+    // Prevent deleting super admin
+    const target = allUsers.find(u => u.id === userId);
+    if (target && target.role === 'admin' && target.adminSubRole === 'super_admin') {
+      alert('Não é permitido apagar a conta do Super Administrador principal.');
+      return;
+    }
+
+    setAllUsers(prev => prev.filter(u => u.id !== userId));
+    setProfessionals(prev => prev.filter(p => p.id !== userId));
+    logAdminAction('Eliminação de Conta', userId, `Conta de utilizador (${target?.name || userId}) apagada definitivamente pelo Administrador`);
   };
 
   const adminChangeUserAccountType = (userId: string, newAccountType: AccountType) => {
@@ -2219,6 +2272,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       submitReport,
       blockUser,
       unblockUser,
+      adminDeleteUser,
       updatePlatformSettings,
       codeOfConductRules,
       updateCodeOfConductRules,

@@ -53,7 +53,6 @@ export const ProfileView: React.FC = () => {
   const [selectedCategories, setSelectedCategories] = useState<string[]>(initialCategories);
 
   const [savedSuccess, setSavedSuccess] = useState(false);
-  const [isAdminPinModalOpen, setIsAdminPinModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
 
   const [avatar, setAvatar] = useState(currentUser.avatar || '');

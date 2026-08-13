@@ -58,6 +58,7 @@ export const AdminDashboard: React.FC = () => {
     updatePlatformSettings, 
     blockUser, 
     unblockUser,
+    adminDeleteUser,
     addCategory,
     addStaffAdmin,
     adminUnlockProPlan,
@@ -1558,6 +1559,20 @@ export const AdminDashboard: React.FC = () => {
                       <span>Bloquear</span>
                     </button>
                   )}
+
+                  {pro.role !== 'admin' && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Tem a certeza que deseja APAGAR a conta do profissional "${pro.name}"?`)) {
+                          adminDeleteUser(pro.id);
+                        }
+                      }}
+                      title="Apagar Conta de Profissional"
+                      className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl border border-rose-200 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -1628,7 +1643,7 @@ export const AdminDashboard: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex-shrink-0">
+                    <div className="flex-shrink-0 flex items-center gap-1.5">
                       {client.blocked ? (
                         <button
                           onClick={() => unblockUser(client.id)}
@@ -1644,6 +1659,20 @@ export const AdminDashboard: React.FC = () => {
                         >
                           <Ban className="w-3.5 h-3.5" />
                           <span>Bloquear</span>
+                        </button>
+                      )}
+
+                      {client.role !== 'admin' && (
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Tem a certeza que deseja APAGAR a conta do cliente "${client.name}"?`)) {
+                              adminDeleteUser(client.id);
+                            }
+                          }}
+                          title="Apagar Conta de Cliente"
+                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl border border-rose-200 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       )}
                     </div>
@@ -2540,7 +2569,7 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-2 flex gap-2">
+            <div className="pt-2 flex flex-col sm:flex-row gap-2">
               {viewingUserDetail.blocked ? (
                 <button
                   onClick={() => {
@@ -2550,7 +2579,7 @@ export const AdminDashboard: React.FC = () => {
                   className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-extrabold py-3 rounded-2xl text-xs flex items-center justify-center gap-1.5 shadow"
                 >
                   <Unlock className="w-4 h-4" />
-                  <span>Desbloquear Utilizador</span>
+                  <span>Desbloquear</span>
                 </button>
               ) : (
                 <button
@@ -2561,7 +2590,23 @@ export const AdminDashboard: React.FC = () => {
                   className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-extrabold py-3 rounded-2xl text-xs flex items-center justify-center gap-1.5 shadow"
                 >
                   <Ban className="w-4 h-4" />
-                  <span>Bloquear Utilizador</span>
+                  <span>Bloquear</span>
+                </button>
+              )}
+
+              {/* Botão de Apagar Conta Definitivamente */}
+              {viewingUserDetail.role !== 'admin' && (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Tem a certeza absoluta que deseja APAGAR DEFINITIVAMENTE a conta de "${viewingUserDetail.name}"? Esta ação removerá o perfil da plataforma.`)) {
+                      adminDeleteUser(viewingUserDetail.id);
+                      setViewingUserDetail(null);
+                    }
+                  }}
+                  className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold py-3 rounded-2xl text-xs flex items-center justify-center gap-1.5 border border-rose-300"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Apagar Conta</span>
                 </button>
               )}
 
