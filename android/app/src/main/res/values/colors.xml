@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary_emerald">#059669</color>
+    <color name="primary_dark">#047857</color>
+    <color name="accent_emerald_light">#10B981</color>
+    <color name="bg_dark">#0F172A</color>
+    <color name="bg_darker">#020617</color>
+    <color name="card_bg">#1E293B</color>
+    <color name="text_white">#FFFFFF</color>
+    <color name="text_muted">#94A3B8</color>
+    <color name="status_bar">#0F172A</color>
+</resources>

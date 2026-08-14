@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">J Smart Services</string>
+    <string name="error_offline_title">Sem Conexão à Internet</string>
+    <string name="error_offline_desc">Verifique os seus dados móveis ou rede Wi-Fi e toque no botão abaixo para tentar novamente.</string>
+    <string name="btn_retry">Tentar Novamente</string>
+    <string name="loading_app">A carregar J Smart Services Angola…</string>
+</resources>

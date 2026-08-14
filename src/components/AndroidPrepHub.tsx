@@ -106,16 +106,16 @@ dependencies {
               <span>Arquitetura Híbrida Web + Android Pronta</span>
             </div>
             <div className="text-xs text-slate-400 font-mono bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
-              Database ID: <span className="text-emerald-400 font-bold">ai-studio-jsmartservices-dd...</span>
+              Backend Worker: <span className="text-emerald-400 font-bold">j-smart-services-app.jfigueiredo790.workers.dev</span>
             </div>
           </div>
 
           <h2 className="text-2xl md:text-3xl font-black text-white">
-            Preparação Técnica para Aplicação Android Nativa
+            Aplicação Android Nativa (Kotlin + Android Studio)
           </h2>
 
           <p className="text-slate-300 text-sm leading-relaxed max-w-3xl">
-            A plataforma <strong className="text-emerald-400">J Smart Services</strong> está estruturada com um **backend unificado no Cloud Firestore e servidores Node.js/Express**. Qualquer conta, categoria ou pedido criado no site funcionará instantaneamente na futura App Android com a mesma conta e dados.
+            A plataforma <strong className="text-emerald-400">J Smart Services</strong> está totalmente preparada com um **projeto Android nativo em Kotlin na pasta <code className="text-emerald-300 font-mono">/android</code>**, ligado diretamente ao seu backend do Cloudflare Worker e ao Cloud Firestore.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
@@ -125,7 +125,7 @@ dependencies {
                 <span>Mesmo Banco de Dados</span>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Cloud Firestore sincroniza clientes, profissionais e saldos em tempo real para ambas as plataformas.
+                Cloud Firestore sincroniza clientes, profissionais, orçamentos e saldos em tempo real para ambas as plataformas sem duplicações.
               </p>
             </div>
 
@@ -135,17 +135,27 @@ dependencies {
                 <span>Mesmas Contas de Acesso</span>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Logins de Cliente, Profissional e Conta Dupla autenticam via Firebase Auth unificado.
+                Logins de Cliente, Profissional e Administrador funcionam de forma idêntica no site e no aplicativo móvel.
               </p>
             </div>
 
             <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-2">
               <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
                 <RefreshCw className="w-4 h-4" />
-                <span>Atualização Sem Novo APK</span>
+                <span>Sincronização Instantânea</span>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Alterações de preços, categorias e conteúdos no Painel Admin refletem na App sem recompilar o APK.
+                Qualquer serviço criado no site aparece no telemóvel e qualquer trabalho pedido no telemóvel aparece no site.
+              </p>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-2">
+              <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
+                <Smartphone className="w-4 h-4" />
+                <span>Recursos Nativos Android</span>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Câmara, galeria de fotos, botão Voltar com duplo toque, pull-to-refresh e tratamento de falta de internet.
               </p>
             </div>
 
