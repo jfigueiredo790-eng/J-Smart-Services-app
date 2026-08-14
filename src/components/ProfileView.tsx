@@ -31,7 +31,9 @@ import {
   Camera,
   Image,
   Upload,
-  Lock
+  Lock,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 export const ProfileView: React.FC = () => {
@@ -42,6 +44,8 @@ export const ProfileView: React.FC = () => {
   const [gender, setGender] = useState<'masculino' | 'feminino'>(currentUser.gender || 'masculino');
   const [email, setEmail] = useState(currentUser.email);
   const [province, setProvince] = useState(currentUser.province || 'Luanda');
+  const [documentNumber, setDocumentNumber] = useState(currentUser.documentNumber || '');
+  const [showBIDigits, setShowBIDigits] = useState(false);
   const [accountType, setAccountType] = useState<AccountType>(currentUser.accountType || 'duplo');
   const [bio, setBio] = useState('bio' in currentUser ? (currentUser as any).bio : 'Cliente ativo na plataforma J Smart Services Angola.');
   const [hourlyRateKz, setHourlyRateKz] = useState('hourlyRateKz' in currentUser ? (currentUser as any).hourlyRateKz : 15000);
@@ -58,10 +62,16 @@ export const ProfileView: React.FC = () => {
   const [avatar, setAvatar] = useState(currentUser.avatar || '');
 
   useEffect(() => {
+    setName(currentUser.name);
+    setPhone(currentUser.phone);
+    setGender(currentUser.gender || 'masculino');
+    setEmail(currentUser.email);
+    setProvince(currentUser.province || 'Luanda');
+    setDocumentNumber(currentUser.documentNumber || '');
     if (currentUser.avatar) {
       setAvatar(currentUser.avatar);
     }
-  }, [currentUser.avatar]);
+  }, [currentUser]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -91,6 +101,7 @@ export const ProfileView: React.FC = () => {
       gender,
       email,
       province,
+      documentNumber: documentNumber.trim(),
       ...(currentUser.role === 'admin' ? { accountType } : {}),
       avatar: avatar || currentUser.avatar,
       categories: selectedCategories,
@@ -438,6 +449,56 @@ export const ProfileView: React.FC = () => {
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
+          </div>
+
+          {/* 🔒 Nº do Bilhete de Identidade (BI) - Área Privada e Confidencial */}
+          <div className="p-4 bg-slate-50/80 border border-slate-200 rounded-2xl space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Nº do Bilhete de Identidade (BI)</span>
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full border border-emerald-200">
+                    🔒 Confidencial & Pessoal
+                  </span>
+                </label>
+                <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                  Visível <strong>apenas por si</strong> e pela <strong>Administração</strong> para validação e segurança em Angola. Nunca é exibido a outros utilizadores nem em áreas públicas.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowBIDigits(!showBIDigits)}
+                className="text-xs font-extrabold text-slate-700 hover:text-emerald-700 bg-white border border-slate-200 hover:border-emerald-300 px-3 py-1.5 rounded-xl transition-all shadow-sm shrink-0 flex items-center gap-1.5 self-start sm:self-center"
+                title={showBIDigits ? "Ocultar dígitos do BI" : "Revelar dígitos do BI"}
+              >
+                {showBIDigits ? (
+                  <>
+                    <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Ocultar</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Visualizar</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="relative">
+              <input 
+                type={showBIDigits ? "text" : "password"} 
+                value={documentNumber} 
+                onChange={(e) => setDocumentNumber(e.target.value)}
+                placeholder="Ex: 004821943LA041"
+                className="w-full text-xs font-mono font-bold tracking-wider p-3 rounded-xl border border-slate-200 text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white"
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 flex items-center gap-1">
+              <span>🛡️ Documento protegido conforme a política de privacidade da J Smart Services.</span>
+            </p>
           </div>
 
           {currentUser.role !== 'admin' ? (

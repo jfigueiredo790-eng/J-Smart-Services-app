@@ -425,33 +425,15 @@ export const ChatView: React.FC = () => {
             className="hidden" 
           />
 
-          {/* Input Form with Photo and GPS location attachment buttons */}
+          {/* Input Form with Photo attachment button, text input and send button */}
           <form onSubmit={handleSend} className="p-3 bg-white border-t border-slate-200 flex items-center gap-2">
             <button
               type="button"
               onClick={() => chatImageInputRef.current?.click()}
-              title="Anexar Fotografia da Galeria"
+              title="Anexar Fotografia"
               className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors border border-slate-200 flex items-center gap-1"
             >
               <ImageIcon className="w-4 h-4 text-emerald-600" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                sendChatMessage(
-                  activeReq.id, 
-                  `📍 Localização GPS compartilhada: ${activeReq.address}, ${activeReq.province}`, 
-                  false, 
-                  undefined, 
-                  undefined, 
-                  { label: `${activeReq.address}, ${activeReq.province} • Angola` }
-                );
-              }}
-              title="Partilhar Localização"
-              className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors border border-slate-200"
-            >
-              <MapPin className="w-4 h-4 text-emerald-600" />
             </button>
 
             <input 

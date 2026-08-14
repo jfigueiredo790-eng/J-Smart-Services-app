@@ -41,6 +41,7 @@ export interface User {
   province: string;
   city?: string;
   address?: string;
+  documentType?: string;
   documentNumber?: string;
   password?: string;
   categories?: string[];

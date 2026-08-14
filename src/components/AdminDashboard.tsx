@@ -1632,6 +1632,7 @@ export const AdminDashboard: React.FC = () => {
                         </div>
                         <p className="text-slate-500 mt-0.5">{client.province} {client.city ? `• ${client.city}` : ''}</p>
                         <p className="text-slate-500">{client.email} • {client.phone}</p>
+                        <p className="text-[11px] font-mono text-slate-600 mt-0.5">Nº BI: <span className="font-bold text-slate-800">{client.documentNumber || 'Não facultado'}</span></p>
                         <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px] font-bold">
                           <span className="bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-emerald-700">
                             {clientReqsCount} Pedido(s) de Serviço
