@@ -1,7 +1,4 @@
 name: Build J Smart Services Android
-
-name: Build J Smart Services Android
-
 on:
   workflow_dispatch:
   push:
