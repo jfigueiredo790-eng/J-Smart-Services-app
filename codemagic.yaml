@@ -1,1 +1,19 @@
 
+workflows:
+  android-debug:
+    name: J Smart Services Android Debug
+    working_directory: android
+    instance_type: linux_x2
+    max_build_duration: 30
+
+    environment:
+      java: 17
+
+    scripts:
+      - name: Build Android debug APK
+        script: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+    artifacts:
+      - app/build/outputs/apk/debug/app-debug.apk
