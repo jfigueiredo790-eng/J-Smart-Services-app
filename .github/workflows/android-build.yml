@@ -1,5 +1,7 @@
 name: Build J Smart Services Android
 
+name: Build J Smart Services Android
+
 on:
   workflow_dispatch:
   push:
@@ -24,11 +26,18 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10'
+
+      - name: Create Gradle Wrapper
+        working-directory: android
+        run: gradle wrapper
+
       - name: Build debug APK
         working-directory: android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
