@@ -88,6 +88,17 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // --- RECOVERY OTPs & SESSIONS ---
+    match /recovery_otps/{sessionId} {
+      allow read, write: if true;
+    }
+
+    // --- WORK POSTS & FEED ---
+    match /posts/{postId} {
+      allow read: if true;
+      allow create, update, delete: if true;
+    }
+
     // --- PLATFORM SETTINGS ---
     match /platform_settings/{settingId} {
       allow read, write: if true;

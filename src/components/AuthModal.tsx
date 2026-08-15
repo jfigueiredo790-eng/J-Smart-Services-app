@@ -239,26 +239,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
     }
   };
 
-  return (
-    <>
-      {showRecoveryModal && (
-        <AccountRecoveryModal
-          initialType={recoveryType}
-          onClose={() => setShowRecoveryModal(false)}
-          onSuccessReturnToLogin={(recoveredId) => {
-            setShowRecoveryModal(false);
-            if (recoveredId) {
-              setPhone(recoveredId.replace('+244', '').trim());
-            }
-          }}
-        />
-      )}
+  if (showRecoveryModal) {
+    return (
+      <AccountRecoveryModal
+        initialType={recoveryType}
+        onClose={() => setShowRecoveryModal(false)}
+        onSuccessReturnToLogin={(recoveredId) => {
+          setShowRecoveryModal(false);
+          setMode('login');
+          if (recoveredId) {
+            setPhone(recoveredId.replace('+244', '').trim());
+          }
+        }}
+      />
+    );
+  }
 
-      <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
-        <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
-          
-          {/* Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+      <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div className="flex items-center gap-2.5">
               <div className="bg-emerald-600 text-white w-9 h-9 rounded-xl font-black text-base flex items-center justify-center shadow-sm">
                 J
@@ -792,6 +794,5 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
 
         </div>
       </div>
-    </>
   );
 };

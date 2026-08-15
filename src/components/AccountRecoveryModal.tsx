@@ -83,6 +83,18 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAccountBlocked, setIsAccountBlocked] = useState(false);
 
+  // Sync initialType when it changes
+  useEffect(() => {
+    setActiveTab(initialType);
+    setStep('input');
+    setErrorMsg('');
+    setSuccessMsg('');
+    setOtpCode('');
+    setDevCode(undefined);
+    setAttemptsRemaining(3);
+    setTimerSeconds(600);
+  }, [initialType]);
+
   // Timer countdown
   useEffect(() => {
     if (step === 'otp' && timerSeconds > 0) {
@@ -280,7 +292,7 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in overflow-y-auto">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in overflow-y-auto">
       <div 
         id="account-recovery-modal"
         className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100 relative my-8"
