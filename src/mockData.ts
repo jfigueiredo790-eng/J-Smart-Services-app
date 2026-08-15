@@ -726,76 +726,10 @@ export const DEFAULT_ADMIN_USER: User = {
 };
 
 export const MOCK_USERS: User[] = [
-  DEFAULT_ADMIN_USER,
-  {
-    id: 'user-duplo-lusevakueno',
-    name: 'Lusevakueno Júlio',
-    email: 'lusevakueno.julio@gmail.com',
-    phone: '+244 923 456 789',
-    gender: 'feminino',
-    role: 'profissional',
-    accountType: 'duplo',
-    province: 'Luanda',
-    city: 'Luanda',
-    documentType: 'Bilhete de Identidade',
-    documentNumber: '004821943LA041',
-    avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
-    verified: true,
-    ownerId: 'user-duplo-lusevakueno',
-    createdAt: new Date().toISOString(),
-    subscriptionPlan: 'plan_30d',
-    planExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'user-cli-makaya',
-    name: 'Makaya',
-    email: 'makaya@gmail.com',
-    phone: '+244 945 112 233',
-    gender: 'feminino',
-    role: 'cliente',
-    accountType: 'cliente',
-    province: 'Luanda',
-    city: 'Viana',
-    documentType: 'Bilhete de Identidade',
-    documentNumber: '005910293LA032',
-    avatar: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=150&auto=format&fit=crop&q=80',
-    verified: true,
-    ownerId: 'user-cli-makaya',
-    createdAt: new Date().toISOString()
-  }
+  DEFAULT_ADMIN_USER
 ];
 
-export const MOCK_PROFESSIONALS: ProfessionalProfile[] = [
-  {
-    id: 'pro-lusevakueno',
-    name: 'Lusevakueno Júlio',
-    email: 'lusevakueno.julio@gmail.com',
-    phone: '+244 923 456 789',
-    gender: 'feminino',
-    role: 'profissional',
-    accountType: 'duplo',
-    avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
-    categories: ['servicos-domesticos', 'consultoria'],
-    province: 'Luanda',
-    city: 'Luanda',
-    address: 'Luanda, Angola',
-    documentType: 'Bilhete de Identidade',
-    documentNumber: '004821943LA041',
-    bio: 'Profissional qualificada com foco em excelência no atendimento e prestação de serviços na J Smart Services.',
-    experienceYears: 3,
-    hourlyRateKz: 5000,
-    verified: true,
-    rating: 5.0,
-    reviewCount: 3,
-    completedJobs: 8,
-    documentsVerified: true,
-    portfolioImages: [],
-    status: 'disponivel',
-    subscriptionPlan: 'plan_30d',
-    planExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    createdAt: new Date().toISOString()
-  }
-];
+export const MOCK_PROFESSIONALS: ProfessionalProfile[] = [];
 
 export const MOCK_REQUESTS: ServiceRequest[] = [];
 
@@ -804,4 +738,5 @@ export const MOCK_MESSAGES: ChatMessage[] = [];
 export const MOCK_REVIEWS: Review[] = [];
 
 export const MOCK_WORK_FEED_POSTS: WorkFeedPost[] = [];
+
 

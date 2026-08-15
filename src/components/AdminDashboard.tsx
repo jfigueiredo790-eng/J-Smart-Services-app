@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, isFictitiousOrInvalidUser } from '../context/AppContext';
 import { AndroidPrepHub } from './AndroidPrepHub';
 import { 
   ShieldCheck, 
@@ -161,7 +161,7 @@ export const AdminDashboard: React.FC = () => {
   const pendingPros = professionals.filter(p => !p.verified && !p.isAutoApproved);
   const totalRequestsCount = requests.length;
 
-  const clientUsers = allUsers.filter(u => u.role === 'cliente');
+  const clientUsers = allUsers.filter(u => u.role === 'cliente' && !isFictitiousOrInvalidUser(u));
   const totalClients = clientUsers.length;
 
   const totalVolumeKz = requests.reduce((acc, curr) => acc + curr.budgetKz, 0);
@@ -170,16 +170,20 @@ export const AdminDashboard: React.FC = () => {
     .reduce((acc, curr) => acc + curr.amountKz, 0);
 
   const filteredPros = professionals.filter(p => 
-    p.name.toLowerCase().includes(userSearch.toLowerCase()) || 
-    p.email.toLowerCase().includes(userSearch.toLowerCase()) ||
-    p.province.toLowerCase().includes(userSearch.toLowerCase())
+    !isFictitiousOrInvalidUser(p) && (
+      p.name.toLowerCase().includes(userSearch.toLowerCase()) || 
+      p.email.toLowerCase().includes(userSearch.toLowerCase()) ||
+      p.province.toLowerCase().includes(userSearch.toLowerCase())
+    )
   );
 
   const filteredClients = clientUsers.filter(c =>
-    c.name.toLowerCase().includes(userSearch.toLowerCase()) ||
-    c.email.toLowerCase().includes(userSearch.toLowerCase()) ||
-    c.phone.includes(userSearch) ||
-    c.province.toLowerCase().includes(userSearch.toLowerCase())
+    !isFictitiousOrInvalidUser(c) && (
+      c.name.toLowerCase().includes(userSearch.toLowerCase()) ||
+      c.email.toLowerCase().includes(userSearch.toLowerCase()) ||
+      (c.phone && c.phone.includes(userSearch)) ||
+      c.province.toLowerCase().includes(userSearch.toLowerCase())
+    )
   );
 
   const handleSaveCommission = async (e: React.FormEvent) => {
@@ -472,6 +476,8 @@ export const AdminDashboard: React.FC = () => {
 
         // Filter registered users
         const filteredRegisteredUsers = allUsers.filter(u => {
+          if (isFictitiousOrInvalidUser(u)) return false;
+
           // Role filter
           if (regRoleFilter === 'cliente' && u.role !== 'cliente') return false;
           if (regRoleFilter === 'profissional' && u.role !== 'profissional' && u.accountType !== 'profissional') return false;
@@ -498,10 +504,11 @@ export const AdminDashboard: React.FC = () => {
           return true;
         });
 
-        const clientCount = allUsers.filter(u => u.role === 'cliente').length;
-        const proCount = allUsers.filter(u => u.role === 'profissional' || u.accountType === 'profissional').length;
-        const dualCount = allUsers.filter(u => u.accountType === 'duplo').length;
-        const adminCount = allUsers.filter(u => u.role === 'admin').length;
+        const activeRegisteredUsers = allUsers.filter(u => !isFictitiousOrInvalidUser(u));
+        const clientCount = activeRegisteredUsers.filter(u => u.role === 'cliente').length;
+        const proCount = activeRegisteredUsers.filter(u => u.role === 'profissional' || u.accountType === 'profissional').length;
+        const dualCount = activeRegisteredUsers.filter(u => u.accountType === 'duplo').length;
+        const adminCount = activeRegisteredUsers.filter(u => u.role === 'admin').length;
 
         return (
           <div className="space-y-6 animate-fade-in">

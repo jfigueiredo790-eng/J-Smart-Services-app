@@ -38,6 +38,7 @@ import {
   setDoc, 
   updateDoc, 
   addDoc, 
+  deleteDoc,
   onSnapshot, 
   query, 
   where, 
@@ -45,6 +46,54 @@ import {
 } from 'firebase/firestore';
 
 export type ActiveTab = 'home' | 'feed' | 'categories' | 'search' | 'requests' | 'chat' | 'profile' | 'admin' | 'pro_dashboard' | 'wallet';
+
+export const FICTITIOUS_MOCK_IDS = new Set([
+  'user-duplo-lusevakueno',
+  'pro-lusevakueno',
+  'user-cli-makaya',
+  'user-cli-antonio',
+  'pro-pedro-silva',
+  'user-duplo-manuel',
+  'user-cli-maria',
+  'pro-mateus-domingos',
+  'pro-1',
+  'pro-2',
+  'pro-3',
+  'feed-1',
+  'feed-2',
+  'feed-3',
+  'feed-4',
+  'user-duplo-1',
+  'guest-client'
+]);
+
+export const isFictitiousOrInvalidUser = (user: Partial<User & ProfessionalProfile> | null | undefined): boolean => {
+  if (!user || !user.id) return true;
+  const id = user.id.toLowerCase();
+  
+  // Real Super Admin should NEVER be filtered
+  if (id === 'user-admin-1' || user.email === 'jfigueiredo790@gmail.com' || (user.phone && user.phone.replace(/\D/g, '') === '956011985')) {
+    return false;
+  }
+
+  if (FICTITIOUS_MOCK_IDS.has(id)) return true;
+  if (id.startsWith('mock-') || id.startsWith('dummy-') || id.startsWith('test-user-')) return true;
+
+  // Deleted or soft deleted
+  if (user.isDeleted === true || user.status === 'deleted') return true;
+
+  // Dummy placeholder names or guest placeholder
+  const name = (user.name || '').trim().toLowerCase();
+  if (!name || name === 'novo cliente' || name === 'cliente teste' || name === 'guest client' || name === 'novo profissional') {
+    return true;
+  }
+
+  // Fictitious client without contact info
+  if (!user.phone && !user.email) return true;
+
+  return false;
+};
+
 
 interface AppContextType {
   currentUser: User;
@@ -228,21 +277,6 @@ export const checkProAutoApproval = (pro: Partial<ProfessionalProfile>): { isApp
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const FICTITIOUS_MOCK_IDS = new Set([
-    'user-cli-antonio',
-    'pro-pedro-silva',
-    'user-duplo-manuel',
-    'user-cli-maria',
-    'pro-mateus-domingos',
-    'pro-1',
-    'pro-2',
-    'feed-1',
-    'feed-2',
-    'feed-3',
-    'feed-4',
-    'user-duplo-1'
-  ]);
-
   // Load state from local storage or fallback to mock
   const [professionals, setProfessionals] = useState<ProfessionalProfile[]>(() => {
     const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_pros`);
@@ -250,14 +284,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const parsed: ProfessionalProfile[] = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          const filtered = parsed.filter(p => !FICTITIOUS_MOCK_IDS.has(p.id));
-          const existingIds = new Set(filtered.map(p => p.id));
-          const missingDefaults = MOCK_PROFESSIONALS.filter(p => !existingIds.has(p.id));
-          return [...filtered, ...missingDefaults];
+          const filtered = parsed.filter(p => !isFictitiousOrInvalidUser(p));
+          return filtered;
         }
       } catch {}
     }
-    return MOCK_PROFESSIONALS;
+    return MOCK_PROFESSIONALS.filter(p => !isFictitiousOrInvalidUser(p));
   });
 
   const [allUsers, setAllUsers] = useState<User[]>(() => {
@@ -266,14 +298,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const parsed: User[] = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          const filtered = parsed.filter(u => !FICTITIOUS_MOCK_IDS.has(u.id));
-          const existingIds = new Set(filtered.map(u => u.id));
-          const missingDefaults = MOCK_USERS.filter(u => !existingIds.has(u.id));
-          return [...filtered, ...missingDefaults];
+          const filtered = parsed.filter(u => !isFictitiousOrInvalidUser(u));
+          if (!filtered.some(u => u.id === 'user-admin-1' || u.email === 'jfigueiredo790@gmail.com')) {
+            filtered.unshift(DEFAULT_ADMIN_USER);
+          }
+          return filtered;
         }
       } catch {}
     }
-    return MOCK_USERS;
+    return MOCK_USERS.filter(u => !isFictitiousOrInvalidUser(u));
   });
 
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
@@ -281,7 +314,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
-        if (parsed && FICTITIOUS_MOCK_IDS.has(parsed.id)) {
+        if (parsed && isFictitiousOrInvalidUser(parsed)) {
           return false;
         }
       } catch {}
@@ -297,7 +330,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (loggedIn && savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
-        if (parsed && !FICTITIOUS_MOCK_IDS.has(parsed.id)) {
+        if (parsed && !isFictitiousOrInvalidUser(parsed)) {
           return parsed;
         }
       } catch {}
@@ -782,38 +815,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Firestore requests snapshot notice:', err.message);
       }));
 
-      // 2. Users (sync all registered users across all devices and shared links)
+      // 2. Users (sync all real registered users across all devices and shared links)
       const usersRef = collection(db, 'users');
       unsubscribes.push(onSnapshot(usersRef, (snapshot) => {
         if (!snapshot.empty) {
           const fsUsers: User[] = [];
           snapshot.forEach(docSnap => {
-            fsUsers.push({ id: docSnap.id, ...docSnap.data() } as User);
+            const uData = { id: docSnap.id, ...docSnap.data() } as User;
+            if (!isFictitiousOrInvalidUser(uData)) {
+              fsUsers.push(uData);
+            } else if (uData.id !== 'user-admin-1') {
+              // Permanently clean fictitious user from Firestore database
+              try {
+                deleteDoc(doc(db, 'users', docSnap.id)).catch(() => {});
+              } catch {}
+            }
           });
           setAllUsers(prev => {
             const fsIds = new Set(fsUsers.map(u => u.id));
-            const existingNonFs = prev.filter(u => !fsIds.has(u.id));
-            return [...fsUsers, ...existingNonFs];
+            const existingNonFs = prev.filter(u => !fsIds.has(u.id) && !isFictitiousOrInvalidUser(u));
+            const combined = [...fsUsers, ...existingNonFs];
+            if (!combined.some(u => u.id === 'user-admin-1' || u.email === 'jfigueiredo790@gmail.com')) {
+              combined.unshift(DEFAULT_ADMIN_USER);
+            }
+            return combined;
           });
         }
       }, (err) => {
         console.warn('Firestore users snapshot notice:', err.message);
       }));
 
-      // 3. Professionals (exclude soft deleted)
+      // 3. Professionals (sync real active professionals only)
       const prosRef = collection(db, 'professionals');
       unsubscribes.push(onSnapshot(prosRef, (snapshot) => {
         if (!snapshot.empty) {
           const fsPros: ProfessionalProfile[] = [];
           snapshot.forEach(docSnap => {
             const pData = { id: docSnap.id, ...docSnap.data() } as ProfessionalProfile;
-            if (!pData.isDeleted && pData.status !== 'deleted') {
+            if (!isFictitiousOrInvalidUser(pData) && !pData.isDeleted && pData.status !== 'deleted') {
               fsPros.push(pData);
+            } else {
+              // Permanently clean fictitious pro from Firestore database
+              try {
+                deleteDoc(doc(db, 'professionals', docSnap.id)).catch(() => {});
+              } catch {}
             }
           });
           setProfessionals(prev => {
             const fsIds = new Set(fsPros.map(p => p.id));
-            const existingNonFs = prev.filter(p => !fsIds.has(p.id) && !p.isDeleted && p.status !== 'deleted');
+            const existingNonFs = prev.filter(p => !fsIds.has(p.id) && !isFictitiousOrInvalidUser(p) && !p.isDeleted && p.status !== 'deleted');
             return [...fsPros, ...existingNonFs];
           });
         }
@@ -1790,61 +1840,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         createdAt: updatedUser.createdAt || new Date().toISOString()
       };
 
-      setProfessionals(prev => {
-        const exists = prev.some(p => p.id === newUserId || p.email === proProfile.email);
-        if (exists) {
-          return prev.map(p => (p.id === newUserId || p.email === proProfile.email) ? { ...p, ...proProfile } : p);
-        }
-        return [proProfile, ...prev];
-      });
-    }
-
-    setAllUsers(prev => {
-      const exists = prev.some(u => u.id === newUserId || u.email === updatedUser.email);
-      if (exists) {
-        return prev.map(u => (u.id === newUserId || u.email === updatedUser.email) ? { ...u, ...updatedUser } : u);
-      }
-      return [updatedUser, ...prev];
-    });
-
-    // Write to Firestore for persistent storage & cross-device sync
-    try {
-      setDoc(doc(db, 'users', newUserId), updatedUser, { merge: true }).catch(err => {
-        console.warn('Firestore user save notice:', err);
-      });
-
-      if (targetRole === 'profissional') {
-        const proProfileToSave = {
-          id: newUserId,
-          name: updatedUser.name || 'Novo Profissional',
-          email: updatedUser.email || '',
-          phone: updatedUser.phone || '',
-          province: updatedUser.province || 'Luanda',
-          city: updatedUser.city || 'Luanda',
-          role: 'profissional',
-          avatar: updatedUser.avatar || '',
-          categories: (updatedUser as any).categories || ['eletricista'],
-          bio: (updatedUser as any).bio || 'Profissional prestador de serviços.',
-          experienceYears: (updatedUser as any).experienceYears || 1,
-          hourlyRateKz: (updatedUser as any).hourlyRateKz || 15000,
-          rating: 5.0,
-          reviewCount: 0,
-          completedJobs: 0,
-          status: 'disponivel',
-          verified: (updatedUser as any).verified || false,
-          documentsVerified: (updatedUser as any).documentsVerified || false,
-          address: (updatedUser as any).address || '',
-          documentType: (updatedUser as any).documentType || 'Bilhete de Identidade',
-          documentNumber: (updatedUser as any).documentNumber || '',
-          portfolioImages: (updatedUser as any).portfolioImages || [],
-          createdAt: updatedUser.createdAt || new Date().toISOString()
-        };
-        setDoc(doc(db, 'professionals', newUserId), proProfileToSave, { merge: true }).catch(err => {
-          console.warn('Firestore pro save notice:', err);
+      if (!isFictitiousOrInvalidUser(proProfile)) {
+        setProfessionals(prev => {
+          const exists = prev.some(p => p.id === newUserId || (p.email && proProfile.email && p.email === proProfile.email));
+          if (exists) {
+            return prev.map(p => (p.id === newUserId || (p.email && proProfile.email && p.email === proProfile.email)) ? { ...p, ...proProfile } : p);
+          }
+          return [proProfile, ...prev];
         });
       }
-    } catch (e) {
-      console.warn('Firestore sync notice:', e);
+    }
+
+    if (!isFictitiousOrInvalidUser(updatedUser)) {
+      setAllUsers(prev => {
+        const exists = prev.some(u => u.id === newUserId || (u.email && updatedUser.email && u.email === updatedUser.email));
+        if (exists) {
+          return prev.map(u => (u.id === newUserId || (u.email && updatedUser.email && u.email === updatedUser.email)) ? { ...u, ...updatedUser } : u);
+        }
+        return [updatedUser, ...prev];
+      });
+
+      // Write to Firestore for persistent storage & cross-device sync
+      try {
+        setDoc(doc(db, 'users', newUserId), updatedUser, { merge: true }).catch(err => {
+          console.warn('Firestore user save notice:', err);
+        });
+
+        if (targetRole === 'profissional') {
+          const proProfileToSave = {
+            id: newUserId,
+            name: updatedUser.name || '',
+            email: updatedUser.email || '',
+            phone: updatedUser.phone || '',
+            province: updatedUser.province || 'Luanda',
+            city: updatedUser.city || 'Luanda',
+            role: 'profissional',
+            avatar: updatedUser.avatar || '',
+            categories: (updatedUser as any).categories || ['eletricista'],
+            bio: (updatedUser as any).bio || 'Profissional prestador de serviços.',
+            experienceYears: (updatedUser as any).experienceYears || 1,
+            hourlyRateKz: (updatedUser as any).hourlyRateKz || 15000,
+            rating: 5.0,
+            reviewCount: 0,
+            completedJobs: 0,
+            status: 'disponivel',
+            verified: (updatedUser as any).verified || false,
+            documentsVerified: (updatedUser as any).documentsVerified || false,
+            address: (updatedUser as any).address || '',
+            documentType: (updatedUser as any).documentType || 'Bilhete de Identidade',
+            documentNumber: (updatedUser as any).documentNumber || '',
+            portfolioImages: (updatedUser as any).portfolioImages || [],
+            createdAt: updatedUser.createdAt || new Date().toISOString()
+          };
+          setDoc(doc(db, 'professionals', newUserId), proProfileToSave, { merge: true }).catch(err => {
+            console.warn('Firestore pro save notice:', err);
+          });
+        }
+      } catch (err) {
+        console.warn('Firestore user save notice:', err);
+      }
     }
   };
 
@@ -2324,7 +2378,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
 
       // 4. Update local state
-      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, ...deletedPayload } : u));
+      setAllUsers(prev => prev.filter(u => u.id !== userId));
       setProfessionals(prev => prev.filter(p => p.id !== userId));
 
       return { success: true, message: `Conta de "${target?.name || userId}" excluída com sucesso e persistida na base de dados.` };
