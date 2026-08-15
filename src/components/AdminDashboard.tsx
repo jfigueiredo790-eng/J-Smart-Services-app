@@ -73,6 +73,29 @@ export const AdminDashboard: React.FC = () => {
   const [rulesSaveSuccess, setRulesSaveSuccess] = useState(false);
   const [newRuleInput, setNewRuleInput] = useState<{ [sectionId: string]: string }>({});
 
+  // Global Administrative Toast Feedback & Confirmation Modal State
+  const [adminFeedback, setAdminFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+  } | null>(null);
+
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    actionType: 'delete_user' | 'block_user' | 'unblock_user';
+    targetUserId: string;
+    targetUserName: string;
+    isProcessing?: boolean;
+  } | null>(null);
+
+  const showToast = (type: 'success' | 'error' | 'info', message: string, duration = 4000) => {
+    setAdminFeedback({ type, message });
+    setTimeout(() => {
+      setAdminFeedback(prev => (prev?.message === message ? null : prev));
+    }, duration);
+  };
+
   useEffect(() => {
     if (codeOfConductRules && codeOfConductRules.length > 0) {
       setEditableRules(codeOfConductRules);
@@ -159,9 +182,9 @@ export const AdminDashboard: React.FC = () => {
     c.province.toLowerCase().includes(userSearch.toLowerCase())
   );
 
-  const handleSaveCommission = (e: React.FormEvent) => {
+  const handleSaveCommission = async (e: React.FormEvent) => {
     e.preventDefault();
-    updatePlatformSettings({
+    const res = await updatePlatformSettings({
       commissionRatePercent: Number(commissionRateInput) || 10,
       companyName: companyNameInput,
       adminHolderName: holderNameInput,
@@ -174,8 +197,57 @@ export const AdminDashboard: React.FC = () => {
       adminCity: cityInput,
       adminPin: adminPinInput
     });
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
+    if (res.success) {
+      setSavedSuccess(true);
+      showToast('success', res.message || 'Definições do Administrador salvas e sincronizadas com a base de dados online (Firestore)!');
+      setTimeout(() => setSavedSuccess(false), 2500);
+    } else {
+      showToast('error', res.message || 'Erro ao persistir definições no Firestore.');
+    }
+  };
+
+  const handleExecuteConfirmedAction = async () => {
+    if (!confirmModal) return;
+
+    setConfirmModal(prev => prev ? { ...prev, isProcessing: true } : null);
+
+    try {
+      if (confirmModal.actionType === 'delete_user') {
+        const res = await adminDeleteUser(confirmModal.targetUserId);
+        if (res.success) {
+          showToast('success', res.message);
+          if (viewingUserDetail?.id === confirmModal.targetUserId) {
+            setViewingUserDetail(null);
+          }
+        } else {
+          showToast('error', res.message);
+        }
+      } else if (confirmModal.actionType === 'block_user') {
+        const res = await blockUser(confirmModal.targetUserId);
+        if (res.success) {
+          showToast('success', res.message);
+          if (viewingUserDetail?.id === confirmModal.targetUserId) {
+            setViewingUserDetail(prev => prev ? { ...prev, blocked: true, status: 'bloqueado' } : null);
+          }
+        } else {
+          showToast('error', res.message);
+        }
+      } else if (confirmModal.actionType === 'unblock_user') {
+        const res = await unblockUser(confirmModal.targetUserId);
+        if (res.success) {
+          showToast('success', res.message);
+          if (viewingUserDetail?.id === confirmModal.targetUserId) {
+            setViewingUserDetail(prev => prev ? { ...prev, blocked: false, status: 'ativo' } : null);
+          }
+        } else {
+          showToast('error', res.message);
+        }
+      }
+    } catch (e: any) {
+      showToast('error', `Erro na execução: ${e.message || e}`);
+    } finally {
+      setConfirmModal(null);
+    }
   };
 
   const handleAddCategory = (e: React.FormEvent) => {
@@ -792,18 +864,28 @@ export const AdminDashboard: React.FC = () => {
         const completedTxs = walletTransactions.filter(t => t.status === 'concluido');
         const rejectedTxs = walletTransactions.filter(t => t.status === 'rejeitado');
 
-        const handleApprove = (txId: string) => {
-          approvePaymentTransaction(txId);
-          setApprovalActionMsg('Pagamento aprovado com sucesso! O plano/saldo do utilizador foi ativado.');
+        const handleApprove = async (txId: string) => {
+          const res = await approvePaymentTransaction(txId);
+          if (res.success) {
+            setApprovalActionMsg(res.message);
+            showToast('success', res.message);
+          } else {
+            showToast('error', res.message);
+          }
           setTimeout(() => setApprovalActionMsg(null), 3000);
         };
 
-        const handleConfirmReject = () => {
+        const handleConfirmReject = async () => {
           if (rejectingTxId) {
-            rejectPaymentTransaction(rejectingTxId, rejectionReasonInput || 'Comprovativo de pagamento não verificado no extrato.');
+            const res = await rejectPaymentTransaction(rejectingTxId, rejectionReasonInput || 'Comprovativo de pagamento não verificado no extrato.');
+            if (res.success) {
+              setApprovalActionMsg(res.message);
+              showToast('success', res.message);
+            } else {
+              showToast('error', res.message);
+            }
             setRejectingTxId(null);
             setRejectionReasonInput('');
-            setApprovalActionMsg('Pagamento rejeitado. O utilizador foi notificado.');
             setTimeout(() => setApprovalActionMsg(null), 3000);
           }
         };
@@ -1344,9 +1426,13 @@ export const AdminDashboard: React.FC = () => {
                           <span className="text-[10px] font-extrabold text-slate-500 block">Liberar Pacote:</span>
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => {
-                                adminUnlockProPlan(pro.id, 'plan_7d');
-                                alert(`Pacote Semanal (7 Dias) liberado para ${pro.name}!`);
+                              onClick={async () => {
+                                const res = await adminUnlockProPlan(pro.id, 'plan_7d');
+                                if (res.success) {
+                                  showToast('success', `Pacote Semanal (7 Dias) liberado para ${pro.name}!`);
+                                } else {
+                                  showToast('error', res.message);
+                                }
                               }}
                               className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-extrabold px-2 py-1 rounded-lg transition-colors"
                               title="Liberar 7 Dias"
@@ -1354,9 +1440,13 @@ export const AdminDashboard: React.FC = () => {
                               +7 Dias
                             </button>
                             <button
-                              onClick={() => {
-                                adminUnlockProPlan(pro.id, 'plan_14d');
-                                alert(`Pacote Quinzenal (14 Dias) liberado para ${pro.name}!`);
+                              onClick={async () => {
+                                const res = await adminUnlockProPlan(pro.id, 'plan_14d');
+                                if (res.success) {
+                                  showToast('success', `Pacote Quinzenal (14 Dias) liberado para ${pro.name}!`);
+                                } else {
+                                  showToast('error', res.message);
+                                }
                               }}
                               className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold px-2 py-1 rounded-lg transition-colors"
                               title="Liberar 14 Dias"
@@ -1364,9 +1454,13 @@ export const AdminDashboard: React.FC = () => {
                               +14 Dias
                             </button>
                             <button
-                              onClick={() => {
-                                adminUnlockProPlan(pro.id, 'plan_30d');
-                                alert(`Pacote Mensal (30 Dias) liberado para ${pro.name}!`);
+                              onClick={async () => {
+                                const res = await adminUnlockProPlan(pro.id, 'plan_30d');
+                                if (res.success) {
+                                  showToast('success', `Pacote Mensal (30 Dias) liberado para ${pro.name}!`);
+                                } else {
+                                  showToast('error', res.message);
+                                }
                               }}
                               className="bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-extrabold px-2 py-1 rounded-lg transition-colors"
                               title="Liberar 30 Dias"
@@ -1473,7 +1567,16 @@ export const AdminDashboard: React.FC = () => {
                       </div>
                     </div>
                     <button
-                      onClick={() => blockUser(lp.id)}
+                      onClick={() => {
+                        setConfirmModal({
+                          isOpen: true,
+                          title: 'Suspender Profissional',
+                          message: `Pretende suspender temporariamente o profissional "${lp.name}" devido à média de avaliações baixa?`,
+                          actionType: 'block_user',
+                          targetUserId: lp.id,
+                          targetUserName: lp.name
+                        });
+                      }}
                       className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[10px] px-2.5 py-1 rounded-lg"
                     >
                       Suspender
@@ -1544,7 +1647,16 @@ export const AdminDashboard: React.FC = () => {
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   {pro.blocked ? (
                     <button
-                      onClick={() => unblockUser(pro.id)}
+                      onClick={() => {
+                        setConfirmModal({
+                          isOpen: true,
+                          title: 'Desbloquear Profissional',
+                          message: `Pretende restabelecer o acesso do profissional "${pro.name}" à plataforma?`,
+                          actionType: 'unblock_user',
+                          targetUserId: pro.id,
+                          targetUserName: pro.name
+                        });
+                      }}
                       className="flex-1 sm:flex-initial bg-amber-500 hover:bg-amber-600 text-white font-bold px-3 py-1.5 rounded-xl flex items-center justify-center gap-1"
                     >
                       <Unlock className="w-3.5 h-3.5" />
@@ -1552,7 +1664,16 @@ export const AdminDashboard: React.FC = () => {
                     </button>
                   ) : (
                     <button
-                      onClick={() => blockUser(pro.id)}
+                      onClick={() => {
+                        setConfirmModal({
+                          isOpen: true,
+                          title: 'Bloquear / Suspender Profissional',
+                          message: `Tem a certeza que deseja suspender o acesso do profissional "${pro.name}"?`,
+                          actionType: 'block_user',
+                          targetUserId: pro.id,
+                          targetUserName: pro.name
+                        });
+                      }}
                       className="flex-1 sm:flex-initial bg-slate-200 hover:bg-rose-100 hover:text-rose-700 text-slate-700 font-bold px-3 py-1.5 rounded-xl transition-colors flex items-center justify-center gap-1"
                     >
                       <Ban className="w-3.5 h-3.5" />
@@ -1563,9 +1684,14 @@ export const AdminDashboard: React.FC = () => {
                   {pro.role !== 'admin' && (
                     <button
                       onClick={() => {
-                        if (window.confirm(`Tem a certeza que deseja APAGAR a conta do profissional "${pro.name}"?`)) {
-                          adminDeleteUser(pro.id);
-                        }
+                        setConfirmModal({
+                          isOpen: true,
+                          title: 'Excluir Conta de Profissional',
+                          message: `Atenção: Tem a certeza que deseja APAGAR permanentemente a conta de "${pro.name}"? O registo será desativado na base de dados online (Firestore).`,
+                          actionType: 'delete_user',
+                          targetUserId: pro.id,
+                          targetUserName: pro.name
+                        });
                       }}
                       title="Apagar Conta de Profissional"
                       className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl border border-rose-200 transition-colors"
@@ -1647,7 +1773,16 @@ export const AdminDashboard: React.FC = () => {
                     <div className="flex-shrink-0 flex items-center gap-1.5">
                       {client.blocked ? (
                         <button
-                          onClick={() => unblockUser(client.id)}
+                          onClick={() => {
+                            setConfirmModal({
+                              isOpen: true,
+                              title: 'Desbloquear Cliente',
+                              message: `Pretende restabelecer o acesso do cliente "${client.name}" à plataforma?`,
+                              actionType: 'unblock_user',
+                              targetUserId: client.id,
+                              targetUserName: client.name
+                            });
+                          }}
                           className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-3 py-1.5 rounded-xl flex items-center justify-center gap-1"
                         >
                           <Unlock className="w-3.5 h-3.5" />
@@ -1655,7 +1790,16 @@ export const AdminDashboard: React.FC = () => {
                         </button>
                       ) : (
                         <button
-                          onClick={() => blockUser(client.id)}
+                          onClick={() => {
+                            setConfirmModal({
+                              isOpen: true,
+                              title: 'Bloquear / Suspender Cliente',
+                              message: `Tem a certeza que deseja suspender o acesso do cliente "${client.name}"?`,
+                              actionType: 'block_user',
+                              targetUserId: client.id,
+                              targetUserName: client.name
+                            });
+                          }}
                           className="bg-slate-200 hover:bg-rose-100 hover:text-rose-700 text-slate-700 font-bold px-3 py-1.5 rounded-xl transition-colors flex items-center justify-center gap-1"
                         >
                           <Ban className="w-3.5 h-3.5" />
@@ -1666,9 +1810,14 @@ export const AdminDashboard: React.FC = () => {
                       {client.role !== 'admin' && (
                         <button
                           onClick={() => {
-                            if (window.confirm(`Tem a certeza que deseja APAGAR a conta do cliente "${client.name}"?`)) {
-                              adminDeleteUser(client.id);
-                            }
+                            setConfirmModal({
+                              isOpen: true,
+                              title: 'Excluir Conta de Cliente',
+                              message: `Atenção: Tem a certeza que deseja APAGAR permanentemente a conta de "${client.name}"? O registo será desativado na base de dados online (Firestore).`,
+                              actionType: 'delete_user',
+                              targetUserId: client.id,
+                              targetUserName: client.name
+                            });
                           }}
                           title="Apagar Conta de Cliente"
                           className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl border border-rose-200 transition-colors"
@@ -2552,14 +2701,19 @@ export const AdminDashboard: React.FC = () => {
               <div className="bg-amber-50/80 p-3 rounded-2xl border border-amber-200/80 flex justify-between items-center">
                 <div>
                   <span className="text-amber-900 font-extrabold text-xs block">Alterar Tipo de Conta</span>
-                  <span className="text-[10px] text-amber-700 font-medium">Ação exclusiva de Administrador</span>
+                  <span className="text-[10px] text-amber-700 font-medium">Ação persistida no Firestore</span>
                 </div>
                 <select
                   value={viewingUserDetail.accountType || (viewingUserDetail.role === 'profissional' ? 'profissional' : 'cliente')}
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const newType = e.target.value as any;
-                    adminChangeUserAccountType(viewingUserDetail.id, newType);
-                    setViewingUserDetail(prev => prev ? { ...prev, accountType: newType, role: newType === 'profissional' ? 'profissional' : 'cliente' } : null);
+                    const res = await adminChangeUserAccountType(viewingUserDetail.id, newType);
+                    if (res.success) {
+                      showToast('success', res.message);
+                      setViewingUserDetail(prev => prev ? { ...prev, accountType: newType, role: newType === 'profissional' ? 'profissional' : 'cliente' } : null);
+                    } else {
+                      showToast('error', res.message);
+                    }
                   }}
                   className="bg-white text-xs font-black text-slate-900 border border-amber-300 rounded-xl px-2.5 py-1.5 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-sm"
                 >
@@ -2574,8 +2728,14 @@ export const AdminDashboard: React.FC = () => {
               {viewingUserDetail.blocked ? (
                 <button
                   onClick={() => {
-                    unblockUser(viewingUserDetail.id);
-                    setViewingUserDetail({ ...viewingUserDetail, blocked: false });
+                    setConfirmModal({
+                      isOpen: true,
+                      title: 'Desbloquear Conta de Utilizador',
+                      message: `Pretende restabelecer o acesso total de "${viewingUserDetail.name}" à plataforma J Smart Services?`,
+                      actionType: 'unblock_user',
+                      targetUserId: viewingUserDetail.id,
+                      targetUserName: viewingUserDetail.name
+                    });
                   }}
                   className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-extrabold py-3 rounded-2xl text-xs flex items-center justify-center gap-1.5 shadow"
                 >
@@ -2585,8 +2745,14 @@ export const AdminDashboard: React.FC = () => {
               ) : (
                 <button
                   onClick={() => {
-                    blockUser(viewingUserDetail.id);
-                    setViewingUserDetail({ ...viewingUserDetail, blocked: true });
+                    setConfirmModal({
+                      isOpen: true,
+                      title: 'Bloquear / Suspender Conta',
+                      message: `Tem a certeza que deseja suspender e bloquear o acesso de "${viewingUserDetail.name}"? O utilizador não conseguirá autenticar-se nem receber novos pedidos.`,
+                      actionType: 'block_user',
+                      targetUserId: viewingUserDetail.id,
+                      targetUserName: viewingUserDetail.name
+                    });
                   }}
                   className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-extrabold py-3 rounded-2xl text-xs flex items-center justify-center gap-1.5 shadow"
                 >
@@ -2599,10 +2765,14 @@ export const AdminDashboard: React.FC = () => {
               {viewingUserDetail.role !== 'admin' && (
                 <button
                   onClick={() => {
-                    if (window.confirm(`Tem a certeza absoluta que deseja APAGAR DEFINITIVAMENTE a conta de "${viewingUserDetail.name}"? Esta ação removerá o perfil da plataforma.`)) {
-                      adminDeleteUser(viewingUserDetail.id);
-                      setViewingUserDetail(null);
-                    }
+                    setConfirmModal({
+                      isOpen: true,
+                      title: 'Exclusão Permanente de Conta',
+                      message: `Atenção: Tem a certeza absoluta que deseja excluir a conta de "${viewingUserDetail.name}"? Esta ação removerá a conta da plataforma, persistindo o estado na base de dados online.`,
+                      actionType: 'delete_user',
+                      targetUserId: viewingUserDetail.id,
+                      targetUserName: viewingUserDetail.name
+                    });
                   }}
                   className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold py-3 rounded-2xl text-xs flex items-center justify-center gap-1.5 border border-rose-300"
                 >
@@ -2618,6 +2788,98 @@ export const AdminDashboard: React.FC = () => {
                 Fechar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO ADMINISTRATIVA GLOBAL */}
+      {confirmModal && confirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 border border-slate-200 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className={`p-3 rounded-2xl ${
+                confirmModal.actionType === 'delete_user' ? 'bg-rose-100 text-rose-700' :
+                confirmModal.actionType === 'block_user' ? 'bg-amber-100 text-amber-700' :
+                'bg-emerald-100 text-emerald-700'
+              }`}>
+                {confirmModal.actionType === 'delete_user' && <Trash2 className="w-6 h-6" />}
+                {confirmModal.actionType === 'block_user' && <Ban className="w-6 h-6" />}
+                {confirmModal.actionType === 'unblock_user' && <Unlock className="w-6 h-6" />}
+              </div>
+              <div>
+                <h3 className="font-black text-slate-900 text-base">{confirmModal.title}</h3>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">Confirmação de operação de administrador</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs text-slate-700 leading-relaxed space-y-2">
+              <p>{confirmModal.message}</p>
+              <div className="pt-2 border-t border-slate-200/80 text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Esta operação será enviada e persistida diretamente no Firestore.</span>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                disabled={confirmModal.isProcessing}
+                onClick={() => setConfirmModal(null)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold py-3 rounded-2xl text-xs transition-colors"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                disabled={confirmModal.isProcessing}
+                onClick={handleExecuteConfirmedAction}
+                className={`flex-1 font-extrabold py-3 rounded-2xl text-xs text-white shadow transition-all flex items-center justify-center gap-2 ${
+                  confirmModal.actionType === 'delete_user'
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : confirmModal.actionType === 'block_user'
+                    ? 'bg-amber-600 hover:bg-amber-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                } ${confirmModal.isProcessing ? 'opacity-70 cursor-not-allowed' : ''}`}
+              >
+                {confirmModal.isProcessing ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    <span>A persistir...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Confirmar e Executar</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST GLOBAL DE FEEDBACK ADMINISTRATIVO */}
+      {adminFeedback && (
+        <div className="fixed bottom-6 right-6 z-50 animate-bounce-short">
+          <div className={`flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl border text-xs font-black backdrop-blur-md ${
+            adminFeedback.type === 'success'
+              ? 'bg-emerald-900/95 text-emerald-100 border-emerald-500/50 shadow-emerald-950/40'
+              : adminFeedback.type === 'error'
+              ? 'bg-rose-900/95 text-rose-100 border-rose-500/50 shadow-rose-950/40'
+              : 'bg-slate-900/95 text-slate-100 border-slate-700 shadow-slate-950/40'
+          }`}>
+            {adminFeedback.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />}
+            {adminFeedback.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />}
+            {adminFeedback.type === 'info' && <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />}
+            <div className="space-y-0.5">
+              <p className="tracking-wide">{adminFeedback.message}</p>
+            </div>
+            <button
+              onClick={() => setAdminFeedback(null)}
+              className="ml-2 text-white/60 hover:text-white p-1 rounded-lg"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}

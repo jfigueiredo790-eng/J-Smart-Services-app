@@ -135,7 +135,7 @@ dependencies {
                 <span>Mesmas Contas de Acesso</span>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Logins de Cliente, Profissional e Administrador funcionam de forma idêntica no site e no aplicativo móvel.
+                Logins de Cliente e Profissional funcionam de forma idêntica no site e no aplicativo móvel.
               </p>
             </div>
 

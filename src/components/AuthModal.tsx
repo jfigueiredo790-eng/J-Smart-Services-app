@@ -440,7 +440,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
 
                 <div className="bg-emerald-50/80 p-3 rounded-2xl border border-emerald-200 text-[11px] text-emerald-950 font-medium flex items-start gap-2 leading-relaxed">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>O sistema reconhece automaticamente o tipo da sua conta (Cliente, Profissional ou Administrador) ao entrar.</span>
+                  <span>O sistema reconhece automaticamente o tipo da sua conta (cliente e profissional) ao entrar.</span>
                 </div>
               </>
             )}

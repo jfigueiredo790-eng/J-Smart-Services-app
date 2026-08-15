@@ -109,15 +109,15 @@ interface AppContextType {
   sendChatMessage: (requestId: string, text: string, isQuote?: boolean, quotePriceKz?: number, imageUrl?: string, locationPin?: { label: string; lat?: number; lng?: number }) => void;
   retryChatMessage: (messageId: string) => void;
   submitReview: (reviewData: Omit<Review, 'id' | 'date'>) => void;
-  verifyProfessional: (proId: string) => void;
-  verifyProExperience: (proId: string, isVerified: boolean) => void;
+  verifyProfessional: (proId: string) => Promise<{ success: boolean; message: string }>;
+  verifyProExperience: (proId: string, isVerified: boolean) => Promise<{ success: boolean; message: string }>;
   updateUserProfile: (updated: Partial<User & ProfessionalProfile>) => void;
   registerUserAsync: (userData: Partial<User & ProfessionalProfile>, password?: string) => Promise<{ success: boolean; message: string }>;
   loginUserWithCredentialsAsync: (emailOrPhone: string, passInput: string, selectedRole: UserRole) => Promise<{ success: boolean; message: string }>;
   changeProPlan: (plan: 'gratuito' | 'pro_destaque') => void;
   subscribeToPlan: (planType: ProSubscriptionPlan, bypassBalance?: boolean) => { success: boolean; message: string };
-  adminUnlockProPlan: (proId: string, planType: ProSubscriptionPlan) => void;
-  adminChangeUserAccountType: (userId: string, newAccountType: AccountType) => void;
+  adminUnlockProPlan: (proId: string, planType: ProSubscriptionPlan) => Promise<{ success: boolean; message: string }>;
+  adminChangeUserAccountType: (userId: string, newAccountType: AccountType) => Promise<{ success: boolean; message: string }>;
   
   // Wallet & Admin Actions
   addWalletDeposit: (amountKz: number, method: string) => void;
@@ -130,21 +130,21 @@ interface AppContextType {
     proofNote?: string;
     planId?: ProSubscriptionPlan;
   }) => { success: boolean; message: string };
-  approvePaymentTransaction: (txId: string) => { success: boolean; message: string };
-  rejectPaymentTransaction: (txId: string, reason: string) => { success: boolean; message: string };
+  approvePaymentTransaction: (txId: string) => Promise<{ success: boolean; message: string }>;
+  rejectPaymentTransaction: (txId: string, reason: string) => Promise<{ success: boolean; message: string }>;
   requestWithdrawal: (amountKz: number, iban: string) => void;
   submitReport: (reportedUserId: string, reportedUserName: string, reason: string, details: string, requestId?: string) => void;
-  blockUser: (userId: string) => void;
-  unblockUser: (userId: string) => void;
-  adminDeleteUser: (userId: string) => void;
-  updatePlatformSettings: (settings: Partial<PlatformSettings>) => void;
+  blockUser: (userId: string) => Promise<{ success: boolean; message: string }>;
+  unblockUser: (userId: string) => Promise<{ success: boolean; message: string }>;
+  adminDeleteUser: (userId: string) => Promise<{ success: boolean; message: string }>;
+  updatePlatformSettings: (settings: Partial<PlatformSettings>) => Promise<{ success: boolean; message: string }>;
   codeOfConductRules: CodeOfConductSection[];
   updateCodeOfConductRules: (rules: CodeOfConductSection[]) => void;
   isRulesModalOpen: boolean;
   setIsRulesModalOpen: (isOpen: boolean) => void;
   addCategory: (category: Omit<ServiceCategory, 'id'>) => void;
   addStaffAdmin: (staffData: { name: string; email: string; phone: string; adminSubRole: AdminSubRole }) => void;
-  logAdminAction: (action: string, targetId?: string, details?: string) => void;
+  logAdminAction: (action: string, targetId?: string, details?: string) => Promise<AdminAuditLog>;
   runAutoTestSuite: () => { success: boolean; totalTests: number; passedTests: number; logResults: { step: string; status: 'pass' | 'fail'; message: string }[] };
 
   // Auto Approval Helper
@@ -636,6 +636,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [allUsers]);
 
   const loginUser = (user: User, role?: UserRole) => {
+    // Check if account is deleted or blocked
+    if (user.isDeleted === true || user.status === 'deleted') {
+      alert('Esta conta foi desativada ou eliminada pela administração e não pode iniciar sessão.');
+      return;
+    }
+    if (user.blocked === true || user.status === 'bloqueado') {
+      alert('Esta conta encontra-se suspensa pela administração por violação dos termos de serviço.');
+      return;
+    }
+
     const finalRole: UserRole = (user.role === 'admin') 
       ? 'admin' 
       : (role || (user.accountType === 'profissional' || user.role === 'profissional' ? 'profissional' : 'cliente'));
@@ -688,7 +698,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveTab('home');
   };
 
-  const addStaffAdmin = (staffData: { name: string; email: string; phone: string; adminSubRole: AdminSubRole }) => {
+  const addStaffAdmin = async (staffData: { name: string; email: string; phone: string; adminSubRole: AdminSubRole }) => {
     const newAdminUser: User = {
       id: `admin-staff-${Date.now()}`,
       name: staffData.name,
@@ -708,15 +718,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAllUsers(prev => [newAdminUser, ...prev]);
 
     try {
-      setDoc(doc(db, 'administradores', newAdminUser.id), newAdminUser);
+      await setDoc(doc(db, 'administradores', newAdminUser.id), newAdminUser);
+      await setDoc(doc(db, 'users', newAdminUser.id), newAdminUser);
     } catch (err) {
       console.warn('Firestore admin save notice:', err);
     }
 
-    logAdminAction('Criação de Funcionário / Admin', newAdminUser.id, `Atribuído sub-papel: ${staffData.adminSubRole}`);
+    await logAdminAction('Criação de Funcionário / Admin', newAdminUser.id, `Atribuído sub-papel: ${staffData.adminSubRole}`);
   };
 
-  const logAdminAction = (action: string, targetId?: string, details?: string) => {
+  const logAdminAction = async (action: string, targetId?: string, details?: string): Promise<AdminAuditLog> => {
     const newLog: AdminAuditLog = {
       id: `audit-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       adminId: currentUser.id || 'admin-system',
@@ -732,8 +743,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAuditLogs(prev => [newLog, ...prev]);
 
     try {
-      setDoc(doc(db, 'admin_audit_logs', newLog.id), newLog).catch(() => {});
-    } catch (err) {}
+      await setDoc(doc(db, 'admin_audit_logs', newLog.id), newLog);
+    } catch (err) {
+      console.warn('Erro ao guardar log de auditoria no Firestore:', err);
+    }
+    return newLog;
   };
 
   const runAutoTestSuite = () => {
@@ -786,17 +800,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Firestore users snapshot notice:', err.message);
       }));
 
-      // 3. Professionals
+      // 3. Professionals (exclude soft deleted)
       const prosRef = collection(db, 'professionals');
       unsubscribes.push(onSnapshot(prosRef, (snapshot) => {
         if (!snapshot.empty) {
           const fsPros: ProfessionalProfile[] = [];
           snapshot.forEach(docSnap => {
-            fsPros.push({ id: docSnap.id, ...docSnap.data() } as ProfessionalProfile);
+            const pData = { id: docSnap.id, ...docSnap.data() } as ProfessionalProfile;
+            if (!pData.isDeleted && pData.status !== 'deleted') {
+              fsPros.push(pData);
+            }
           });
           setProfessionals(prev => {
             const fsIds = new Set(fsPros.map(p => p.id));
-            const existingNonFs = prev.filter(p => !fsIds.has(p.id));
+            const existingNonFs = prev.filter(p => !fsIds.has(p.id) && !p.isDeleted && p.status !== 'deleted');
             return [...fsPros, ...existingNonFs];
           });
         }
@@ -840,6 +857,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }, (err) => {
         console.warn('Firestore messages snapshot notice:', err.message);
+      }));
+
+      // 6. Admin Audit Logs (real-time cross-device log sync)
+      const auditRef = collection(db, 'admin_audit_logs');
+      unsubscribes.push(onSnapshot(auditRef, (snapshot) => {
+        if (!snapshot.empty) {
+          const fsLogs: AdminAuditLog[] = [];
+          snapshot.forEach(docSnap => {
+            fsLogs.push({ id: docSnap.id, ...docSnap.data() } as AdminAuditLog);
+          });
+          fsLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setAuditLogs(fsLogs);
+        }
+      }, (err) => {
+        console.warn('Firestore audit logs snapshot notice:', err.message);
+      }));
+
+      // 7. Platform Settings
+      const settingsDocRef = doc(db, 'platform_settings', 'global_config');
+      unsubscribes.push(onSnapshot(settingsDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const fsSettings = docSnap.data() as PlatformSettings;
+          setPlatformSettings(prev => ({ ...prev, ...fsSettings }));
+        }
+      }, (err) => {
+        console.warn('Firestore settings snapshot notice:', err.message);
       }));
 
     } catch (err) {
@@ -1337,46 +1380,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setReviewingRequestId(null);
   };
 
-  const verifyProfessional = (proId: string) => {
-    setProfessionals(prev => prev.map(p => {
-      if (p.id === proId) {
-        return { ...p, verified: true, documentsVerified: true, isAutoApproved: true };
+  const verifyProfessional = async (proId: string): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada.' };
+    }
+
+    const payload = { verified: true, documentsVerified: true, isAutoApproved: true };
+
+    try {
+      await setDoc(doc(db, 'professionals', proId), payload, { merge: true });
+      await setDoc(doc(db, 'users', proId), payload, { merge: true });
+
+      setProfessionals(prev => prev.map(p => p.id === proId ? { ...p, ...payload } : p));
+      setAllUsers(prev => prev.map(u => u.id === proId ? { ...u, ...payload } : u));
+
+      if (currentUser.id === proId) {
+        setCurrentUser(prev => ({ ...prev, ...payload }));
       }
-      return p;
-    }));
+
+      await logAdminAction('Verificação de Profissional', proId, 'Documentos e conta aprovados manualmente pelo Administrador');
+
+      return { success: true, message: 'Profissional verificado com sucesso na base de dados!' };
+    } catch (err: any) {
+      console.error('Erro ao verificar profissional no Firestore:', err);
+      return { success: false, message: `Falha ao persistir verificação: ${err.message || err}` };
+    }
   };
 
-  const verifyProExperience = (proId: string, isVerified: boolean) => {
-    setProfessionals(prev => prev.map(p => {
-      if (p.id === proId) {
-        return { ...p, experienceVerified: isVerified };
-      }
-      return p;
-    }));
-
-    setAllUsers(prev => prev.map(u => {
-      if (u.id === proId) {
-        return { ...u, experienceVerified: isVerified };
-      }
-      return u;
-    }));
-
-    if (currentUser.id === proId) {
-      setCurrentUser(prev => ({ ...prev, experienceVerified: isVerified }));
+  const verifyProExperience = async (proId: string, isVerified: boolean): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada.' };
     }
 
     try {
-      setDoc(doc(db, 'professionals', proId), { experienceVerified: isVerified }, { merge: true }).catch(() => {});
-      setDoc(doc(db, 'users', proId), { experienceVerified: isVerified }, { merge: true }).catch(() => {});
-    } catch (e) {
-      console.warn('Firestore experience update error:', e);
-    }
+      await setDoc(doc(db, 'professionals', proId), { experienceVerified: isVerified }, { merge: true });
+      await setDoc(doc(db, 'users', proId), { experienceVerified: isVerified }, { merge: true });
 
-    logAdminAction(
-      'Verificação de Experiência Profissional',
-      proId,
-      `Anos de experiência alterados para: ${isVerified ? 'Verificados (✅)' : 'Não verificados (⚪)'}`
-    );
+      setProfessionals(prev => prev.map(p => p.id === proId ? { ...p, experienceVerified: isVerified } : p));
+      setAllUsers(prev => prev.map(u => u.id === proId ? { ...u, experienceVerified: isVerified } : u));
+
+      if (currentUser.id === proId) {
+        setCurrentUser(prev => ({ ...prev, experienceVerified: isVerified }));
+      }
+
+      await logAdminAction(
+        'Verificação de Experiência Profissional',
+        proId,
+        `Anos de experiência alterados para: ${isVerified ? 'Verificados (✅)' : 'Não verificados (⚪)'}`
+      );
+
+      return { success: true, message: `Experiência ${isVerified ? 'verificada' : 'desmarcada'} com sucesso na base de dados.` };
+    } catch (err: any) {
+      console.error('Erro ao verificar experiência no Firestore:', err);
+      return { success: false, message: `Falha ao persistir no Firestore: ${err.message || err}` };
+    }
   };
 
   const registerUserAsync = async (
@@ -1621,6 +1678,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return {
           success: false,
           message: 'Conta não encontrada na base de dados. Certifique-se de que utiliza o mesmo e-mail, telefone ou BI do registo.'
+        };
+      }
+
+      if (targetUser.isDeleted === true || (targetUser as any).status === 'deleted') {
+        return {
+          success: false,
+          message: 'Esta conta foi desativada ou eliminada pela administração e não pode iniciar sessão.'
+        };
+      }
+
+      if (targetUser.blocked === true || (targetUser as any).status === 'bloqueado') {
+        return {
+          success: false,
+          message: 'Esta conta encontra-se suspensa pela administração por violação dos termos de serviço.'
         };
       }
 
@@ -1879,52 +1950,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  const adminUnlockProPlan = (proId: string, planType: ProSubscriptionPlan) => {
+  const adminUnlockProPlan = async (proId: string, planType: ProSubscriptionPlan): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas administradores podem liberar planos.' };
+    }
+
     const planInfo = PLAN_PRICES[planType as keyof typeof PLAN_PRICES];
-    if (!planInfo) return;
+    if (!planInfo) return { success: false, message: 'Plano inválido especificado.' };
 
     const now = new Date();
     const newExpiresAt = new Date(now.getTime() + planInfo.days * 24 * 60 * 60 * 1000).toISOString();
+    const planPayload = {
+      subscriptionPlan: planType,
+      planExpiresAt: newExpiresAt
+    };
 
-    setProfessionals(prev => prev.map(p => {
-      if (p.id === proId) {
-        return {
-          ...p,
-          subscriptionPlan: planType,
-          planExpiresAt: newExpiresAt
-        };
-      }
-      return p;
-    }));
+    try {
+      await setDoc(doc(db, 'professionals', proId), planPayload, { merge: true });
+      await setDoc(doc(db, 'users', proId), planPayload, { merge: true });
 
-    setAllUsers(prev => prev.map(u => {
-      if (u.id === proId) {
-        return {
-          ...u,
-          subscriptionPlan: planType,
-          planExpiresAt: newExpiresAt
-        };
-      }
-      return u;
-    }));
-
-    if (currentUser.id === proId) {
-      setCurrentUser(prev => ({
-        ...prev,
-        subscriptionPlan: planType,
-        planExpiresAt: newExpiresAt
+      setProfessionals(prev => prev.map(p => {
+        if (p.id === proId) {
+          return { ...p, ...planPayload };
+        }
+        return p;
       }));
+
+      setAllUsers(prev => prev.map(u => {
+        if (u.id === proId) {
+          return { ...u, ...planPayload };
+        }
+        return u;
+      }));
+
+      if (currentUser.id === proId) {
+        setCurrentUser(prev => ({ ...prev, ...planPayload }));
+      }
+
+      addNotification({
+        userId: proId,
+        targetRoleScope: 'profissional',
+        title: '🎉 Pacote Liberado pela Administração',
+        message: `O seu plano ${planInfo.label} (${planInfo.days} Dias) foi liberado e confirmado pela equipa administrativa!`,
+        type: 'pagamento_confirmado'
+      });
+
+      await logAdminAction('Liberação de Pacote pelo Admin', proId, `Pacote ${planInfo.label} (${planInfo.days} dias) liberado com sucesso`);
+
+      return { success: true, message: `Pacote ${planInfo.label} liberado com sucesso na base de dados!` };
+    } catch (err: any) {
+      console.error('Erro ao liberar plano no Firestore:', err);
+      return { success: false, message: `Falha ao persistir liberação de plano: ${err.message || err}` };
     }
-
-    addNotification({
-      userId: proId,
-      targetRoleScope: 'profissional',
-      title: '🎉 Pacote Liberado pela Administração',
-      message: `O seu plano ${planInfo.label} (${planInfo.days} Dias) foi liberado e confirmado pela equipa administrativa!`,
-      type: 'pagamento_confirmado'
-    });
-
-    logAdminAction('Liberação de Pacote pelo Admin', proId, `Pacote ${planInfo.label} liberado com sucesso`);
   };
 
   // Wallet & Payment Actions
@@ -2009,78 +2086,109 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  const approvePaymentTransaction = (txId: string): { success: boolean; message: string } => {
-    const tx = walletTransactions.find(t => t.id === txId);
-    if (!tx) return { success: false, message: 'Transação não encontrada.' };
-
-    setWalletTransactions(prev => prev.map(t => {
-      if (t.id === txId) {
-        return { ...t, status: 'concluido', updatedAt: new Date().toISOString() };
-      }
-      return t;
-    }));
-
-    // If it's a plan payment, unlock the plan for user
-    if (tx.planId) {
-      adminUnlockProPlan(tx.userId, tx.planId);
-    } else if (tx.type === 'deposit') {
-      setCurrentUser(prev => {
-        if (prev.id === tx.userId) {
-          return { ...prev, walletBalanceKz: (prev.walletBalanceKz || 0) + tx.amountKz };
-        }
-        return prev;
-      });
-      setAllUsers(prev => prev.map(u => {
-        if (u.id === tx.userId) {
-          return { ...u, walletBalanceKz: (u.walletBalanceKz || 0) + tx.amountKz };
-        }
-        return u;
-      }));
-      setProfessionals(prev => prev.map(p => {
-        if (p.id === tx.userId) {
-          return { ...p, walletBalanceKz: (p.walletBalanceKz || 0) + tx.amountKz };
-        }
-        return p;
-      }));
+  const approvePaymentTransaction = async (txId: string): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada.' };
     }
 
-    // Notify user
-    addNotification({
-      userId: tx.userId,
-      targetRoleScope: tx.planId ? 'profissional' : 'todos',
-      title: '🎉 Pagamento Aprovado com Sucesso!',
-      message: `O Administrador confirmou o seu comprovativo e APROVOU o pagamento de ${tx.amountKz.toLocaleString('pt-AO')} Kz. ${tx.planId ? 'O seu pacote já está ativo!' : 'O saldo já está disponível na sua carteira.'}`,
-      type: 'pagamento_confirmado'
-    });
-
-    logAdminAction('Aprovação de Pagamento', tx.userId, `Pagamento ID ${txId} (${tx.amountKz.toLocaleString('pt-AO')} Kz) APROVADO`);
-
-    return { success: true, message: 'Pagamento aprovado e ativado com sucesso!' };
-  };
-
-  const rejectPaymentTransaction = (txId: string, reason: string): { success: boolean; message: string } => {
     const tx = walletTransactions.find(t => t.id === txId);
     if (!tx) return { success: false, message: 'Transação não encontrada.' };
 
-    setWalletTransactions(prev => prev.map(t => {
-      if (t.id === txId) {
-        return { ...t, status: 'rejeitado', rejectionReason: reason, updatedAt: new Date().toISOString() };
+    const updateTxPayload = { status: 'concluido' as const, updatedAt: new Date().toISOString() };
+
+    try {
+      await setDoc(doc(db, 'wallet_transactions', txId), updateTxPayload, { merge: true });
+
+      setWalletTransactions(prev => prev.map(t => {
+        if (t.id === txId) {
+          return { ...t, ...updateTxPayload };
+        }
+        return t;
+      }));
+
+      // If it's a plan payment, unlock the plan for user
+      if (tx.planId) {
+        await adminUnlockProPlan(tx.userId, tx.planId);
+      } else if (tx.type === 'deposit') {
+        const userTarget = allUsers.find(u => u.id === tx.userId);
+        const newBalance = (userTarget?.walletBalanceKz || 0) + tx.amountKz;
+        await setDoc(doc(db, 'users', tx.userId), { walletBalanceKz: newBalance }, { merge: true });
+        await setDoc(doc(db, 'professionals', tx.userId), { walletBalanceKz: newBalance }, { merge: true });
+
+        setCurrentUser(prev => {
+          if (prev.id === tx.userId) {
+            return { ...prev, walletBalanceKz: newBalance };
+          }
+          return prev;
+        });
+        setAllUsers(prev => prev.map(u => {
+          if (u.id === tx.userId) {
+            return { ...u, walletBalanceKz: newBalance };
+          }
+          return u;
+        }));
+        setProfessionals(prev => prev.map(p => {
+          if (p.id === tx.userId) {
+            return { ...p, walletBalanceKz: newBalance };
+          }
+          return p;
+        }));
       }
-      return t;
-    }));
 
-    // Notify user
-    addNotification({
-      userId: tx.userId,
-      targetRoleScope: tx.planId ? 'profissional' : 'todos',
-      title: '❌ Comprovativo Rejeitado pelo Administrador',
-      message: `O seu comprovativo de pagamento de ${tx.amountKz.toLocaleString('pt-AO')} Kz foi rejeitado pelo Administrador. Motivo: ${reason || 'Comprovativo não identificado no extrato bancário.'}`,
-      type: 'pagamento_confirmado'
-    });
+      // Notify user
+      addNotification({
+        userId: tx.userId,
+        targetRoleScope: tx.planId ? 'profissional' : 'todos',
+        title: '🎉 Pagamento Aprovado com Sucesso!',
+        message: `O Administrador confirmou o seu comprovativo e APROVOU o pagamento de ${tx.amountKz.toLocaleString('pt-AO')} Kz. ${tx.planId ? 'O seu pacote já está ativo!' : 'O saldo já está disponível na sua carteira.'}`,
+        type: 'pagamento_confirmado'
+      });
 
-    logAdminAction('Rejeição de Pagamento', tx.userId, `Pagamento ID ${txId} REJEITADO. Motivo: ${reason}`);
+      await logAdminAction('Aprovação de Pagamento', tx.userId, `Pagamento ID ${txId} (${tx.amountKz.toLocaleString('pt-AO')} Kz) APROVADO`);
 
-    return { success: true, message: 'Pagamento marcado como rejeitado.' };
+      return { success: true, message: 'Pagamento aprovado e ativado com sucesso na base de dados!' };
+    } catch (err: any) {
+      console.error('Erro ao aprovar transação no Firestore:', err);
+      return { success: false, message: `Falha ao persistir aprovação no Firestore: ${err.message || err}` };
+    }
+  };
+
+  const rejectPaymentTransaction = async (txId: string, reason: string): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada.' };
+    }
+
+    const tx = walletTransactions.find(t => t.id === txId);
+    if (!tx) return { success: false, message: 'Transação não encontrada.' };
+
+    const rejectPayload = { status: 'rejeitado' as const, rejectionReason: reason, updatedAt: new Date().toISOString() };
+
+    try {
+      await setDoc(doc(db, 'wallet_transactions', txId), rejectPayload, { merge: true });
+
+      setWalletTransactions(prev => prev.map(t => {
+        if (t.id === txId) {
+          return { ...t, ...rejectPayload };
+        }
+        return t;
+      }));
+
+      // Notify user
+      addNotification({
+        userId: tx.userId,
+        targetRoleScope: tx.planId ? 'profissional' : 'todos',
+        title: '❌ Comprovativo Rejeitado pelo Administrador',
+        message: `O seu comprovativo de pagamento de ${tx.amountKz.toLocaleString('pt-AO')} Kz foi rejeitado pelo Administrador. Motivo: ${reason || 'Comprovativo não identificado no extrato bancário.'}`,
+        type: 'pagamento_confirmado'
+      });
+
+      await logAdminAction('Rejeição de Pagamento', tx.userId, `Pagamento ID ${txId} REJEITADO. Motivo: ${reason}`);
+
+      return { success: true, message: 'Pagamento marcado como rejeitado na base de dados.' };
+    } catch (err: any) {
+      console.error('Erro ao rejeitar pagamento no Firestore:', err);
+      return { success: false, message: `Falha ao persistir rejeição no Firestore: ${err.message || err}` };
+    }
   };
 
   const requestWithdrawal = (amountKz: number, iban: string) => {
@@ -2120,48 +2228,162 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setReports(prev => [newReport, ...prev]);
   };
 
-  const blockUser = (userId: string) => {
-    setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, blocked: true } : u));
-    setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, blocked: true } : p));
-    setReports(prev => prev.map(r => r.reportedUserId === userId ? { ...r, status: 'bloqueado' } : r));
-    logAdminAction('Bloqueio de Utilizador', userId, 'Conta suspensa por violação de segurança/termos');
+  const blockUser = async (userId: string): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas administradores podem suspender contas.' };
+    }
+
+    const target = allUsers.find(u => u.id === userId);
+    const blockTimestamp = new Date().toISOString();
+    const blockPayload = {
+      blocked: true,
+      status: 'bloqueado' as const,
+      blockedAt: blockTimestamp,
+      blockedBy: currentUser.id
+    };
+
+    try {
+      await setDoc(doc(db, 'users', userId), blockPayload, { merge: true });
+      await setDoc(doc(db, 'professionals', userId), blockPayload, { merge: true });
+
+      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, ...blockPayload } : u));
+      setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, ...blockPayload } : p));
+      setReports(prev => prev.map(r => r.reportedUserId === userId ? { ...r, status: 'bloqueado' } : r));
+
+      await logAdminAction('Bloqueio de Utilizador', userId, `Conta de ${target?.name || userId} suspensa por violação de segurança/termos`);
+
+      return { success: true, message: `Utilizador "${target?.name || userId}" bloqueado com sucesso na base de dados.` };
+    } catch (err: any) {
+      console.error('Erro ao bloquear utilizador no Firestore:', err);
+      return { success: false, message: `Falha ao persistir bloqueio no Firestore: ${err.message || err}` };
+    }
   };
 
-  const unblockUser = (userId: string) => {
-    setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, blocked: false } : u));
-    setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, blocked: false } : p));
-    logAdminAction('Desbloqueio de Utilizador', userId, 'Conta reativada após revisão administrativa');
+  const unblockUser = async (userId: string): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas administradores podem reativar contas.' };
+    }
+
+    const target = allUsers.find(u => u.id === userId);
+    const unblockTimestamp = new Date().toISOString();
+    const unblockPayload = {
+      blocked: false,
+      status: 'ativo' as const,
+      unblockedAt: unblockTimestamp,
+      unblockedBy: currentUser.id
+    };
+
+    try {
+      await setDoc(doc(db, 'users', userId), unblockPayload, { merge: true });
+      await setDoc(doc(db, 'professionals', userId), { ...unblockPayload, status: 'disponivel' as const }, { merge: true });
+
+      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, blocked: false, status: 'ativo' } : u));
+      setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, blocked: false, status: 'disponivel' } : p));
+
+      await logAdminAction('Desbloqueio de Utilizador', userId, `Conta de ${target?.name || userId} reativada após revisão administrativa`);
+
+      return { success: true, message: `Utilizador "${target?.name || userId}" desbloqueado com sucesso na base de dados.` };
+    } catch (err: any) {
+      console.error('Erro ao desbloquear utilizador no Firestore:', err);
+      return { success: false, message: `Falha ao persistir desbloqueio no Firestore: ${err.message || err}` };
+    }
   };
 
-  const adminDeleteUser = (userId: string) => {
+  const adminDeleteUser = async (userId: string): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas administradores podem excluir contas.' };
+    }
+
     // Prevent deleting super admin
     const target = allUsers.find(u => u.id === userId);
-    if (target && target.role === 'admin' && target.adminSubRole === 'super_admin') {
-      alert('Não é permitido apagar a conta do Super Administrador principal.');
-      return;
+    if (target && target.role === 'admin' && (target.adminSubRole === 'super_admin' || !target.adminSubRole)) {
+      return { success: false, message: 'Não é permitido apagar a conta do Super Administrador principal.' };
     }
 
-    setAllUsers(prev => prev.filter(u => u.id !== userId));
-    setProfessionals(prev => prev.filter(p => p.id !== userId));
-    logAdminAction('Eliminação de Conta', userId, `Conta de utilizador (${target?.name || userId}) apagada definitivamente pelo Administrador`);
+    const deleteTimestamp = new Date().toISOString();
+    const deletedPayload = {
+      isDeleted: true,
+      status: 'deleted' as const,
+      deletedAt: deleteTimestamp,
+      deletedBy: currentUser.id,
+      deletedByName: currentUser.name
+    };
+
+    try {
+      // 1. Update in Firestore 'users' collection (soft delete preserves system logs & integrity)
+      await setDoc(doc(db, 'users', userId), deletedPayload, { merge: true });
+
+      // 2. Update in Firestore 'professionals' collection
+      await setDoc(doc(db, 'professionals', userId), deletedPayload, { merge: true });
+
+      // 3. Log audit action in Firestore
+      await logAdminAction(
+        'Exclusão de Conta (Soft Delete)', 
+        userId, 
+        `Conta de ${target?.name || userId} (${target?.role || 'utilizador'}) excluída definitivamente na base de dados`
+      );
+
+      // 4. Update local state
+      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, ...deletedPayload } : u));
+      setProfessionals(prev => prev.filter(p => p.id !== userId));
+
+      return { success: true, message: `Conta de "${target?.name || userId}" excluída com sucesso e persistida na base de dados.` };
+    } catch (err: any) {
+      console.error('Erro ao excluir conta no Firestore:', err);
+      return { success: false, message: `Falha ao persistir a exclusão na base de dados: ${err.message || err}` };
+    }
   };
 
-  const adminChangeUserAccountType = (userId: string, newAccountType: AccountType) => {
+  const adminChangeUserAccountType = async (userId: string, newAccountType: AccountType): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada.' };
+    }
+
     const targetRole: UserRole = newAccountType === 'profissional' ? 'profissional' : 'cliente';
-    
-    setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, accountType: newAccountType, role: u.role === 'admin' ? 'admin' : targetRole } : u));
-    setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, accountType: newAccountType, role: p.role === 'admin' ? 'admin' : targetRole } : p));
-    
-    if (currentUser.id === userId) {
-      setCurrentUser(prev => ({ ...prev, accountType: newAccountType, role: prev.role === 'admin' ? 'admin' : targetRole }));
+    const target = allUsers.find(u => u.id === userId);
+    const changeTimestamp = new Date().toISOString();
+    const changePayload = {
+      accountType: newAccountType,
+      role: target?.role === 'admin' ? ('admin' as UserRole) : targetRole,
+      accountTypeChangedAt: changeTimestamp,
+      accountTypeChangedBy: currentUser.id
+    };
+
+    try {
+      await setDoc(doc(db, 'users', userId), changePayload, { merge: true });
+      await setDoc(doc(db, 'professionals', userId), changePayload, { merge: true });
+
+      await logAdminAction('Alteração do Tipo de Conta', userId, `Tipo de conta de ${target?.name || userId} alterado para ${newAccountType}`);
+
+      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, ...changePayload } : u));
+      setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, ...changePayload } : p));
+
+      if (currentUser.id === userId) {
+        setCurrentUser(prev => ({ ...prev, ...changePayload }));
+      }
+
+      return { success: true, message: `Tipo de conta alterado para "${newAccountType}" com sucesso na base de dados.` };
+    } catch (err: any) {
+      console.error('Erro ao alterar tipo de conta no Firestore:', err);
+      return { success: false, message: `Falha ao persistir a alteração no Firestore: ${err.message || err}` };
     }
-    
-    logAdminAction('Alteração do Tipo de Conta', userId, `Tipo de conta alterado para ${newAccountType} pelo Administrador`);
   };
 
-  const updatePlatformSettings = (newSettings: Partial<PlatformSettings>) => {
+  const updatePlatformSettings = async (newSettings: Partial<PlatformSettings>): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada.' };
+    }
+
     setPlatformSettings(prev => ({ ...prev, ...newSettings }));
-    logAdminAction('Atualização de Configurações da Plataforma', undefined, JSON.stringify(newSettings));
+
+    try {
+      await setDoc(doc(db, 'platform_settings', 'global_config'), newSettings, { merge: true });
+      await logAdminAction('Atualização de Configurações da Plataforma', undefined, JSON.stringify(newSettings));
+      return { success: true, message: 'Configurações atualizadas e sincronizadas no Firestore com sucesso!' };
+    } catch (err: any) {
+      console.error('Erro ao guardar configurações no Firestore:', err);
+      return { success: false, message: `Falha ao persistir definições no Firestore: ${err.message || err}` };
+    }
   };
 
   const updateCodeOfConductRules = (newRules: CodeOfConductSection[]) => {

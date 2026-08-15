@@ -28,6 +28,8 @@ export interface WorkFeedPost {
   ownerId?: string;
 }
 
+export type UserStatus = 'ativo' | 'disponivel' | 'ocupado' | 'bloqueado' | 'deleted';
+
 export interface User {
   id: string;
   name: string;
@@ -47,6 +49,17 @@ export interface User {
   categories?: string[];
   verified: boolean;
   blocked?: boolean;
+  status?: UserStatus;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByName?: string;
+  blockedAt?: string;
+  blockedBy?: string;
+  unblockedAt?: string;
+  unblockedBy?: string;
+  accountTypeChangedAt?: string;
+  accountTypeChangedBy?: string;
   walletBalanceKz?: number;
   clientRequestsCount?: number;
   ownerId?: string;
@@ -73,7 +86,7 @@ export interface ProfessionalProfile extends User {
   documentsVerified: boolean;
   isAutoApproved?: boolean;
   portfolioImages: string[];
-  status: 'disponivel' | 'ocupado';
+  status: 'disponivel' | 'ocupado' | 'bloqueado' | 'deleted' | 'ativo';
   address: string;
   documentType?: string;
   documentNumber?: string;
