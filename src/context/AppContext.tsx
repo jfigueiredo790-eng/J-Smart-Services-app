@@ -23,6 +23,18 @@ import { DEFAULT_CODE_OF_CONDUCT_RULES } from '../data/defaultCodeOfConduct';
 import { PLAN_PRICES, getProPlanStatus, validateProAction } from '../utils/planUtils';
 import { isNotificationForUser } from '../utils/notificationUtils';
 import { runFullSystemTestSuite } from '../utils/systemTestSuite';
+import { 
+  AccountRecoverySession, 
+  RECOVERY_MESSAGES, 
+  checkRecoveryRateLimit, 
+  generateSecureOTP, 
+  maskPhoneNumber, 
+  maskEmailAddress, 
+  isValidAngolanPhone, 
+  normalizeAngolanPhone, 
+  OTP_EXPIRATION_MS, 
+  MAX_OTP_ATTEMPTS 
+} from '../utils/recoveryUtils';
 import { CATEGORIES, DEFAULT_ADMIN_USER, MOCK_USERS, MOCK_PROFESSIONALS, MOCK_REQUESTS, MOCK_MESSAGES, MOCK_REVIEWS, MOCK_WORK_FEED_POSTS } from '../mockData';
 import { db, auth } from '../lib/firebase';
 import { 
@@ -163,6 +175,41 @@ interface AppContextType {
   updateUserProfile: (updated: Partial<User & ProfessionalProfile>) => void;
   registerUserAsync: (userData: Partial<User & ProfessionalProfile>, password?: string) => Promise<{ success: boolean; message: string }>;
   loginUserWithCredentialsAsync: (emailOrPhone: string, passInput: string, selectedRole: UserRole) => Promise<{ success: boolean; message: string }>;
+  
+  // Account Access Recovery Methods
+  requestPasswordRecoveryOtpAsync: (phoneOrEmailOrDoc: string) => Promise<{
+    success: boolean;
+    message: string;
+    sessionId?: string;
+    maskedContact?: string;
+    devCode?: string;
+    isBlocked?: boolean;
+  }>;
+  verifyRecoveryOtpAsync: (sessionId: string, enteredCode: string) => Promise<{
+    success: boolean;
+    message: string;
+    isBlocked?: boolean;
+  }>;
+  resetAccountPasswordAsync: (sessionId: string, verifiedOtp: string, newPassword: string) => Promise<{
+    success: boolean;
+    message: string;
+    isBlocked?: boolean;
+  }>;
+  requestPhoneRecoveryVerificationAsync: (email: string, documentNumber: string, currentPassword?: string) => Promise<{
+    success: boolean;
+    message: string;
+    sessionId?: string;
+    maskedCurrentPhone?: string;
+    maskedEmail?: string;
+    devCode?: string;
+    isBlocked?: boolean;
+  }>;
+  updateRecoveredPhoneNumberAsync: (sessionId: string, verifiedOtp: string, newPhone: string) => Promise<{
+    success: boolean;
+    message: string;
+    isBlocked?: boolean;
+  }>;
+
   changeProPlan: (plan: 'gratuito' | 'pro_destaque') => void;
   subscribeToPlan: (planType: ProSubscriptionPlan, bypassBalance?: boolean) => { success: boolean; message: string };
   adminUnlockProPlan: (proId: string, planType: ProSubscriptionPlan) => Promise<{ success: boolean; message: string }>;
@@ -1825,6 +1872,584 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // ==================== ACCOUNT ACCESS RECOVERY METHODS ====================
+  const [recoverySessions, setRecoverySessions] = useState<AccountRecoverySession[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_recovery_sessions`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_recovery_sessions`, JSON.stringify(recoverySessions));
+    } catch {}
+  }, [recoverySessions]);
+
+  const requestPasswordRecoveryOtpAsync = async (
+    phoneOrEmailOrDoc: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    sessionId?: string;
+    maskedContact?: string;
+    devCode?: string;
+    isBlocked?: boolean;
+  }> => {
+    try {
+      const inputTrimmed = phoneOrEmailOrDoc.trim();
+      if (!inputTrimmed) {
+        return { success: false, message: 'Por favor introduza o número de telefone, e-mail ou BI associado à conta.' };
+      }
+
+      // 1. Rate limit check
+      if (!checkRecoveryRateLimit(inputTrimmed)) {
+        return { success: false, message: RECOVERY_MESSAGES.RATE_LIMIT };
+      }
+
+      const inputLower = inputTrimmed.toLowerCase();
+      const cleanPhone = inputTrimmed.replace(/\D/g, '');
+
+      // 2. Search in allUsers & professionals & Firestore
+      let targetUser: (User | ProfessionalProfile) | undefined = allUsers.find(u => {
+        if (u.email && u.email.trim().toLowerCase() === inputLower) return true;
+        if (u.documentNumber && u.documentNumber.trim().toLowerCase() === inputLower) return true;
+        if (cleanPhone && cleanPhone.length >= 6 && u.phone) {
+          const uDigits = u.phone.replace(/\D/g, '');
+          if (uDigits.length >= 6 && (uDigits.endsWith(cleanPhone) || cleanPhone.endsWith(uDigits))) return true;
+        }
+        return false;
+      });
+
+      if (!targetUser) {
+        targetUser = professionals.find(p => {
+          if (p.email && p.email.trim().toLowerCase() === inputLower) return true;
+          if (p.documentNumber && p.documentNumber.trim().toLowerCase() === inputLower) return true;
+          if (cleanPhone && cleanPhone.length >= 6 && p.phone) {
+            const pDigits = p.phone.replace(/\D/g, '');
+            if (pDigits.length >= 6 && (pDigits.endsWith(cleanPhone) || cleanPhone.endsWith(pDigits))) return true;
+          }
+          return false;
+        });
+      }
+
+      // 3. Direct Firestore fallback
+      if (!targetUser) {
+        try {
+          const usersSnap = await getDocs(collection(db, 'users'));
+          usersSnap.forEach(docSnap => {
+            const uData = { id: docSnap.id, ...docSnap.data() } as User;
+            const uEmail = (uData.email || '').trim().toLowerCase();
+            const uDoc = (uData.documentNumber || '').trim().toLowerCase();
+            const uPhoneDigits = (uData.phone || '').replace(/\D/g, '');
+            if (inputLower && (uEmail === inputLower || uDoc === inputLower)) targetUser = uData;
+            else if (cleanPhone && cleanPhone.length >= 6 && uPhoneDigits.length >= 6 && (uPhoneDigits.endsWith(cleanPhone) || cleanPhone.endsWith(uPhoneDigits))) {
+              targetUser = uData;
+            }
+          });
+
+          if (!targetUser) {
+            const prosSnap = await getDocs(collection(db, 'professionals'));
+            prosSnap.forEach(docSnap => {
+              const pData = { id: docSnap.id, ...docSnap.data() } as ProfessionalProfile;
+              const pEmail = (pData.email || '').trim().toLowerCase();
+              const pDoc = (pData.documentNumber || '').trim().toLowerCase();
+              const pPhoneDigits = (pData.phone || '').replace(/\D/g, '');
+              if (inputLower && (pEmail === inputLower || pDoc === inputLower)) targetUser = pData;
+              else if (cleanPhone && cleanPhone.length >= 6 && pPhoneDigits.length >= 6 && (pPhoneDigits.endsWith(cleanPhone) || cleanPhone.endsWith(pPhoneDigits))) {
+                targetUser = pData;
+              }
+            });
+          }
+        } catch (e) {
+          console.warn('Erro ao pesquisar utilizador no Firestore para recuperação:', e);
+        }
+      }
+
+      if (!targetUser) {
+        return { success: false, message: RECOVERY_MESSAGES.USER_NOT_FOUND };
+      }
+
+      if (targetUser.isDeleted === true || (targetUser as any).status === 'deleted') {
+        return { success: false, message: 'Esta conta foi desativada pela administração e não pode recuperar credenciais.' };
+      }
+
+      const isBlocked = targetUser.blocked === true || (targetUser as any).status === 'bloqueado' || (targetUser as any).accountStatus === 'BLOCKED';
+      const isExpiredSub = (targetUser as any).subscriptionStatus === 'EXPIRED';
+
+      const otp = generateSecureOTP();
+      const session: AccountRecoverySession = {
+        id: `rec-pwd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        type: 'password',
+        targetUserId: targetUser.id,
+        targetUserRole: (targetUser.role || 'cliente') as any,
+        targetEmail: targetUser.email || '',
+        targetPhone: targetUser.phone || '',
+        targetDocNumber: targetUser.documentNumber || '',
+        targetName: targetUser.name || 'Utilizador',
+        otpCode: otp,
+        expiresAt: Date.now() + OTP_EXPIRATION_MS,
+        attemptsLeft: MAX_OTP_ATTEMPTS,
+        isVerified: false,
+        isUsed: false,
+        isBlockedAccount: isBlocked,
+        isExpiredSubscription: isExpiredSub,
+        createdAt: Date.now(),
+        ipOrIdentifier: inputTrimmed
+      };
+
+      setRecoverySessions(prev => [session, ...prev.filter(s => s.targetUserId !== targetUser!.id)]);
+
+      // Attempt to save to Firestore recovery_otps collection
+      try {
+        await setDoc(doc(db, 'recovery_otps', session.id), session);
+      } catch (err) {
+        console.warn('Aviso: sessão de recuperação registada localmente:', err);
+      }
+
+      const maskedContact = targetUser.phone 
+        ? maskPhoneNumber(targetUser.phone) 
+        : maskEmailAddress(targetUser.email);
+
+      return {
+        success: true,
+        message: RECOVERY_MESSAGES.CODE_SENT,
+        sessionId: session.id,
+        maskedContact,
+        devCode: otp,
+        isBlocked
+      };
+    } catch (err: any) {
+      return { success: false, message: `Erro ao iniciar recuperação: ${err.message || err}` };
+    }
+  };
+
+  const verifyRecoveryOtpAsync = async (
+    sessionId: string,
+    enteredCode: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    isBlocked?: boolean;
+  }> => {
+    try {
+      const codeTrimmed = enteredCode.trim();
+      if (!codeTrimmed) {
+        return { success: false, message: 'Por favor introduza o código de 6 dígitos recebido.' };
+      }
+
+      let session = recoverySessions.find(s => s.id === sessionId);
+
+      if (!session) {
+        try {
+          const sDoc = await getDoc(doc(db, 'recovery_otps', sessionId));
+          if (sDoc.exists()) {
+            session = sDoc.data() as AccountRecoverySession;
+          }
+        } catch {}
+      }
+
+      if (!session) {
+        return { success: false, message: RECOVERY_MESSAGES.CODE_INVALID };
+      }
+
+      if (session.isUsed) {
+        return { success: false, message: RECOVERY_MESSAGES.CODE_INVALID };
+      }
+
+      if (Date.now() > session.expiresAt) {
+        return { success: false, message: RECOVERY_MESSAGES.CODE_INVALID };
+      }
+
+      if (session.attemptsLeft <= 0) {
+        return { success: false, message: RECOVERY_MESSAGES.MAX_ATTEMPTS };
+      }
+
+      if (session.otpCode !== codeTrimmed) {
+        const remaining = session.attemptsLeft - 1;
+        const updatedSession = { ...session, attemptsLeft: remaining };
+        setRecoverySessions(prev => prev.map(s => s.id === sessionId ? updatedSession : s));
+        try {
+          await updateDoc(doc(db, 'recovery_otps', sessionId), { attemptsLeft: remaining });
+        } catch {}
+
+        if (remaining <= 0) {
+          return { success: false, message: RECOVERY_MESSAGES.MAX_ATTEMPTS };
+        }
+        return { 
+          success: false, 
+          message: `${RECOVERY_MESSAGES.CODE_INVALID} (Restam ${remaining} tentativa${remaining > 1 ? 's' : ''})` 
+        };
+      }
+
+      // Successful OTP validation
+      const verifiedSession = { ...session, isVerified: true };
+      setRecoverySessions(prev => prev.map(s => s.id === sessionId ? verifiedSession : s));
+      try {
+        await updateDoc(doc(db, 'recovery_otps', sessionId), { isVerified: true });
+      } catch {}
+
+      return {
+        success: true,
+        message: 'Código validado com sucesso! Prossiga com a operação.',
+        isBlocked: session.isBlockedAccount
+      };
+    } catch (err: any) {
+      return { success: false, message: `Erro ao validar código: ${err.message || err}` };
+    }
+  };
+
+  const resetAccountPasswordAsync = async (
+    sessionId: string,
+    verifiedOtp: string,
+    newPassword: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    isBlocked?: boolean;
+  }> => {
+    try {
+      if (!newPassword || newPassword.trim().length < 4) {
+        return { success: false, message: 'A nova palavra-passe deve conter pelo menos 4 caracteres.' };
+      }
+
+      let session = recoverySessions.find(s => s.id === sessionId);
+      if (!session) {
+        try {
+          const sDoc = await getDoc(doc(db, 'recovery_otps', sessionId));
+          if (sDoc.exists()) session = sDoc.data() as AccountRecoverySession;
+        } catch {}
+      }
+
+      if (!session || !session.isVerified || session.isUsed || Date.now() > session.expiresAt || session.otpCode !== verifiedOtp.trim()) {
+        return { success: false, message: RECOVERY_MESSAGES.CODE_INVALID };
+      }
+
+      const targetId = session.targetUserId;
+      const cleanPass = newPassword.trim();
+      const updatedTime = new Date().toISOString();
+
+      // =========================================================================
+      // REGRA DE PRESERVAÇÃO TOTAL DOS DADOS
+      // Atualizar APENAS password e updatedAt.
+      // NUNCA apagar dados, avaliações, pedidos, histórico, documentos ou carteira.
+      // Manter estado de bloqueio e de subscrição inalterados.
+      // =========================================================================
+
+      // Update in allUsers state
+      setAllUsers(prev => prev.map(u => {
+        if (u.id === targetId || (session && session.targetEmail && u.email === session.targetEmail)) {
+          return { ...u, password: cleanPass, updatedAt: updatedTime };
+        }
+        return u;
+      }));
+
+      // Update in professionals state
+      setProfessionals(prev => prev.map(p => {
+        if (p.id === targetId || (session && session.targetEmail && p.email === session.targetEmail)) {
+          return { ...p, password: cleanPass, updatedAt: updatedTime };
+        }
+        return p;
+      }));
+
+      // Update in Firestore 'users' collection
+      try {
+        await setDoc(doc(db, 'users', targetId), { password: cleanPass, updatedAt: updatedTime }, { merge: true });
+      } catch (err) {
+        console.warn('Erro ao atualizar senha no Firestore (users):', err);
+      }
+
+      // Update in Firestore 'professionals' collection if professional
+      if (session.targetUserRole === 'profissional') {
+        try {
+          await setDoc(doc(db, 'professionals', targetId), { password: cleanPass, updatedAt: updatedTime }, { merge: true });
+        } catch (err) {
+          console.warn('Erro ao atualizar senha no Firestore (professionals):', err);
+        }
+      }
+
+      // Mark session as used
+      const usedSession = { ...session, isUsed: true };
+      setRecoverySessions(prev => prev.map(s => s.id === sessionId ? usedSession : s));
+      try {
+        await updateDoc(doc(db, 'recovery_otps', sessionId), { isUsed: true });
+      } catch {}
+
+      // Log action for audit
+      await logAdminAction(
+        'PASSWORD_RECOVERY_COMPLETED',
+        targetId,
+        `Palavra-passe redefinida com sucesso via código de recuperação. Conta Bloqueada: ${session.isBlockedAccount ? 'Sim' : 'Não'}`
+      );
+
+      return {
+        success: true,
+        isBlocked: session.isBlockedAccount,
+        message: session.isBlockedAccount ? RECOVERY_MESSAGES.ACCOUNT_BLOCKED : RECOVERY_MESSAGES.SUCCESS
+      };
+    } catch (err: any) {
+      return { success: false, message: `Erro ao redefinir palavra-passe: ${err.message || err}` };
+    }
+  };
+
+  const requestPhoneRecoveryVerificationAsync = async (
+    email: string,
+    documentNumber: string,
+    currentPassword?: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    sessionId?: string;
+    maskedCurrentPhone?: string;
+    maskedEmail?: string;
+    devCode?: string;
+    isBlocked?: boolean;
+  }> => {
+    try {
+      const emailTrimmed = email.trim().toLowerCase();
+      const docTrimmed = documentNumber.trim().toLowerCase();
+
+      if (!emailTrimmed || !docTrimmed) {
+        return {
+          success: false,
+          message: 'Por favor preencha o seu E-mail e o Número de Bilhete de Identidade (BI) associados à conta.'
+        };
+      }
+
+      if (!checkRecoveryRateLimit(emailTrimmed)) {
+        return { success: false, message: RECOVERY_MESSAGES.RATE_LIMIT };
+      }
+
+      // Locate user matching email AND docNumber
+      let targetUser: (User | ProfessionalProfile) | undefined = allUsers.find(u => {
+        const uEmail = (u.email || '').trim().toLowerCase();
+        const uDoc = (u.documentNumber || '').trim().toLowerCase();
+        return uEmail === emailTrimmed && uDoc === docTrimmed;
+      });
+
+      if (!targetUser) {
+        targetUser = professionals.find(p => {
+          const pEmail = (p.email || '').trim().toLowerCase();
+          const pDoc = (p.documentNumber || '').trim().toLowerCase();
+          return pEmail === emailTrimmed && pDoc === docTrimmed;
+        });
+      }
+
+      // Firestore fallback
+      if (!targetUser) {
+        try {
+          const usersSnap = await getDocs(collection(db, 'users'));
+          usersSnap.forEach(docSnap => {
+            const uData = { id: docSnap.id, ...docSnap.data() } as User;
+            const uEmail = (uData.email || '').trim().toLowerCase();
+            const uDoc = (uData.documentNumber || '').trim().toLowerCase();
+            if (uEmail === emailTrimmed && uDoc === docTrimmed) {
+              targetUser = uData;
+            }
+          });
+
+          if (!targetUser) {
+            const prosSnap = await getDocs(collection(db, 'professionals'));
+            prosSnap.forEach(docSnap => {
+              const pData = { id: docSnap.id, ...docSnap.data() } as ProfessionalProfile;
+              const pEmail = (pData.email || '').trim().toLowerCase();
+              const pDoc = (pData.documentNumber || '').trim().toLowerCase();
+              if (pEmail === emailTrimmed && pDoc === docTrimmed) {
+                targetUser = pData;
+              }
+            });
+          }
+        } catch (e) {}
+      }
+
+      if (!targetUser) {
+        return {
+          success: false,
+          message: 'Não foi encontrada nenhuma conta com a combinação de E-mail e BI informados.'
+        };
+      }
+
+      // Optional password check if provided
+      if (currentPassword && currentPassword.trim()) {
+        if (targetUser.password && targetUser.password.trim() !== currentPassword.trim()) {
+          return {
+            success: false,
+            message: 'A palavra-passe informada está incorreta para esta conta.'
+          };
+        }
+      }
+
+      if (targetUser.isDeleted === true || (targetUser as any).status === 'deleted') {
+        return { success: false, message: 'Esta conta foi desativada e não pode recuperar credenciais.' };
+      }
+
+      const isBlocked = targetUser.blocked === true || (targetUser as any).status === 'bloqueado' || (targetUser as any).accountStatus === 'BLOCKED';
+      const isExpiredSub = (targetUser as any).subscriptionStatus === 'EXPIRED';
+
+      const otp = generateSecureOTP();
+      const session: AccountRecoverySession = {
+        id: `rec-phn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        type: 'phone',
+        targetUserId: targetUser.id,
+        targetUserRole: (targetUser.role || 'cliente') as any,
+        targetEmail: targetUser.email || '',
+        targetPhone: targetUser.phone || '',
+        targetDocNumber: targetUser.documentNumber || '',
+        targetName: targetUser.name || 'Utilizador',
+        otpCode: otp,
+        expiresAt: Date.now() + OTP_EXPIRATION_MS,
+        attemptsLeft: MAX_OTP_ATTEMPTS,
+        isVerified: false,
+        isUsed: false,
+        isBlockedAccount: isBlocked,
+        isExpiredSubscription: isExpiredSub,
+        createdAt: Date.now(),
+        ipOrIdentifier: emailTrimmed
+      };
+
+      setRecoverySessions(prev => [session, ...prev.filter(s => s.targetUserId !== targetUser!.id)]);
+
+      try {
+        await setDoc(doc(db, 'recovery_otps', session.id), session);
+      } catch {}
+
+      return {
+        success: true,
+        message: RECOVERY_MESSAGES.CODE_SENT,
+        sessionId: session.id,
+        maskedCurrentPhone: maskPhoneNumber(targetUser.phone),
+        maskedEmail: maskEmailAddress(targetUser.email),
+        devCode: otp,
+        isBlocked
+      };
+    } catch (err: any) {
+      return { success: false, message: `Erro ao iniciar recuperação de telefone: ${err.message || err}` };
+    }
+  };
+
+  const updateRecoveredPhoneNumberAsync = async (
+    sessionId: string,
+    verifiedOtp: string,
+    newPhone: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    isBlocked?: boolean;
+  }> => {
+    try {
+      if (!newPhone || !isValidAngolanPhone(newPhone)) {
+        return { success: false, message: RECOVERY_MESSAGES.INVALID_PHONE_FORMAT };
+      }
+
+      const formattedPhone = normalizeAngolanPhone(newPhone);
+      const cleanPhoneDigits = formattedPhone.replace(/\D/g, '');
+
+      let session = recoverySessions.find(s => s.id === sessionId);
+      if (!session) {
+        try {
+          const sDoc = await getDoc(doc(db, 'recovery_otps', sessionId));
+          if (sDoc.exists()) session = sDoc.data() as AccountRecoverySession;
+        } catch {}
+      }
+
+      if (!session || !session.isVerified || session.isUsed || Date.now() > session.expiresAt || session.otpCode !== verifiedOtp.trim()) {
+        return { success: false, message: RECOVERY_MESSAGES.CODE_INVALID };
+      }
+
+      const targetId = session.targetUserId;
+
+      // 1. DUPLICATE CHECK: Verify that newPhone is NOT already in use by ANOTHER account
+      const duplicateUser = allUsers.find(u => {
+        if (u.id === targetId) return false;
+        if (u.phone) {
+          const uDigits = u.phone.replace(/\D/g, '');
+          if (uDigits.length >= 9 && cleanPhoneDigits.length >= 9) {
+            return uDigits.endsWith(cleanPhoneDigits) || cleanPhoneDigits.endsWith(uDigits);
+          }
+        }
+        return false;
+      });
+
+      const duplicatePro = professionals.find(p => {
+        if (p.id === targetId) return false;
+        if (p.phone) {
+          const pDigits = p.phone.replace(/\D/g, '');
+          if (pDigits.length >= 9 && cleanPhoneDigits.length >= 9) {
+            return pDigits.endsWith(cleanPhoneDigits) || cleanPhoneDigits.endsWith(pDigits);
+          }
+        }
+        return false;
+      });
+
+      if (duplicateUser || duplicatePro) {
+        return {
+          success: false,
+          message: RECOVERY_MESSAGES.PHONE_ALREADY_IN_USE
+        };
+      }
+
+      const updatedTime = new Date().toISOString();
+
+      // =========================================================================
+      // REGRA DE PRESERVAÇÃO TOTAL DOS DADOS
+      // Atualizar APENAS phone e updatedAt.
+      // =========================================================================
+      setAllUsers(prev => prev.map(u => {
+        if (u.id === targetId) {
+          return { ...u, phone: formattedPhone, updatedAt: updatedTime };
+        }
+        return u;
+      }));
+
+      setProfessionals(prev => prev.map(p => {
+        if (p.id === targetId) {
+          return { ...p, phone: formattedPhone, updatedAt: updatedTime };
+        }
+        return p;
+      }));
+
+      // Update in Firestore 'users'
+      try {
+        await setDoc(doc(db, 'users', targetId), { phone: formattedPhone, updatedAt: updatedTime }, { merge: true });
+      } catch (err) {
+        console.warn('Erro ao atualizar telefone no Firestore (users):', err);
+      }
+
+      // Update in Firestore 'professionals' if pro
+      if (session.targetUserRole === 'profissional') {
+        try {
+          await setDoc(doc(db, 'professionals', targetId), { phone: formattedPhone, updatedAt: updatedTime }, { merge: true });
+        } catch (err) {
+          console.warn('Erro ao atualizar telefone no Firestore (professionals):', err);
+        }
+      }
+
+      // Mark session as used
+      const usedSession = { ...session, isUsed: true };
+      setRecoverySessions(prev => prev.map(s => s.id === sessionId ? usedSession : s));
+      try {
+        await updateDoc(doc(db, 'recovery_otps', sessionId), { isUsed: true });
+      } catch {}
+
+      // Log action for audit
+      await logAdminAction(
+        'PHONE_RECOVERY_COMPLETED',
+        targetId,
+        `Número de telefone recuperado/atualizado para ${formattedPhone}. Conta Bloqueada: ${session.isBlockedAccount ? 'Sim' : 'Não'}`
+      );
+
+      return {
+        success: true,
+        isBlocked: session.isBlockedAccount,
+        message: session.isBlockedAccount ? RECOVERY_MESSAGES.ACCOUNT_BLOCKED : RECOVERY_MESSAGES.SUCCESS
+      };
+    } catch (err: any) {
+      return { success: false, message: `Erro ao atualizar número de telefone: ${err.message || err}` };
+    }
+  };
+
   const updateUserProfile = (updated: Partial<User & ProfessionalProfile>) => {
     const targetRole = updated.role || currentUser.role;
     let autoApproveObj = {};
@@ -2575,6 +3200,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateUserProfile,
       registerUserAsync,
       loginUserWithCredentialsAsync,
+      requestPasswordRecoveryOtpAsync,
+      verifyRecoveryOtpAsync,
+      resetAccountPasswordAsync,
+      requestPhoneRecoveryVerificationAsync,
+      updateRecoveredPhoneNumberAsync,
       changeProPlan,
       subscribeToPlan,
       adminUnlockProPlan,

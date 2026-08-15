@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { CategoryMultiSelect } from './CategoryMultiSelect';
 import { UserRole, AccountType, ANGOLA_PROVINCES, User, ProfessionalProfile } from '../types';
 import { compressImageFile } from '../utils/imageUtils';
+import { AccountRecoveryModal } from './AccountRecoveryModal';
 import { 
   X, 
   User as UserIcon, 
@@ -40,7 +41,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
     isLoggedIn 
   } = useApp();
 
-  const [mode, setMode] = useState<'login' | 'register' | 'forgot_password'>('login');
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [recoveryType, setRecoveryType] = useState<'password' | 'phone'>('password');
   const [accountType, setAccountType] = useState<AccountType>('cliente');
   const [role, setRole] = useState<UserRole>(initialRole);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -237,33 +240,46 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
-      <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2.5">
-            <div className="bg-emerald-600 text-white w-9 h-9 rounded-xl font-black text-base flex items-center justify-center shadow-sm">
-              J
-            </div>
-            <div>
-              <h2 className="font-extrabold text-slate-900 text-base leading-tight">J Smart Services</h2>
-              <p className="text-xs text-slate-500">Acesse a sua conta em Angola 🇦🇴</p>
-            </div>
-          </div>
-          {isLoggedIn ? (
-            <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-full transition-colors">
-              <X className="w-5 h-5" />
-            </button>
-          ) : (
-            <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-full transition-colors" title="Fechar">
-              <X className="w-5 h-5" />
-            </button>
-          )}
-        </div>
+    <>
+      {showRecoveryModal && (
+        <AccountRecoveryModal
+          initialType={recoveryType}
+          onClose={() => setShowRecoveryModal(false)}
+          onSuccessReturnToLogin={(recoveredId) => {
+            setShowRecoveryModal(false);
+            if (recoveredId) {
+              setPhone(recoveredId.replace('+244', '').trim());
+            }
+          }}
+        />
+      )}
 
-        {/* Mode Selector (Login vs Criar Conta) */}
-        {mode !== 'forgot_password' && (
+      <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+        <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
+          
+          {/* Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2.5">
+              <div className="bg-emerald-600 text-white w-9 h-9 rounded-xl font-black text-base flex items-center justify-center shadow-sm">
+                J
+              </div>
+              <div>
+                <h2 className="font-extrabold text-slate-900 text-base leading-tight">J Smart Services</h2>
+                <p className="text-xs text-slate-500">Acesse a sua conta em Angola 🇦🇴</p>
+              </div>
+            </div>
+            {isLoggedIn ? (
+              <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-full transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            ) : (
+              <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-full transition-colors" title="Fechar">
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+
+          {/* Mode Selector (Login vs Criar Conta) */}
           <div className="flex bg-slate-100 p-1 rounded-2xl my-4">
             <button
               onClick={() => { setMode('login'); setAuthError(''); setSuccessInfo(''); }}
@@ -282,97 +298,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
               Criar conta
             </button>
           </div>
-        )}
 
-        {/* Auth Error Banner */}
-        {authError && (
-          <div className="bg-rose-50 border border-rose-200 p-3 rounded-2xl mb-4 flex items-start gap-2 text-xs text-rose-800 font-medium">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-            <span>{authError}</span>
-          </div>
-        )}
-
-        {/* Success Banner */}
-        {successInfo && (
-          <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl mb-4 flex items-start gap-2 text-xs text-emerald-800 font-medium">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-            <span>{successInfo}</span>
-          </div>
-        )}
-
-        {/* ==================== FORGOT PASSWORD MODE ==================== */}
-        {mode === 'forgot_password' ? (
-          <div className="space-y-4 pt-2">
-            <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
-              <KeyRound className="w-4 h-4 text-emerald-600" />
-              <span>Recuperar Palavra-passe</span>
+          {/* Auth Error Banner */}
+          {authError && (
+            <div className="bg-rose-50 border border-rose-200 p-3 rounded-2xl mb-4 flex items-start gap-2 text-xs text-rose-800 font-medium">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <span>{authError}</span>
             </div>
-            
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Introduza o número de telefone ou e-mail associado à sua conta para redefinir a palavra-passe.
-            </p>
+          )}
 
-            {!forgotSent ? (
-              <form onSubmit={handleSubmit} className="space-y-3.5">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Número de Telefone ou E-mail *</span>
-                    </span>
-                    <span className="text-[10px] text-emerald-600 font-extrabold">🇦🇴 +244</span>
-                  </label>
-                  <input 
-                    type="text" 
-                    value={forgotIdentifier} 
-                    onChange={(e) => setForgotIdentifier(e.target.value)}
-                    placeholder="923 111 222 ou exemplo@gmail.com" 
-                    className="w-full text-xs p-3 rounded-xl border border-slate-200 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-slate-50/50"
-                    required
-                  />
-                </div>
+          {/* Success Banner */}
+          {successInfo && (
+            <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl mb-4 flex items-start gap-2 text-xs text-emerald-800 font-medium">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <span>{successInfo}</span>
+            </div>
+          )}
 
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl transition-all shadow-md text-xs flex items-center justify-center gap-2"
-                >
-                  {isSubmitting ? 'A verificar...' : 'Enviar Instruções de Recuperação'}
-                </button>
-              </form>
-            ) : (
-              <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl space-y-3 text-xs">
-                <p className="font-bold text-slate-800">Precisa de assistência imediata?</p>
-                <p className="text-slate-600 text-[11px]">
-                  Fale com a nossa equipa de apoio técnico para validação de identidade e reposição rápida de credenciais:
-                </p>
-                <a
-                  href="https://wa.me/244956011985?text=Ol%C3%A1%2C%20preciso%20de%20ajuda%20para%20recuperar%20a%20minha%20palavra-passe%20na%20J%20Smart%20Services"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-xs transition-all shadow-sm"
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  <span>Apoio via WhatsApp (+244 956 011 985)</span>
-                </a>
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => {
-                setMode('login');
-                setForgotSent(false);
-                setAuthError('');
-                setSuccessInfo('');
-              }}
-              className="w-full py-2.5 text-xs text-slate-600 hover:text-slate-900 font-bold transition-colors"
-            >
-              ← Voltar ao Ecrã de Login
-            </button>
-          </div>
-        ) : (
-          /* Form for Login and Register */
+          {/* Form for Login and Register */}
           <form onSubmit={handleSubmit} className="space-y-3.5">
             
             {/* ==================== LOGIN MODE ==================== */}
@@ -380,13 +323,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
               <>
                 {/* Telefone */}
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
                       <Phone className="w-3.5 h-3.5 text-emerald-600" />
                       <span>Número de telefone *</span>
-                    </span>
+                    </label>
                     <span className="text-[10px] text-emerald-600 font-extrabold">🇦🇴 +244</span>
-                  </label>
+                  </div>
                   <div className="relative">
                     <span className="absolute left-3.5 top-3 text-xs font-bold text-slate-400">+244</span>
                     <input 
@@ -397,6 +340,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                       className="w-full text-xs p-3 pl-14 rounded-xl border border-slate-200 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-slate-50/50"
                       required
                     />
+                  </div>
+                  <div className="flex justify-end mt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecoveryType('phone');
+                        setShowRecoveryModal(true);
+                        setAuthError('');
+                      }}
+                      className="text-[11px] text-slate-500 hover:text-emerald-700 font-bold transition-colors flex items-center gap-1"
+                    >
+                      <HelpCircle className="w-3 h-3 text-slate-400" />
+                      <span>Esqueci o número de telefone</span>
+                    </button>
                   </div>
                 </div>
 
@@ -410,13 +367,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                     <button
                       type="button"
                       onClick={() => {
-                        setMode('forgot_password');
+                        setRecoveryType('password');
+                        setShowRecoveryModal(true);
                         setAuthError('');
-                        setSuccessInfo('');
                       }}
-                      className="text-[11px] text-emerald-700 hover:text-emerald-800 font-bold transition-colors"
+                      className="text-[11px] text-emerald-700 hover:text-emerald-800 font-bold transition-colors flex items-center gap-1"
                     >
-                      Esqueci a palavra-passe
+                      <KeyRound className="w-3 h-3" />
+                      <span>Esqueci a palavra-passe</span>
                     </button>
                   </div>
                   <div className="relative">
@@ -831,9 +789,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
             </div>
 
           </form>
-        )}
 
+        </div>
       </div>
-    </div>
+    </>
   );
 };
