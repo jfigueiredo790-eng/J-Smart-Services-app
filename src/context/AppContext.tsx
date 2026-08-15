@@ -20,7 +20,7 @@ import {
   WorkFeedPost
 } from '../types';
 import { DEFAULT_CODE_OF_CONDUCT_RULES } from '../data/defaultCodeOfConduct';
-import { PLAN_PRICES, getProPlanStatus } from '../utils/planUtils';
+import { PLAN_PRICES, getProPlanStatus, validateProAction } from '../utils/planUtils';
 import { isNotificationForUser } from '../utils/notificationUtils';
 import { runFullSystemTestSuite } from '../utils/systemTestSuite';
 import { CATEGORIES, DEFAULT_ADMIN_USER, MOCK_USERS, MOCK_PROFESSIONALS, MOCK_REQUESTS, MOCK_MESSAGES, MOCK_REVIEWS, MOCK_WORK_FEED_POSTS } from '../mockData';
@@ -521,16 +521,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [subExpiredCustomMessage, setSubExpiredCustomMessage] = useState('');
 
   const triggerBlockedActionPrompt = (customMsg?: string) => {
-    if (customMsg) setSubExpiredCustomMessage(customMsg);
-    else setSubExpiredCustomMessage('');
+    setSubExpiredCustomMessage(customMsg || 'O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.');
     setIsSubExpiredModalOpen(true);
   };
 
   const addWorkFeedPost = (post: Omit<WorkFeedPost, 'id' | 'createdAt' | 'likesCount' | 'likedBy'>) => {
-    const proPlanStatus = getProPlanStatus(currentUser);
-    if (!proPlanStatus.isActive) {
-      triggerBlockedActionPrompt('⚠️ A sua subscrição terminou. Para publicar novos trabalhos no Feed da J Smart Services, escolha uma subscrição.');
-      return { success: false, error: '⚠️ A sua subscrição terminou. Para publicar novos trabalhos no Feed da J Smart Services, escolha uma subscrição.' };
+    const validation = validateProAction(currentUser);
+    if (!validation.allowed) {
+      if (validation.reason === 'blocked') {
+        alert('Conta bloqueada. O acesso à J Smart Services foi bloqueado pelo Administrador. Entre em contacto com o suporte para obter mais informações.');
+        return { success: false, error: 'Conta bloqueada.' };
+      }
+      triggerBlockedActionPrompt('O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.');
+      return { success: false, error: 'O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.' };
     }
 
     const newPost: WorkFeedPost = {
@@ -558,11 +561,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ? p.likedBy.filter(id => id !== currentUser.id)
           : [...p.likedBy, currentUser.id];
         
-        return {
+        const updatedPost = {
           ...p,
           likedBy: updatedLikedBy,
           likesCount: updatedLikedBy.length
         };
+
+        try {
+          setDoc(doc(db, 'work_feed_posts', postId), updatedPost, { merge: true }).catch(() => {});
+        } catch (e) {}
+
+        return updatedPost;
       }
       return p;
     }));
@@ -570,6 +579,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteWorkFeedPost = (postId: string) => {
     setWorkFeedPosts(prev => prev.filter(p => p.id !== postId));
+    try {
+      deleteDoc(doc(db, 'work_feed_posts', postId)).catch(() => {});
+    } catch (e) {}
   };
 
   const addNotification = (notifData: Omit<AppNotification, 'id' | 'createdAt' | 'read'>) => {
@@ -935,6 +947,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Firestore settings snapshot notice:', err.message);
       }));
 
+      // 8. Work Feed Posts (real publications by real registered professionals)
+      const feedRef = collection(db, 'work_feed_posts');
+      unsubscribes.push(onSnapshot(feedRef, (snapshot) => {
+        if (!snapshot.empty) {
+          const fsFeed: WorkFeedPost[] = [];
+          snapshot.forEach(docSnap => {
+            const pData = { id: docSnap.id, ...docSnap.data() } as WorkFeedPost;
+            if (!FICTITIOUS_MOCK_IDS.has(pData.id) && !FICTITIOUS_MOCK_IDS.has(pData.professionalId)) {
+              fsFeed.push(pData);
+            }
+          });
+          setWorkFeedPosts(prev => {
+            const fsIds = new Set(fsFeed.map(f => f.id));
+            const existingNonFs = prev.filter(f => !fsIds.has(f.id) && !FICTITIOUS_MOCK_IDS.has(f.id));
+            return [...fsFeed, ...existingNonFs];
+          });
+        }
+      }, (err) => {
+        console.warn('Firestore work feed snapshot notice:', err.message);
+      }));
+
     } catch (err) {
       console.warn('Firestore initialization notice:', err);
     }
@@ -1108,13 +1141,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { allowed: false, reason: 'Está a navegar no Modo Cliente. Mude para o Modo Profissional no seu perfil para responder a este cliente.' };
     }
 
-    // Check if professional's subscription plan is expired when activeRole is 'profissional'
+    // Check if account is blocked or pro subscription plan is expired when activeRole is 'profissional'
     if (activeRole === 'profissional') {
-      const proPlanStatus = getProPlanStatus(currentUser);
-      if (proPlanStatus.isExpired) {
+      const validation = validateProAction(currentUser);
+      if (!validation.allowed) {
         return { 
           allowed: false, 
-          reason: 'O seu plano profissional expirou. Por favor aceda ao seu Painel e selecione um novo plano (Semanal, Quinzenal ou Mensal) para continuar a responder a clientes.' 
+          reason: validation.message 
         };
       }
     }
@@ -1222,11 +1255,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetReq = requests.find(r => r.id === requestId);
     if (!targetReq) return;
 
-    // Block status update if current user is acting as professional and their subscription plan is expired
+    // Block status update if current user is acting as professional and their subscription plan is expired or account blocked
     if (currentUser.role === 'profissional' && (status === 'aceito' || status === 'em_progresso')) {
-      const proPlanStatus = getProPlanStatus(currentUser);
-      if (proPlanStatus.isExpired) {
-        alert('O seu plano profissional expirou. Escolha e ative um novo plano no seu Painel de Profissional (Semanal, Quinzenal ou Mensal) para aceitar e realizar trabalhos.');
+      const validation = validateProAction(currentUser);
+      if (!validation.allowed) {
+        if (validation.reason === 'blocked') {
+          alert('Conta bloqueada. O acesso à J Smart Services foi bloqueado pelo Administrador. Entre em contacto com o suporte para obter mais informações.');
+          return;
+        }
+        triggerBlockedActionPrompt('O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.');
         return;
       }
     }
@@ -1738,10 +1775,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
 
-      if (targetUser.blocked === true || (targetUser as any).status === 'bloqueado') {
+      if (targetUser.blocked === true || (targetUser as any).status === 'bloqueado' || (targetUser as any).accountStatus === 'BLOCKED') {
         return {
           success: false,
-          message: 'Esta conta encontra-se suspensa pela administração por violação dos termos de serviço.'
+          message: 'Conta bloqueada. O acesso à J Smart Services foi bloqueado pelo Administrador. Entre em contacto com o suporte para obter mais informações.'
         };
       }
 
@@ -2291,6 +2328,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const blockTimestamp = new Date().toISOString();
     const blockPayload = {
       blocked: true,
+      accountStatus: 'BLOCKED' as const,
       status: 'bloqueado' as const,
       blockedAt: blockTimestamp,
       blockedBy: currentUser.id
@@ -2304,9 +2342,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, ...blockPayload } : p));
       setReports(prev => prev.map(r => r.reportedUserId === userId ? { ...r, status: 'bloqueado' } : r));
 
-      await logAdminAction('Bloqueio de Utilizador', userId, `Conta de ${target?.name || userId} suspensa por violação de segurança/termos`);
+      await logAdminAction('Bloqueio de Utilizador', userId, `Conta de ${target?.name || userId} bloqueada pelo Administrador. Todos os dados foram integralmente preservados.`);
 
-      return { success: true, message: `Utilizador "${target?.name || userId}" bloqueado com sucesso na base de dados.` };
+      return { success: true, message: `Utilizador "${target?.name || userId}" bloqueado com sucesso na base de dados (dados 100% preservados).` };
     } catch (err: any) {
       console.error('Erro ao bloquear utilizador no Firestore:', err);
       return { success: false, message: `Falha ao persistir bloqueio no Firestore: ${err.message || err}` };
@@ -2322,6 +2360,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unblockTimestamp = new Date().toISOString();
     const unblockPayload = {
       blocked: false,
+      accountStatus: 'ACTIVE' as const,
       status: 'ativo' as const,
       unblockedAt: unblockTimestamp,
       unblockedBy: currentUser.id
@@ -2331,10 +2370,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await setDoc(doc(db, 'users', userId), unblockPayload, { merge: true });
       await setDoc(doc(db, 'professionals', userId), { ...unblockPayload, status: 'disponivel' as const }, { merge: true });
 
-      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, blocked: false, status: 'ativo' } : u));
-      setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, blocked: false, status: 'disponivel' } : p));
+      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, blocked: false, accountStatus: 'ACTIVE', status: 'ativo' } : u));
+      setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, blocked: false, accountStatus: 'ACTIVE', status: 'disponivel' } : p));
 
-      await logAdminAction('Desbloqueio de Utilizador', userId, `Conta de ${target?.name || userId} reativada após revisão administrativa`);
+      await logAdminAction('Desbloqueio de Utilizador', userId, `Conta de ${target?.name || userId} desbloqueada e acesso restaurado normalmente`);
 
       return { success: true, message: `Utilizador "${target?.name || userId}" desbloqueado com sucesso na base de dados.` };
     } catch (err: any) {

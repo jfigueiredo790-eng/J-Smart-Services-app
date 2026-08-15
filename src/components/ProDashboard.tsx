@@ -367,7 +367,7 @@ export const ProDashboard: React.FC = () => {
               <p className="text-xs text-slate-500 mt-1">Opção intermédia com melhor planeamento.</p>
 
               <div className="mt-4 pt-3 border-t border-blue-100">
-                <span className="text-2xl font-black text-slate-900">3.000 Kz</span>
+                <span className="text-2xl font-black text-slate-900">2.000 Kz</span>
                 <span className="text-xs text-slate-500 font-medium"> / 14 dias</span>
               </div>
 
@@ -391,7 +391,7 @@ export const ProDashboard: React.FC = () => {
               onClick={() => handleSubscribeClick('plan_14d')}
               className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-2xl transition-all shadow-md shadow-blue-600/20"
             >
-              Ativar Plano Quinzenal (3.000 Kz)
+              Ativar Plano Quinzenal (2.000 Kz)
             </button>
           </div>
 

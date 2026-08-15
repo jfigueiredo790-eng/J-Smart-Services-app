@@ -1,15 +1,16 @@
 import { ProfessionalProfile, User, ProSubscriptionPlan } from '../types';
 
 export const PLAN_PRICES = {
-  plan_7d: { days: 7, priceKz: 1500, label: 'Plano Semanal', badgeColor: 'emerald', description: 'Plano Semanal (7 Dias)' },
-  plan_14d: { days: 14, priceKz: 3000, label: 'Plano Quinzenal', badgeColor: 'blue', description: 'Plano Quinzenal (14 Dias)' },
-  plan_30d: { days: 30, priceKz: 5000, label: 'Plano Mensal', badgeColor: 'purple', description: 'Plano Mensal (30 Dias - Mais Vendido)' },
+  plan_7d: { days: 7, priceKz: 1500, label: 'Plano Semanal', badgeColor: 'emerald', description: 'Plano Semanal (7 Dias — 1.500 Kz)' },
+  plan_14d: { days: 14, priceKz: 2000, label: 'Plano Quinzenal', badgeColor: 'blue', description: 'Plano Quinzenal (14 Dias — 2.000 Kz)' },
+  plan_30d: { days: 30, priceKz: 5000, label: 'Plano Mensal', badgeColor: 'purple', description: 'Plano Mensal (30 Dias — 5.000 Kz)' },
 } as const;
 
 export interface PlanStatusResult {
   isTrial: boolean;
   isActive: boolean;
   isExpired: boolean;
+  isBlocked?: boolean;
   daysRemaining: number;
   hoursRemaining?: number;
   alertStage?: '7_days' | '3_days' | '24_hours' | 'expired' | 'normal';
@@ -27,7 +28,20 @@ export function getProPlanStatus(pro: Partial<ProfessionalProfile | User> | null
       daysRemaining: 0,
       alertStage: 'expired',
       planType: 'free_trial',
-      message: 'O seu período gratuito terminou. Escolha um plano para continuar a receber clientes.'
+      message: 'O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.'
+    };
+  }
+
+  // 0. Check if account is blocked by Admin
+  if (pro.blocked === true || pro.status === 'bloqueado' || (pro as any).accountStatus === 'BLOCKED') {
+    return {
+      isTrial: false,
+      isActive: false,
+      isExpired: false,
+      isBlocked: true,
+      daysRemaining: 0,
+      planType: pro.subscriptionPlan || 'free_trial',
+      message: 'Conta bloqueada. O acesso à J Smart Services foi bloqueado pelo Administrador. Entre em contacto com o suporte para obter mais informações.'
     };
   }
 
@@ -65,7 +79,7 @@ export function getProPlanStatus(pro: Partial<ProfessionalProfile | User> | null
         alertStage: 'expired',
         planType: pro.subscriptionPlan,
         expiresAtIso: pro.planExpiresAt,
-        message: 'O seu plano profissional expirou. Escolha um novo plano (Semanal, Quinzenal ou Mensal) para continuar a receber trabalhos.'
+        message: 'O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.'
       };
     }
   }
@@ -113,7 +127,64 @@ export function getProPlanStatus(pro: Partial<ProfessionalProfile | User> | null
       alertStage: 'expired',
       planType: 'free_trial',
       expiresAtIso: trialEnd.toISOString(),
-      message: 'O seu período gratuito terminou. Escolha um plano para continuar a receber clientes.'
+      message: 'O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.'
     };
   }
+}
+
+/**
+ * Validação de Segurança em 4 Etapas Obrigatórias para qualquer ação Profissional:
+ * 1. Conta bloqueada?
+ * 2. Conta ativa / não eliminada?
+ * 3. Subscrição válida?
+ * 4. Data de expiração não ultrapassada?
+ */
+export function validateProAction(pro: Partial<ProfessionalProfile | User> | null | undefined): {
+  allowed: boolean;
+  reason?: 'blocked' | 'deleted' | 'expired' | 'unauthorized';
+  message: string;
+  planStatus?: PlanStatusResult;
+} {
+  if (!pro) {
+    return {
+      allowed: false,
+      reason: 'unauthorized',
+      message: 'Inicie sessão com uma conta profissional para realizar esta ação.'
+    };
+  }
+
+  // 1. Verificar se a conta está bloqueada pelo Administrador
+  if (pro.blocked === true || pro.status === 'bloqueado' || (pro as any).accountStatus === 'BLOCKED') {
+    return {
+      allowed: false,
+      reason: 'blocked',
+      message: 'Conta bloqueada. O acesso à J Smart Services foi bloqueado pelo Administrador. Entre em contacto com o suporte para obter mais informações.'
+    };
+  }
+
+  // 2. Verificar se a conta está ativa / não eliminada
+  if (pro.isDeleted === true || pro.status === 'deleted') {
+    return {
+      allowed: false,
+      reason: 'deleted',
+      message: 'Esta conta foi desativada ou eliminada e não pode realizar ações na plataforma.'
+    };
+  }
+
+  // 3 & 4. Verificar se existe uma subscrição válida e se a data de expiração não foi ultrapassada
+  const planStatus = getProPlanStatus(pro);
+  if (!planStatus.isActive || planStatus.isExpired) {
+    return {
+      allowed: false,
+      reason: 'expired',
+      message: 'O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.',
+      planStatus
+    };
+  }
+
+  return {
+    allowed: true,
+    message: 'Ação profissional autorizada com sucesso.',
+    planStatus
+  };
 }

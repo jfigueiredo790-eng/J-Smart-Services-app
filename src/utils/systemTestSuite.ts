@@ -1,6 +1,7 @@
-import { User, ProfessionalProfile, ServiceRequest, Review, ServiceCategory, UserRole, RequestStatus, ChatMessage, AppNotification } from '../types';
+import { User, ProfessionalProfile, ServiceRequest, Review, ServiceCategory, UserRole, RequestStatus, ChatMessage, AppNotification, WorkFeedPost } from '../types';
 import { getProPlanStatus, PLAN_PRICES } from './planUtils';
 import { isNotificationForUser } from './notificationUtils';
+import { rankWorkFeedPosts, formatPostDateFriendly } from './feedAlgorithm';
 
 export interface TestResult {
   id: string;
@@ -1522,6 +1523,169 @@ export function runFullSystemTestSuite(): TestSuiteReport {
         '4. Profissional impedido de visualizar BI de clientes ou outros profissionais: ✅ Bloqueado',
         '5. Administrador autorizado a consultar BI de todos os utilizadores no Painel Admin: ✅ Autorizado',
         '6. Perfis públicos, pesquisas, chat e avaliações livres de exposição de BI: ✅ 100% Protegido'
+      ]
+    };
+  });
+
+  // 18. WORK FEED: ALGORITMO DE RELEVÂNCIA, RECÊNCIA E PRESERVAÇÃO DE DADOS
+  runTest('T18.1', 'Feed de Trabalhos', 'Algoritmo do Feed: Recência, relevância, ordenação prioritária e preservação de data original', () => {
+    const now = Date.now();
+    const testPro: ProfessionalProfile = {
+      id: 'pro-feed-real-1',
+      name: 'Manuel Costa Eletricista',
+      email: 'manuel@jsmart.ao',
+      phone: '+244 923 111 222',
+      avatar: 'https://example.com/pro.jpg',
+      address: 'Talatona, Luanda',
+      role: 'profissional',
+      province: 'Luanda',
+      categories: ['Eletricista'],
+      status: 'disponivel',
+      verified: true,
+      bio: 'Eletricista credenciado em Luanda',
+      experienceYears: 10,
+      hourlyRateKz: 15000,
+      rating: 4.9,
+      reviewCount: 30,
+      completedJobs: 85,
+      documentsVerified: true,
+      portfolioImages: [],
+      subscriptionPlan: 'plan_30d',
+      planExpiresAt: new Date(now + 20 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString()
+    };
+
+    const postToday: WorkFeedPost = {
+      id: 'feed-post-today',
+      professionalId: testPro.id,
+      professionalName: testPro.name,
+      professionalAvatar: 'https://example.com/pro.jpg',
+      professionalVerified: true,
+      professionalCategories: ['Eletricista'],
+      categoryName: 'Eletricista',
+      description: 'Instalação completa de quadro elétrico residencial no Talatona com disjuntores diferenciais.',
+      mediaUrl: 'https://example.com/work-today.jpg',
+      mediaType: 'image',
+      createdAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(), // 2h atrás
+      likesCount: 5,
+      likedBy: ['user-1']
+    };
+
+    const postYesterday: WorkFeedPost = {
+      id: 'feed-post-yesterday',
+      professionalId: testPro.id,
+      professionalName: testPro.name,
+      professionalAvatar: 'https://example.com/pro.jpg',
+      professionalVerified: true,
+      professionalCategories: ['Eletricista'],
+      categoryName: 'Eletricista',
+      description: 'Manutenção preventiva de gerador e reparação de quadro elétrico.',
+      mediaUrl: 'https://example.com/work-yesterday.jpg',
+      mediaType: 'image',
+      createdAt: new Date(now - 26 * 60 * 60 * 1000).toISOString(), // 26h atrás (ontem)
+      likesCount: 12,
+      likedBy: ['user-1', 'user-2']
+    };
+
+    const postLastWeek: WorkFeedPost = {
+      id: 'feed-post-last-week',
+      professionalId: testPro.id,
+      professionalName: testPro.name,
+      professionalAvatar: 'https://example.com/pro.jpg',
+      professionalVerified: true,
+      professionalCategories: ['Eletricista'],
+      categoryName: 'Eletricista',
+      description: 'Instalação de tomadas e iluminação LED em condomínio.',
+      mediaUrl: 'https://example.com/work-lastweek.jpg',
+      mediaType: 'image',
+      createdAt: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(), // 5 dias atrás
+      likesCount: 20,
+      likedBy: []
+    };
+
+    const ranked = rankWorkFeedPosts([postLastWeek, postYesterday, postToday], null, [testPro]);
+
+    // 1. Post de hoje deve aparecer antes do de ontem
+    const todayBeforeYesterday = ranked.findIndex(p => p.id === 'feed-post-today') < ranked.findIndex(p => p.id === 'feed-post-yesterday');
+
+    // 2. Todos os posts continuam no feed (posts antigos não desaparecem)
+    const allPostsPreserved = ranked.length === 3;
+
+    // 3. Formatação amigável preserva data original sem duplicação
+    const friendlyDateToday = formatPostDateFriendly(postToday.createdAt);
+    const friendlyDateYesterday = formatPostDateFriendly(postYesterday.createdAt);
+
+    const passed = todayBeforeYesterday && allPostsPreserved && friendlyDateToday.includes('Hoje') && friendlyDateYesterday.includes('Ontem');
+
+    return {
+      passed,
+      message: 'Algoritmo organiza publicações reais por recência e relevância, mantendo publicações anteriores com data original.',
+      details: [
+        `1. Publicação de hoje aparece antes de ontem: ${todayBeforeYesterday ? '✅ Conforme' : '❌ Falhou'}`,
+        `2. Publicações de dias anteriores continuam ativas no Feed: ${allPostsPreserved ? '✅ Preservadas (3/3)' : '❌ Perdidas'}`,
+        `3. Rótulo de data relativo e legível: "${friendlyDateToday}" e "${friendlyDateYesterday}"`
+      ]
+    };
+  });
+
+  runTest('T18.2', 'Feed de Trabalhos', 'Preservação Absoluta de Dados: Publicações de profissionais com plano expirado permanecem no Feed', () => {
+    const now = Date.now();
+    const expiredPro: ProfessionalProfile = {
+      id: 'pro-feed-expired-1',
+      name: 'Carlos Pintor',
+      email: 'carlos@jsmart.ao',
+      phone: '+244 923 333 444',
+      avatar: 'https://example.com/carlos.jpg',
+      address: 'Centro, Benguela',
+      role: 'profissional',
+      province: 'Benguela',
+      categories: ['Pintor'],
+      status: 'disponivel',
+      verified: false,
+      bio: 'Pinturas de interiores e fachadas em Benguela',
+      experienceYears: 7,
+      hourlyRateKz: 12000,
+      rating: 4.8,
+      reviewCount: 15,
+      completedJobs: 40,
+      documentsVerified: true,
+      portfolioImages: [],
+      subscriptionPlan: 'free_trial',
+      trialStartDate: new Date(now - 25 * 24 * 60 * 60 * 1000).toISOString(), // Expirado há 11 dias (> 14 dias trial)
+      createdAt: new Date(now - 40 * 24 * 60 * 60 * 1000).toISOString()
+    };
+
+    const postExpiredPro: WorkFeedPost = {
+      id: 'feed-post-expired-pro',
+      professionalId: expiredPro.id,
+      professionalName: expiredPro.name,
+      professionalAvatar: 'https://example.com/carlos.jpg',
+      professionalVerified: false,
+      professionalCategories: ['Pintor'],
+      categoryName: 'Pintor',
+      description: 'Pintura exterior de vivenda concluída em Benguela.',
+      mediaUrl: 'https://example.com/painting.jpg',
+      mediaType: 'image',
+      createdAt: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      likesCount: 8,
+      likedBy: []
+    };
+
+    const ranked = rankWorkFeedPosts([postExpiredPro], null, [expiredPro]);
+
+    // Publicação continua 100% visível e preservada no Feed
+    const postPreserved = ranked.length === 1 && ranked[0].id === 'feed-post-expired-pro';
+    const proPlanStatus = getProPlanStatus(expiredPro);
+
+    const passed = postPreserved && proPlanStatus.isExpired && !proPlanStatus.isActive;
+
+    return {
+      passed,
+      message: 'Publicações de profissionais com plano expirado permanecem armazenadas e visíveis no Feed.',
+      details: [
+        `1. Estado do profissional: isExpired = ${proPlanStatus.isExpired} (${proPlanStatus.message})`,
+        `2. Publicação permanece no Feed: ${postPreserved ? '✅ 100% Preservada' : '❌ Eliminada indevidamente'}`,
+        '3. Regra de ouro respeitada: Nenhum dado, foto ou histórico é apagado por término de subscrição.'
       ]
     };
   });

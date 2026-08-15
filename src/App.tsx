@@ -20,6 +20,7 @@ import { SubcategoryModal } from './components/SubcategoryModal';
 import { RulesAndCodeModal } from './components/RulesAndCodeModal';
 import { WorkFeedView } from './components/WorkFeedView';
 import { SubscriptionExpiredModal } from './components/SubscriptionExpiredModal';
+import { BlockedAccountModal } from './components/BlockedAccountModal';
 import { ANGOLA_PROVINCES, ProfessionalProfile, ServiceCategory } from './types';
 import { getProPlanStatus } from './utils/planUtils';
 import { 
@@ -765,6 +766,8 @@ function MainContent() {
           onClose={() => setIsSubExpiredModalOpen(false)}
           customMessage={subExpiredCustomMessage}
         />
+
+        <BlockedAccountModal />
 
         {subModalCategory && (
           <SubcategoryModal

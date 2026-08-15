@@ -29,6 +29,8 @@ export interface WorkFeedPost {
 }
 
 export type UserStatus = 'ativo' | 'disponivel' | 'ocupado' | 'bloqueado' | 'deleted';
+export type AccountStatus = 'ACTIVE' | 'BLOCKED';
+export type SubscriptionStatus = 'ACTIVE' | 'EXPIRED' | 'PAGAMENTO_PENDENTE';
 
 export interface User {
   id: string;
@@ -49,6 +51,8 @@ export interface User {
   categories?: string[];
   verified: boolean;
   blocked?: boolean;
+  accountStatus?: AccountStatus;
+  subscriptionStatus?: SubscriptionStatus;
   status?: UserStatus;
   isDeleted?: boolean;
   deletedAt?: string;
@@ -67,6 +71,7 @@ export interface User {
   updatedAt?: string;
   trialStartDate?: string;
   subscriptionPlan?: ProSubscriptionPlan;
+  planStartedAt?: string;
   planExpiresAt?: string;
   registrationSource?: string;
   referralCode?: string;
@@ -94,7 +99,10 @@ export interface ProfessionalProfile extends User {
   planActivatedAt?: string;
   trialStartDate?: string;
   subscriptionPlan?: ProSubscriptionPlan;
+  planStartedAt?: string;
   planExpiresAt?: string;
+  accountStatus?: AccountStatus;
+  subscriptionStatus?: SubscriptionStatus;
 }
 
 export interface ServiceCategory {
