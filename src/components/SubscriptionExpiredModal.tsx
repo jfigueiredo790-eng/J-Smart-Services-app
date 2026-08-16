@@ -88,7 +88,7 @@ export const SubscriptionExpiredModal: React.FC<SubscriptionExpiredModalProps> =
                   <p className="text-xs font-bold text-slate-900 mt-1">Quinzenal</p>
                 </div>
                 <div className="mt-2">
-                  <p className="text-sm font-black text-slate-900">2.000 Kz</p>
+                  <p className="text-sm font-black text-slate-900">3.000 Kz</p>
                 </div>
               </button>
 

@@ -2,7 +2,7 @@ import { ProfessionalProfile, User, ProSubscriptionPlan } from '../types';
 
 export const PLAN_PRICES = {
   plan_7d: { days: 7, priceKz: 1500, label: 'Plano Semanal', badgeColor: 'emerald', description: 'Plano Semanal (7 Dias — 1.500 Kz)' },
-  plan_14d: { days: 14, priceKz: 2000, label: 'Plano Quinzenal', badgeColor: 'blue', description: 'Plano Quinzenal (14 Dias — 2.000 Kz)' },
+  plan_14d: { days: 14, priceKz: 3000, label: 'Plano Quinzenal', badgeColor: 'blue', description: 'Plano Quinzenal (14 Dias — 3.000 Kz)' },
   plan_30d: { days: 30, priceKz: 5000, label: 'Plano Mensal', badgeColor: 'purple', description: 'Plano Mensal (30 Dias — 5.000 Kz)' },
 } as const;
 

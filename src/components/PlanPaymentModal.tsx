@@ -95,7 +95,7 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
 
   const planDetails = {
     plan_7d: { name: 'Plano Semanal (7 Dias)', priceKz: 1500, priceStr: '1.500 Kz', period: '7 Dias' },
-    plan_14d: { name: 'Plano Quinzenal (14 Dias)', priceKz: 2000, priceStr: '2.000 Kz', period: '14 Dias' },
+    plan_14d: { name: 'Plano Quinzenal (14 Dias)', priceKz: 3000, priceStr: '3.000 Kz', period: '14 Dias' },
     plan_30d: { name: 'Plano Mensal (30 Dias)', priceKz: 5000, priceStr: '5.000 Kz', period: '30 Dias' },
   }[planKey];
 

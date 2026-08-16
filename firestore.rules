@@ -99,6 +99,57 @@ service cloud.firestore {
       allow create, update, delete: if true;
     }
 
+    match /work_feed_posts/{postId} {
+      allow read: if true;
+      allow create, update, delete: if true;
+    }
+
+    // --- NOTIFICATIONS ---
+    match /app_notifications/{notifId} {
+      allow read, write: if true;
+    }
+
+    // --- CATEGORIES ---
+    match /categories/{catId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /servicos/{serviceId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // --- REPORTS & TICKETS ---
+    match /reports/{reportId} {
+      allow read, write: if true;
+    }
+
+    match /support_tickets/{ticketId} {
+      allow read, write: if true;
+    }
+
+    // --- BLUEPRINT MAPPINGS ---
+    match /clientes/{clientId} {
+      allow read, write: if true;
+    }
+
+    match /pedidos/{requestId} {
+      allow read, write: if true;
+    }
+
+    match /pagamentos/{paymentId} {
+      allow read, write: if true;
+    }
+
+    match /avaliacoes/{reviewId} {
+      allow read, write: if true;
+    }
+
+    match /mensagens/{messageId} {
+      allow read, write: if true;
+    }
+
     // --- PLATFORM SETTINGS ---
     match /platform_settings/{settingId} {
       allow read, write: if true;
