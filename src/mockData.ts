@@ -719,7 +719,7 @@ export const DEFAULT_ADMIN_USER: User = {
   city: 'Icolo e Bengo',
   documentType: 'Bilhete de Identidade',
   documentNumber: '003921845LA041',
-  avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
+  avatar: '',
   verified: true,
   ownerId: 'user-admin-1',
   createdAt: new Date().toISOString()

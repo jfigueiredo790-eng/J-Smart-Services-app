@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { BrandLogo } from './BrandLogo';
+import { UserAvatar } from './UserAvatar';
 import { 
   UserRole, 
   ANGOLA_PROVINCES 
@@ -176,10 +177,13 @@ export const Header: React.FC = () => {
             className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-white px-2.5 py-1.5 rounded-2xl transition-all text-xs font-semibold"
             title="Ver Perfil e Definições da Conta"
           >
-            <img 
-              src={currentUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80'} 
-              alt={currentUser.name} 
-              className="w-6 h-6 rounded-full object-cover border border-emerald-500/50"
+            <UserAvatar 
+              src={currentUser.avatar} 
+              name={currentUser.name} 
+              sizeClassName="w-6 h-6"
+              roundedClassName="rounded-full"
+              role={currentUser.role}
+              className="border border-emerald-500/50"
             />
             <span className="font-bold text-xs max-w-[100px] truncate">{currentUser.name}</span>
             <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>

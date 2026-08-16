@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ANGOLA_PROVINCES, UrgencyLevel, ProfessionalProfile } from '../types';
 import { CategoryIcon } from './CategoryIcon';
+import { UserAvatar } from './UserAvatar';
 import { 
   X, 
   MapPin, 
@@ -70,7 +71,7 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({ onClose, preSe
       budgetKz: Number(budgetKz),
       professionalId: preSelectedPro?.id,
       professionalName: preSelectedPro?.name,
-      professionalAvatar: preSelectedPro?.avatar
+      professionalAvatar: preSelectedPro?.avatar || (preSelectedPro as any)?.photoURL || ''
     });
 
     onClose();
@@ -113,7 +114,13 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({ onClose, preSe
           {/* Preselected Pro banner if applicable */}
           {preSelectedPro && (
             <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl flex items-center gap-3">
-              <img src={preSelectedPro.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80'} alt={preSelectedPro.name} className="w-10 h-10 rounded-xl object-cover" />
+              <UserAvatar 
+                src={preSelectedPro.avatar || (preSelectedPro as any)?.photoURL} 
+                name={preSelectedPro.name} 
+                sizeClassName="w-10 h-10" 
+                roundedClassName="rounded-xl" 
+                role="profissional" 
+              />
               <div>
                 <p className="text-xs text-slate-500 font-medium">Profissional Seleccionado:</p>
                 <p className="font-bold text-slate-900 text-sm">{preSelectedPro.name}</p>

@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { CategoryMultiSelect } from './CategoryMultiSelect';
 import { UserRole, AccountType, ANGOLA_PROVINCES, User, ProfessionalProfile } from '../types';
 import { compressImageFile } from '../utils/imageUtils';
+import { UserAvatar } from './UserAvatar';
 import { AccountRecoveryModal } from './AccountRecoveryModal';
 import { 
   X, 
@@ -210,7 +211,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         address: address.trim(),
         documentNumber: documentNumber.trim(),
         categories: selectedCategories,
-        avatar: avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        avatar: avatarUrl || '',
         verified: true,
         createdAt: new Date().toISOString(),
         ...proData
@@ -507,10 +508,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                   </label>
 
                   <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl border border-slate-200">
-                    <img 
-                      src={avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'} 
-                      alt="Preview de Perfil" 
-                      className="w-12 h-12 rounded-xl object-cover border border-slate-300 shadow-sm shrink-0"
+                    <UserAvatar 
+                      src={avatarUrl} 
+                      name={name || 'Novo Utilizador'} 
+                      sizeClassName="w-12 h-12"
+                      roundedClassName="rounded-xl"
+                      role={role}
+                      className="shrink-0"
                     />
                     <div className="min-w-0 flex-1">
                       <button

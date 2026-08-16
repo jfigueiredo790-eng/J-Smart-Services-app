@@ -1,8 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { WorkFeedPost, ProfessionalProfile } from '../types';
 import { getProPlanStatus, validateProAction } from '../utils/planUtils';
 import { rankWorkFeedPosts, formatPostDateFriendly } from '../utils/feedAlgorithm';
+import { compressImageFile, uploadWorkPostImageToStorage } from '../utils/imageUtils';
+import { UserAvatar } from './UserAvatar';
 import { 
   Heart, 
   MessageSquare, 
@@ -20,7 +22,14 @@ import {
   Search,
   Upload,
   Calendar,
-  Layers
+  Layers,
+  MoreVertical,
+  Edit3,
+  MapPin,
+  Banknote,
+  Check,
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 
 export const WorkFeedView: React.FC = () => {
@@ -29,6 +38,7 @@ export const WorkFeedView: React.FC = () => {
     userRole, 
     workFeedPosts, 
     addWorkFeedPost, 
+    updateWorkFeedPost,
     likeWorkFeedPost, 
     deleteWorkFeedPost,
     categories, 
@@ -41,21 +51,51 @@ export const WorkFeedView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   
+  // Menu de opções (⋮) por publicação
+  const [activeMenuPostId, setActiveMenuPostId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
   // New Post Form State
+  const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newCategoryName, setNewCategoryName] = useState(categories[0]?.name || 'Geral');
+  const [newLocation, setNewLocation] = useState('');
+  const [newPriceKz, setNewPriceKz] = useState('');
   const [newMediaType, setNewMediaType] = useState<'image' | 'video'>('image');
   const [newMediaUrl, setNewMediaUrl] = useState('');
   const [customFilePreview, setCustomFilePreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Edit Post Form State
+  const [editingPost, setEditingPost] = useState<WorkFeedPost | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editCategoryName, setEditCategoryName] = useState('');
+  const [editLocation, setEditLocation] = useState('');
+  const [editPriceKz, setEditPriceKz] = useState('');
+  const [editMediaType, setEditMediaType] = useState<'image' | 'video'>('image');
+  const [editMediaUrl, setEditMediaUrl] = useState('');
+  const [editCustomPreview, setEditCustomPreview] = useState<string | null>(null);
+  const [isEditUploading, setIsEditUploading] = useState(false);
+  const [editFeedback, setEditFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   const currentUserPlan = getProPlanStatus(currentUser);
   const isPro = userRole === 'profissional' || currentUser.role === 'profissional';
+
+  // Fechar menu de 3 pontos ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setActiveMenuPostId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Algoritmo de Organização do Feed: Recência + Relevância + Interações + Qualidade
   // Preserva integralmente as publicações reais anteriores com a sua data original.
   const rankedPosts = useMemo(() => {
-    // 1. Aplicar algoritmo de pontuação de 7 critérios
     const ranked = rankWorkFeedPosts(
       workFeedPosts,
       currentUser,
@@ -63,11 +103,12 @@ export const WorkFeedView: React.FC = () => {
       selectedCatFilter
     );
 
-    // 2. Filtro de pesquisa opcional por texto
     if (!searchTerm.trim()) return ranked;
     const q = searchTerm.toLowerCase();
     return ranked.filter(post => 
       post.description.toLowerCase().includes(q) ||
+      (post.title && post.title.toLowerCase().includes(q)) ||
+      (post.location && post.location.toLowerCase().includes(q)) ||
       post.professionalName.toLowerCase().includes(q) ||
       post.categoryName.toLowerCase().includes(q)
     );
@@ -75,7 +116,7 @@ export const WorkFeedView: React.FC = () => {
 
   const handleOpenPublishModal = () => {
     if (!isPro) {
-      alert('Apenas profissionais reais registados na J Smart Services podem publicar trabalhos no Feed.');
+      alert('Apenas profissionais registados na J Smart Services podem publicar trabalhos no Feed.');
       return;
     }
 
@@ -92,22 +133,33 @@ export const WorkFeedView: React.FC = () => {
     setIsPublishModalOpen(true);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setIsUploading(true);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        setCustomFilePreview(result);
-        setNewMediaUrl(result);
+      try {
+        if (file.type.startsWith('image/')) {
+          const compressed = await compressImageFile(file, 1200, 0.85);
+          setCustomFilePreview(compressed);
+          setNewMediaUrl(compressed);
+        } else {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const result = reader.result as string;
+            setCustomFilePreview(result);
+            setNewMediaUrl(result);
+          };
+          reader.readAsDataURL(file);
+        }
+      } catch (err) {
+        console.error('Erro ao processar ficheiro de trabalho:', err);
+      } finally {
         setIsUploading(false);
-      };
-      reader.readAsDataURL(file);
+      }
     }
   };
 
-  const handleSubmitNewPost = (e: React.FormEvent) => {
+  const handleSubmitNewPost = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!newDesc.trim()) {
@@ -115,33 +167,166 @@ export const WorkFeedView: React.FC = () => {
       return;
     }
 
-    const finalMedia = newMediaUrl.trim() || customFilePreview;
+    let finalMedia = newMediaUrl.trim() || customFilePreview;
     if (!finalMedia) {
       alert('Por favor carregue uma fotografia ou vídeo real do serviço concluído.');
       return;
     }
 
-    const matchedPro = professionals.find(p => p.id === currentUser.id) || (currentUser as ProfessionalProfile);
+    setIsUploading(true);
 
-    const res = addWorkFeedPost({
-      professionalId: currentUser.id,
-      professionalName: currentUser.name,
-      professionalAvatar: currentUser.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-      professionalVerified: currentUser.verified || false,
-      professionalCategories: matchedPro.categories || [],
-      mediaUrl: finalMedia,
-      mediaType: newMediaType,
-      description: newDesc.trim(),
-      categoryName: newCategoryName
-    });
+    try {
+      // Se for um Data URL de imagem, fazer upload seguro no Firebase Storage
+      if (finalMedia.startsWith('data:image/')) {
+        const uploadRes = await uploadWorkPostImageToStorage(finalMedia, currentUser.id);
+        if (uploadRes.success && uploadRes.url) {
+          finalMedia = uploadRes.url;
+        }
+      }
 
-    if (res.success) {
-      setIsPublishModalOpen(false);
-      setNewDesc('');
-      setNewMediaUrl('');
-      setCustomFilePreview(null);
-    } else if (res.error) {
-      triggerBlockedActionPrompt(res.error);
+      const matchedPro = professionals.find(p => p.id === currentUser.id) || (currentUser as ProfessionalProfile);
+
+      const res = addWorkFeedPost({
+        professionalId: currentUser.id,
+        professionalName: currentUser.name,
+        professionalAvatar: currentUser.avatar || '',
+        professionalVerified: currentUser.verified || false,
+        professionalCategories: matchedPro.categories || [],
+        mediaUrl: finalMedia,
+        mediaType: newMediaType,
+        title: newTitle.trim() || undefined,
+        description: newDesc.trim(),
+        categoryName: newCategoryName,
+        location: newLocation.trim() || currentUser.province || undefined,
+        priceKz: newPriceKz ? Number(newPriceKz) : undefined,
+        ownerId: currentUser.id
+      });
+
+      if (res.success) {
+        setIsPublishModalOpen(false);
+        setNewTitle('');
+        setNewDesc('');
+        setNewLocation('');
+        setNewPriceKz('');
+        setNewMediaUrl('');
+        setCustomFilePreview(null);
+      } else if (res.error) {
+        triggerBlockedActionPrompt(res.error);
+      }
+    } catch (err) {
+      console.error('Erro ao submeter publicação:', err);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // ==========================================
+  // FLUXO DE EDIÇÃO DE PUBLICAÇÃO PRÓPRIA
+  // ==========================================
+  const handleOpenEditModal = (post: WorkFeedPost) => {
+    // Validação de Segurança: Utilizador autenticado deve ser o autor ou administrador
+    const isAuthor = currentUser.id === post.professionalId || (post.ownerId && currentUser.id === post.ownerId);
+    const isAdmin = currentUser.role === 'admin';
+
+    if (!isAuthor && !isAdmin) {
+      alert('Acesso negado: Só tem permissão para editar as publicações criadas pela sua própria conta.');
+      return;
+    }
+
+    setEditingPost(post);
+    setEditTitle(post.title || '');
+    setEditDesc(post.description || '');
+    setEditCategoryName(post.categoryName || categories[0]?.name || 'Geral');
+    setEditLocation(post.location || '');
+    setEditPriceKz(post.priceKz ? post.priceKz.toString() : '');
+    setEditMediaType(post.mediaType || 'image');
+    setEditMediaUrl(post.mediaUrl || '');
+    setEditCustomPreview(null);
+    setEditFeedback(null);
+    setActiveMenuPostId(null);
+  };
+
+  const handleEditFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setIsEditUploading(true);
+      try {
+        if (file.type.startsWith('image/')) {
+          const compressed = await compressImageFile(file, 1200, 0.85);
+          setEditCustomPreview(compressed);
+          setEditMediaUrl(compressed);
+        } else {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const result = reader.result as string;
+            setEditCustomPreview(result);
+            setEditMediaUrl(result);
+          };
+          reader.readAsDataURL(file);
+        }
+      } catch (err) {
+        console.error('Erro ao processar nova imagem/vídeo para edição:', err);
+      } finally {
+        setIsEditUploading(false);
+      }
+    }
+  };
+
+  const handleSaveEditPost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPost) return;
+
+    if (!editDesc.trim()) {
+      setEditFeedback({ type: 'error', message: 'A descrição da publicação é obrigatória.' });
+      return;
+    }
+
+    let finalMedia = editMediaUrl.trim() || editCustomPreview || editingPost.mediaUrl;
+    if (!finalMedia) {
+      setEditFeedback({ type: 'error', message: 'A publicação deve conter uma fotografia ou vídeo.' });
+      return;
+    }
+
+    setIsEditUploading(true);
+    setEditFeedback(null);
+
+    try {
+      // Se o utilizador substituiu ou adicionou nova imagem via Data URL, faz upload para o Storage
+      if (finalMedia.startsWith('data:image/')) {
+        const uploadRes = await uploadWorkPostImageToStorage(finalMedia, currentUser.id);
+        if (uploadRes.success && uploadRes.url) {
+          finalMedia = uploadRes.url;
+        }
+      }
+
+      // Encontrar ID da categoria se aplicável
+      const matchedCat = categories.find(c => c.name === editCategoryName);
+
+      const result = await updateWorkFeedPost(editingPost.id, {
+        title: editTitle.trim() || undefined,
+        description: editDesc.trim(),
+        categoryName: editCategoryName,
+        categoryId: matchedCat ? matchedCat.id : editingPost.categoryId,
+        location: editLocation.trim() || undefined,
+        priceKz: editPriceKz ? Number(editPriceKz) : undefined,
+        mediaUrl: finalMedia,
+        mediaType: editMediaType
+      });
+
+      if (result.success) {
+        setEditFeedback({ type: 'success', message: 'Publicação atualizada com sucesso!' });
+        setTimeout(() => {
+          setEditingPost(null);
+          setEditFeedback(null);
+        }, 1200);
+      } else {
+        setEditFeedback({ type: 'error', message: result.message || 'Erro ao atualizar publicação.' });
+      }
+    } catch (err: any) {
+      console.error('Erro ao salvar alterações da publicação:', err);
+      setEditFeedback({ type: 'error', message: `Erro ao salvar alterações: ${err.message || err}` });
+    } finally {
+      setIsEditUploading(false);
     }
   };
 
@@ -151,7 +336,6 @@ export const WorkFeedView: React.FC = () => {
       return;
     }
 
-    // Encontrar os dados do profissional
     const pro = professionals.find(p => p.id === post.professionalId);
     if (!pro) {
       alert('Perfil do profissional não encontrado.');
@@ -166,13 +350,12 @@ export const WorkFeedView: React.FC = () => {
       return;
     }
 
-    // Abrir modal de detalhes do profissional para solicitar serviço ou orçamento
     setSelectedPro(pro);
   };
 
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-4 py-6 space-y-6 pb-24" id="work-feed-container">
-      {/* Banner Principal do Feed Existente */}
+      {/* Banner Principal do Feed */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 text-white rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden border border-emerald-900/50">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -188,7 +371,7 @@ export const WorkFeedView: React.FC = () => {
             </p>
           </div>
 
-          {/* Botão de Ação: Publicar Trabalho (Restrito a Profissionais Reais com Plano Ativo) */}
+          {/* Botão de Ação: Publicar Trabalho */}
           {isPro ? (
             <button
               id="btn-publish-work-post"
@@ -230,7 +413,7 @@ export const WorkFeedView: React.FC = () => {
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Pesquisar trabalhos por descrição, profissional ou serviço..."
+            placeholder="Pesquisar trabalhos por título, descrição, profissional, categoria ou localização..."
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-xs text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm"
           />
           {searchTerm && (
@@ -274,7 +457,7 @@ export const WorkFeedView: React.FC = () => {
         </div>
       </div>
 
-      {/* Lista de Publicações Reais Ordenadas pelo Algoritmo */}
+      {/* Lista de Publicações Reais */}
       <div className="space-y-6">
         {rankedPosts.length === 0 ? (
           <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 text-center space-y-4 shadow-sm" id="empty-feed-card">
@@ -309,26 +492,34 @@ export const WorkFeedView: React.FC = () => {
             const pro = professionals.find(p => p.id === post.professionalId);
             const proPlan = pro ? getProPlanStatus(pro) : null;
             const isInactivePro = proPlan && !proPlan.isActive;
+            // Segurança: Verificar se o utilizador logado é o autor ou admin
+            const isOwner = currentUser.id === post.professionalId || (post.ownerId && currentUser.id === post.ownerId);
+            const isAdmin = currentUser.role === 'admin';
+            const canManagePost = isOwner || isAdmin;
+            const isMenuOpen = activeMenuPostId === post.id;
+            const authorAvatar = pro?.avatar || (pro as any)?.photoURL || (isOwner ? (currentUser.avatar || (currentUser as any)?.photoURL) : post.professionalAvatar);
 
             return (
               <article 
                 key={post.id}
                 id={`work-feed-post-${post.id}`}
-                className="bg-white rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-all overflow-hidden"
+                className="bg-white rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-all overflow-hidden relative"
               >
                 {/* Cabeçalho do Autor Real */}
-                <div className="p-4 flex items-center justify-between border-b border-slate-100">
+                <div className="p-4 flex items-center justify-between border-b border-slate-100 relative">
                   <div 
                     onClick={() => {
                       if (pro) setSelectedPro(pro);
                     }}
                     className="flex items-center gap-3 cursor-pointer group"
                   >
-                    <img
-                      src={post.professionalAvatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80'}
-                      alt={post.professionalName}
-                      className="w-11 h-11 rounded-full object-cover border-2 border-slate-100 group-hover:border-emerald-500 transition-colors"
-                      referrerPolicy="no-referrer"
+                    <UserAvatar
+                      src={authorAvatar}
+                      name={post.professionalName}
+                      sizeClassName="w-11 h-11"
+                      roundedClassName="rounded-full"
+                      role="profissional"
+                      className="border-2 border-slate-100 group-hover:border-emerald-500 transition-colors"
                     />
                     <div>
                       <div className="flex items-center gap-1.5">
@@ -356,28 +547,67 @@ export const WorkFeedView: React.FC = () => {
                           </span>
                         )}
 
-                        {pro?.province && (
-                          <span className="text-[10px] text-slate-400 font-medium">
-                            • {pro.province}
+                        {(post.location || pro?.province) && (
+                          <span className="text-[10px] text-slate-400 font-medium flex items-center gap-0.5">
+                            <MapPin className="w-2.5 h-2.5 text-slate-400" />
+                            {post.location || pro?.province}
+                          </span>
+                        )}
+
+                        {post.updatedAt && post.updatedAt !== post.createdAt && (
+                          <span className="text-[9px] font-medium text-slate-400 italic">
+                            (editado)
                           </span>
                         )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Botão de Excluir (Autor ou Administrador) */}
-                  {(currentUser.id === post.professionalId || currentUser.role === 'admin') && (
-                    <button
-                      onClick={() => {
-                        if (window.confirm('Tem a certeza de que pretende eliminar esta publicação do Feed?')) {
-                          deleteWorkFeedPost(post.id);
-                        }
-                      }}
-                      className="p-2 text-slate-300 hover:text-rose-600 rounded-full hover:bg-rose-50 transition-colors"
-                      title="Eliminar Publicação"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  {/* Menu de Ações (⋮) para o Autor da Publicação ou Administrador */}
+                  {canManagePost && (
+                    <div className="relative">
+                      <button
+                        id={`btn-post-menu-${post.id}`}
+                        onClick={() => setActiveMenuPostId(isMenuOpen ? null : post.id)}
+                        className="p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition-colors"
+                        title="Opções da Publicação"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+
+                      {/* Dropdown Menu */}
+                      {isMenuOpen && (
+                        <div 
+                          ref={menuRef}
+                          className="absolute right-0 top-10 w-48 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-20 animate-fade-in"
+                        >
+                          {/* Opção Editar Publicação */}
+                          <button
+                            id={`btn-edit-post-${post.id}`}
+                            onClick={() => handleOpenEditModal(post)}
+                            className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-2.5 transition-colors"
+                          >
+                            <Edit3 className="w-4 h-4 text-emerald-600" />
+                            <span>Editar publicação</span>
+                          </button>
+
+                          {/* Opção Eliminar Publicação */}
+                          <button
+                            id={`btn-delete-post-${post.id}`}
+                            onClick={() => {
+                              setActiveMenuPostId(null);
+                              if (window.confirm('Tem a certeza de que pretende eliminar esta publicação do Feed?')) {
+                                deleteWorkFeedPost(post.id);
+                              }
+                            }}
+                            className="w-full px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4 text-rose-600" />
+                            <span>Eliminar publicação</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -392,18 +622,32 @@ export const WorkFeedView: React.FC = () => {
                   ) : (
                     <img
                       src={post.mediaUrl}
-                      alt={post.description}
+                      alt={post.title || post.description}
                       className="w-full max-h-[500px] object-cover"
                       referrerPolicy="no-referrer"
                     />
                   )}
                 </div>
 
-                {/* Descrição e Barra de Ações */}
+                {/* Descrição, Título, Preço e Barra de Ações */}
                 <div className="p-4 space-y-3">
-                  <p className="text-xs sm:text-sm text-slate-800 leading-relaxed font-medium">
+                  {post.title && (
+                    <h4 className="text-sm sm:text-base font-black text-slate-900 leading-snug">
+                      {post.title}
+                    </h4>
+                  )}
+
+                  <p className="text-xs sm:text-sm text-slate-800 leading-relaxed font-medium whitespace-pre-line">
                     {post.description}
                   </p>
+
+                  {/* Informações Extras (Preço ou Orçamento se houver) */}
+                  {post.priceKz !== undefined && post.priceKz > 0 && (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-black">
+                      <Banknote className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Orçamento: {post.priceKz.toLocaleString('pt-AO')} Kz</span>
+                    </div>
+                  )}
 
                   {/* Barra de Rodapé: Gostos + Perfil + Contacto */}
                   <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
@@ -455,6 +699,268 @@ export const WorkFeedView: React.FC = () => {
         )}
       </div>
 
+      {/* ==========================================
+          MODAL: EDITAR PUBLICAÇÃO PRÓPRIA (17-23)
+          ========================================== */}
+      {editingPost && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-fade-in" id="modal-edit-work-post">
+          <div className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-slate-200 relative space-y-4 max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => {
+                setEditingPost(null);
+                setEditFeedback(null);
+              }}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2 text-emerald-700">
+              <Edit3 className="w-5 h-5 text-emerald-600" />
+              <h3 className="text-lg font-black text-slate-900">Editar Publicação</h3>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Atualize as informações do seu trabalho. O autor original, data de criação e histórico de gostos são estritamente preservados.
+            </p>
+
+            {editFeedback && (
+              <div className={`p-3 rounded-2xl text-xs font-bold flex items-center gap-2 ${
+                editFeedback.type === 'success' 
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  : 'bg-rose-50 text-rose-800 border border-rose-200'
+              }`}>
+                {editFeedback.type === 'success' ? (
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <X className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span>{editFeedback.message}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditPost} className="space-y-4">
+              {/* Título Opcional */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Título do Trabalho (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="Ex: Instalação de Ar Condicionado Inverter"
+                  className="w-full text-xs font-medium p-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Seleção de Categoria */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Categoria do Serviço
+                </label>
+                <select
+                  value={editCategoryName}
+                  onChange={(e) => setEditCategoryName(e.target.value)}
+                  className="w-full text-xs font-bold p-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                >
+                  {categories.map(cat => (
+                    <option key={cat.id} value={cat.name}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Localização e Preço */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Localização (Província / Bairro)
+                  </label>
+                  <input
+                    type="text"
+                    value={editLocation}
+                    onChange={(e) => setEditLocation(e.target.value)}
+                    placeholder="Ex: Luanda, Talatona"
+                    className="w-full text-xs font-medium p-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Preço / Orçamento Estimado (Kz)
+                  </label>
+                  <input
+                    type="number"
+                    value={editPriceKz}
+                    onChange={(e) => setEditPriceKz(e.target.value)}
+                    placeholder="Ex: 25000"
+                    className="w-full text-xs font-medium p-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Tipo de Mídia */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Tipo de Ficheiro</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditMediaType('image');
+                    }}
+                    className={`py-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                      editMediaType === 'image'
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-800 font-black'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <ImageIcon className="w-4 h-4" /> Fotografia
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditMediaType('video');
+                    }}
+                    className={`py-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                      editMediaType === 'video'
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-800 font-black'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <VideoIcon className="w-4 h-4" /> Vídeo
+                  </button>
+                </div>
+              </div>
+
+              {/* Mídia Atual e Substituição */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-700">
+                  Fotografia ou Vídeo da Publicação
+                </label>
+
+                {/* Pré-visualização da Mídia Atual ou Nova */}
+                {(editCustomPreview || editMediaUrl) && (
+                  <div className="relative rounded-2xl overflow-hidden border border-slate-200 max-h-48 bg-slate-950 flex items-center justify-center">
+                    {editMediaType === 'video' ? (
+                      <video src={editCustomPreview || editMediaUrl} controls className="max-h-48 w-full object-contain" />
+                    ) : (
+                      <img 
+                        src={editCustomPreview || editMediaUrl} 
+                        alt="Pré-visualização da Mídia" 
+                        className="max-h-48 w-full object-contain" 
+                        referrerPolicy="no-referrer"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditCustomPreview(null);
+                        setEditMediaUrl('');
+                      }}
+                      className="absolute top-2 right-2 bg-slate-900/80 text-white p-1 rounded-full hover:bg-rose-600 transition-colors"
+                      title="Remover imagem"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Botão de Upload para Substituir Imagem */}
+                <div className="border-2 border-dashed border-slate-200 hover:border-emerald-500 rounded-2xl p-4 text-center bg-slate-50/50 transition-colors">
+                  <input
+                    type="file"
+                    accept={editMediaType === 'image' ? 'image/*' : 'video/*'}
+                    onChange={handleEditFileUpload}
+                    className="hidden"
+                    id="edit-feed-file-upload-input"
+                  />
+                  <label
+                    htmlFor="edit-feed-file-upload-input"
+                    className="cursor-pointer flex flex-col items-center justify-center gap-1.5"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                      <Upload className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-700">
+                      {editMediaUrl ? 'Clique para substituir por nova foto/vídeo' : 'Selecionar fotografia/vídeo'}
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      PNG, JPG, MP4 ou WebM
+                    </span>
+                  </label>
+                </div>
+
+                {/* Ou URL direto */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                    Ou insira o link direto:
+                  </label>
+                  <input
+                    type="url"
+                    value={editMediaUrl}
+                    onChange={(e) => {
+                      setEditMediaUrl(e.target.value);
+                      setEditCustomPreview(e.target.value);
+                    }}
+                    placeholder="https://..."
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Descrição do Trabalho */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Descrição do Trabalho Concluído *
+                </label>
+                <textarea
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  placeholder="Descreva detalhadamente o serviço efetuado..."
+                  rows={4}
+                  className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 focus:outline-none font-medium"
+                  required
+                ></textarea>
+              </div>
+
+              {/* Botões de Ação */}
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingPost(null);
+                    setEditFeedback(null);
+                  }}
+                  className="w-1/3 py-3 border border-slate-200 hover:bg-slate-100 text-slate-700 font-extrabold text-xs rounded-2xl transition-all"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  id="btn-save-edit-post"
+                  type="submit"
+                  disabled={isEditUploading}
+                  className="w-2/3 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-2xl shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-1.5 active:scale-98 disabled:opacity-50"
+                >
+                  {isEditUploading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>A guardar alterações...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-200" />
+                      <span>Salvar alterações</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Modal: Publicar Novo Trabalho Real */}
       {isPublishModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-fade-in" id="modal-publish-work">
@@ -476,6 +982,18 @@ export const WorkFeedView: React.FC = () => {
             </p>
 
             <form onSubmit={handleSubmitNewPost} className="space-y-4">
+              {/* Título Opcional */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Título do Trabalho (Opcional)</label>
+                <input
+                  type="text"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="Ex: Manutenção de Gerador Industrial"
+                  className="w-full text-xs font-medium p-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
               {/* Seleção de Categoria */}
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Categoria do Serviço</label>
@@ -488,6 +1006,31 @@ export const WorkFeedView: React.FC = () => {
                     <option key={cat.id} value={cat.name}>{cat.name}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* Localização e Preço */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Localização</label>
+                  <input
+                    type="text"
+                    value={newLocation}
+                    onChange={(e) => setNewLocation(e.target.value)}
+                    placeholder="Ex: Luanda, Viana"
+                    className="w-full text-xs font-medium p-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Orçamento Estimado (Kz)</label>
+                  <input
+                    type="number"
+                    value={newPriceKz}
+                    onChange={(e) => setNewPriceKz(e.target.value)}
+                    placeholder="Ex: 15000"
+                    className="w-full text-xs font-medium p-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
               </div>
 
               {/* Tipo de Mídia */}
@@ -600,7 +1143,7 @@ export const WorkFeedView: React.FC = () => {
               {/* Descrição do Trabalho Real */}
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">
-                  Descrição do Trabalho Concluído
+                  Descrição do Trabalho Concluído *
                 </label>
                 <textarea
                   value={newDesc}
@@ -619,8 +1162,17 @@ export const WorkFeedView: React.FC = () => {
                 disabled={isUploading}
                 className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-2xl shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-1.5 active:scale-98 disabled:opacity-50"
               >
-                <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>{isUploading ? 'A carregar ficheiro...' : 'Publicar no Feed de Trabalhos'}</span>
+                {isUploading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>A processar publicação...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-amber-300" />
+                    <span>Publicar no Feed de Trabalhos</span>
+                  </>
+                )}
               </button>
             </form>
           </div>

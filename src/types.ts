@@ -26,6 +26,10 @@ export interface WorkFeedPost {
   createdAt: string;
   updatedAt?: string;
   ownerId?: string;
+  title?: string;
+  location?: string;
+  priceKz?: number;
+  mediaUrls?: string[];
 }
 
 export type UserStatus = 'ativo' | 'disponivel' | 'ocupado' | 'bloqueado' | 'deleted';

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { compressImageFile } from '../utils/imageUtils';
+import { UserAvatar } from './UserAvatar';
 import { 
   Send, 
   Banknote, 
@@ -138,10 +139,13 @@ export const ChatView: React.FC = () => {
             </button>
           )}
 
-          <img 
-            src={currentUser.role === 'cliente' ? (activeReq.professionalAvatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80') : (activeReq.clientAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80')} 
-            alt="Avatar" 
-            className="w-10 h-10 rounded-full object-cover border border-emerald-500"
+          <UserAvatar 
+            src={currentUser.role === 'cliente' ? activeReq.professionalAvatar : activeReq.clientAvatar} 
+            name={currentUser.role === 'cliente' ? (activeReq.professionalName || 'Profissional') : activeReq.clientName} 
+            sizeClassName="w-10 h-10"
+            roundedClassName="rounded-full"
+            role={currentUser.role === 'cliente' ? 'profissional' : 'cliente'}
+            className="border border-emerald-500"
           />
 
           <div>
@@ -278,7 +282,13 @@ export const ChatView: React.FC = () => {
               >
                 <div className="flex items-end gap-1.5 max-w-[85%] sm:max-w-[75%]">
                   {!isMe && (
-                    <img src={msg.senderAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80'} alt={msg.senderName} className="w-6 h-6 rounded-full object-cover mb-1" />
+                    <UserAvatar 
+                      src={msg.senderAvatar} 
+                      name={msg.senderName} 
+                      sizeClassName="w-6 h-6" 
+                      roundedClassName="rounded-full" 
+                      className="mb-1" 
+                    />
                   )}
 
                   <div className={`p-3.5 rounded-2xl shadow-sm text-xs ${

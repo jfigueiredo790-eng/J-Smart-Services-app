@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { RequestCard } from './RequestCard';
 import { PlanPaymentModal } from './PlanPaymentModal';
+import { UserAvatar } from './UserAvatar';
 import { 
   Briefcase, 
   CheckCircle2, 
@@ -79,31 +80,44 @@ export const ProDashboard: React.FC = () => {
       {/* Header Banner */}
       <div className="bg-slate-900 text-white rounded-3xl p-6 border border-slate-800 shadow-xl">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-emerald-400 font-bold text-xs uppercase tracking-wider block">Painel do Profissional</span>
-              <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-500/30">
-                Registo 100% Gratuito
-              </span>
-            </div>
-            <h2 className="text-xl font-black text-white mt-1">{currentUser.name}</h2>
-            <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{currentUser.province} • Prestação de Serviços</span>
-            </p>
-            <div className="flex flex-wrap items-center gap-2 mt-2">
-              <span className="text-xs text-slate-300 bg-slate-800 px-3 py-1 rounded-xl border border-slate-700 font-medium">
-                Experiência: <strong className="text-white font-bold">{(currentUser as any).experienceYears || 0} anos</strong>
-              </span>
-              {(currentUser as any).experienceVerified ? (
-                <span className="text-xs font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 px-2.5 py-1 rounded-xl flex items-center gap-1">
-                  ✅ Experiência verificada
+          <div className="flex items-center gap-4">
+            <UserAvatar
+              src={currentUser.avatar}
+              name={currentUser.name}
+              sizeClassName="w-16 h-16"
+              roundedClassName="rounded-2xl"
+              role="profissional"
+              isVerified={currentUser.verified}
+              showVerifiedBadge={true}
+              onClick={() => setActiveTab('profile')}
+              className="border-2 border-emerald-400 shadow-md cursor-pointer hover:opacity-90 transition-opacity shrink-0"
+            />
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-400 font-bold text-xs uppercase tracking-wider block">Painel do Profissional</span>
+                <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                  Registo 100% Gratuito
                 </span>
-              ) : (
-                <span className="text-xs font-semibold text-slate-400 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-xl flex items-center gap-1" title="Esta informação é não verificada até confirmação de comprovativos pelo Administrador">
-                  ⚪ Estado: Não verificada
+              </div>
+              <h2 className="text-xl font-black text-white mt-1">{currentUser.name}</h2>
+              <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{currentUser.province} • Prestação de Serviços</span>
+              </p>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="text-xs text-slate-300 bg-slate-800 px-3 py-1 rounded-xl border border-slate-700 font-medium">
+                  Experiência: <strong className="text-white font-bold">{(currentUser as any).experienceYears || 0} anos</strong>
                 </span>
-              )}
+                {(currentUser as any).experienceVerified ? (
+                  <span className="text-xs font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 px-2.5 py-1 rounded-xl flex items-center gap-1">
+                    ✅ Experiência verificada
+                  </span>
+                ) : (
+                  <span className="text-xs font-semibold text-slate-400 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-xl flex items-center gap-1" title="Esta informação é não verificada até confirmação de comprovativos pelo Administrador">
+                    ⚪ Estado: Não verificada
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 

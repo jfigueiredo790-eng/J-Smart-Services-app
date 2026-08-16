@@ -1,6 +1,7 @@
 import React from 'react';
 import { ServiceRequest, RequestStatus } from '../types';
 import { useApp } from '../context/AppContext';
+import { UserAvatar } from './UserAvatar';
 import { 
   Clock, 
   MapPin, 
@@ -21,6 +22,8 @@ interface RequestCardProps {
 export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
   const { 
     currentUser, 
+    professionals,
+    allUsers,
     updateRequestStatus, 
     setActiveChatRequestId, 
     setActiveTab,
@@ -30,6 +33,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
 
   const isClient = currentUser.role === 'cliente';
   const isPro = currentUser.role === 'profissional';
+
+  const matchedPro = professionals.find(p => p.id === request.professionalId);
+  const matchedClient = allUsers.find(u => u.id === request.clientId);
+  const targetAvatar = isPro 
+    ? (matchedClient?.avatar || (matchedClient as any)?.photoURL || request.clientAvatar)
+    : (matchedPro?.avatar || (matchedPro as any)?.photoURL || request.professionalAvatar);
 
   // Status color styles
   const getStatusBadge = (status: RequestStatus) => {
@@ -92,10 +101,13 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
       {/* Client / Pro Info */}
       <div className="flex items-center justify-between text-xs my-3 pt-1">
         <div className="flex items-center gap-2">
-          <img 
-            src={isPro ? (request.clientAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80') : (request.professionalAvatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80')} 
-            alt="User" 
-            className="w-8 h-8 rounded-full object-cover border border-slate-200"
+          <UserAvatar 
+            src={isPro ? request.clientAvatar : request.professionalAvatar} 
+            name={isPro ? request.clientName : (request.professionalName || 'Profissional')} 
+            sizeClassName="w-8 h-8"
+            roundedClassName="rounded-full"
+            role={isPro ? 'cliente' : 'profissional'}
+            className="border border-slate-200"
           />
           <div>
             <span className="text-[10px] text-slate-400 block font-semibold">{isPro ? 'Cliente' : 'Profissional'}</span>

@@ -2,6 +2,7 @@ import React from 'react';
 import { ProfessionalProfile } from '../types';
 import { useApp } from '../context/AppContext';
 import { getProPlanStatus } from '../utils/planUtils';
+import { UserAvatar } from './UserAvatar';
 import { 
   Star, 
   MapPin, 
@@ -88,18 +89,16 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({ pro, onOpenD
       <div>
         {/* Top Header: Avatar, Name, Rating & Verified */}
         <div className="flex items-start gap-3">
-          <div className="relative">
-            <img 
-              src={pro.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80'} 
-              alt={pro.name}
-              className="w-14 h-14 rounded-2xl object-cover border-2 border-slate-100 shadow-sm"
-            />
-            {pro.verified && (
-              <span className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5" title="Profissional Verificado">
-                <CheckCircle2 className="w-4 h-4 text-white fill-emerald-600" />
-              </span>
-            )}
-          </div>
+          <UserAvatar
+            src={pro.avatar || (pro as any).photoURL}
+            name={pro.name}
+            sizeClassName="w-14 h-14"
+            roundedClassName="rounded-2xl"
+            role="profissional"
+            isVerified={pro.verified}
+            showVerifiedBadge={true}
+            className="border-2 border-slate-100 shadow-sm"
+          />
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-1">

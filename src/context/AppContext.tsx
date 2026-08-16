@@ -129,6 +129,10 @@ interface AppContextType {
 
   // Work Feed & Subscription Prompt Actions
   addWorkFeedPost: (post: Omit<WorkFeedPost, 'id' | 'createdAt' | 'likesCount' | 'likedBy'>) => { success: boolean; error?: string };
+  updateWorkFeedPost: (
+    postId: string,
+    updatedData: Partial<Pick<WorkFeedPost, 'title' | 'description' | 'categoryName' | 'categoryId' | 'mediaUrl' | 'mediaType' | 'mediaUrls' | 'location' | 'priceKz'>>
+  ) => Promise<{ success: boolean; message?: string }>;
   likeWorkFeedPost: (postId: string) => void;
   deleteWorkFeedPost: (postId: string) => void;
   isSubExpiredModalOpen: boolean;
@@ -634,6 +638,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {}
   };
 
+  const updateWorkFeedPost = async (
+    postId: string,
+    updatedData: Partial<Pick<WorkFeedPost, 'title' | 'description' | 'categoryName' | 'categoryId' | 'mediaUrl' | 'mediaType' | 'mediaUrls' | 'location' | 'priceKz'>>
+  ): Promise<{ success: boolean; message?: string }> => {
+    const existingPost = workFeedPosts.find(p => p.id === postId);
+    if (!existingPost) {
+      return { success: false, message: 'Publicação não encontrada.' };
+    }
+
+    // Regra de Segurança: utilizador autenticado == post.professionalId/ownerId ou Administrador
+    const isAuthor = currentUser.id === existingPost.professionalId || (existingPost.ownerId && currentUser.id === existingPost.ownerId);
+    const isAdmin = currentUser.role === 'admin';
+
+    if (!isAuthor && !isAdmin) {
+      return { 
+        success: false, 
+        message: 'Acesso negado: Só tem permissão para editar as publicações criadas pela sua própria conta.' 
+      };
+    }
+
+    if (currentUser.role === 'profissional' && !isAdmin) {
+      const validation = validateProAction(currentUser);
+      if (!validation.allowed) {
+        if (validation.reason === 'blocked') {
+          return { success: false, message: 'Conta bloqueada. O acesso à J Smart Services foi bloqueado pelo Administrador.' };
+        }
+        triggerBlockedActionPrompt('O seu período gratuito terminou. Para continuar a gerir publicações profissionais, escolha um plano e efetue o pagamento.');
+        return { success: false, message: 'Subscrição inativa. Por favor renove o seu plano.' };
+      }
+    }
+
+    if (updatedData.description !== undefined && !updatedData.description.trim()) {
+      return { success: false, message: 'A descrição da publicação é obrigatória.' };
+    }
+
+    const modificationTimestamp = new Date().toISOString();
+
+    const updatedPost: WorkFeedPost = {
+      ...existingPost,
+      ...updatedData,
+      id: existingPost.id, // Preservar ID original
+      professionalId: existingPost.professionalId, // Preservar autor original
+      professionalName: existingPost.professionalName,
+      professionalAvatar: existingPost.professionalAvatar,
+      professionalVerified: existingPost.professionalVerified,
+      professionalCategories: existingPost.professionalCategories,
+      likesCount: existingPost.likesCount, // Preservar gostos
+      likedBy: existingPost.likedBy,
+      createdAt: existingPost.createdAt, // Preservar data de criação
+      ownerId: existingPost.ownerId,
+      updatedAt: modificationTimestamp
+    };
+
+    setWorkFeedPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+
+    try {
+      await setDoc(doc(db, 'work_feed_posts', postId), updatedPost, { merge: true });
+      return { success: true, message: 'Publicação atualizada com sucesso!' };
+    } catch (err: any) {
+      console.warn('Aviso ao atualizar publicação no Firestore (sincronizada localmente):', err);
+      return { success: true, message: 'Publicação atualizada com sucesso!' };
+    }
+  };
+
   const addNotification = (notifData: Omit<AppNotification, 'id' | 'createdAt' | 'read'>) => {
     // Regra Importante do Backend: Verificar tipo/role do utilizador antes de criar a notificação
     if (notifData.userId && !['all', 'pro_all', 'client_all', 'admin'].includes(notifData.userId)) {
@@ -793,7 +861,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveTab('home');
   };
 
-  const addStaffAdmin = async (staffData: { name: string; email: string; phone: string; adminSubRole: AdminSubRole }) => {
+  const addStaffAdmin = async (staffData: { name: string; email: string; phone: string; adminSubRole: AdminSubRole; avatar?: string }) => {
     const newAdminUser: User = {
       id: `admin-staff-${Date.now()}`,
       name: staffData.name,
@@ -803,7 +871,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       adminSubRole: staffData.adminSubRole,
       province: platformSettings.adminProvince || 'Icolo e Bengo',
       city: platformSettings.adminCity || 'Centralidade do Sequele',
-      avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
+      avatar: staffData.avatar || '',
       verified: true,
       ownerId: currentUser.id,
       createdAt: new Date().toISOString(),
@@ -883,14 +951,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (!snapshot.empty) {
           const fsUsers: User[] = [];
           snapshot.forEach(docSnap => {
-            const uData = { id: docSnap.id, ...docSnap.data() } as User;
+            const raw = docSnap.data();
+            const photo = raw.avatar || raw.photoURL || raw.profilePhoto || raw.profileImage || '';
+            const uData = { 
+              id: docSnap.id, 
+              ...raw,
+              avatar: photo,
+              photoURL: photo
+            } as User;
             if (!isFictitiousOrInvalidUser(uData)) {
               fsUsers.push(uData);
-            } else if (uData.id !== 'user-admin-1') {
-              // Permanently clean fictitious user from Firestore database
-              try {
-                deleteDoc(doc(db, 'users', docSnap.id)).catch(() => {});
-              } catch {}
             }
           });
           setAllUsers(prev => {
@@ -913,14 +983,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (!snapshot.empty) {
           const fsPros: ProfessionalProfile[] = [];
           snapshot.forEach(docSnap => {
-            const pData = { id: docSnap.id, ...docSnap.data() } as ProfessionalProfile;
+            const raw = docSnap.data();
+            const photo = raw.avatar || raw.photoURL || raw.profilePhoto || raw.profileImage || '';
+            const pData = { 
+              id: docSnap.id, 
+              ...raw,
+              avatar: photo,
+              photoURL: photo
+            } as ProfessionalProfile;
             if (!isFictitiousOrInvalidUser(pData) && !pData.isDeleted && pData.status !== 'deleted') {
               fsPros.push(pData);
-            } else {
-              // Permanently clean fictitious pro from Firestore database
-              try {
-                deleteDoc(doc(db, 'professionals', docSnap.id)).catch(() => {});
-              } catch {}
             }
           });
           setProfessionals(prev => {
@@ -1631,7 +1703,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         address: userData.address || '',
         documentNumber: userData.documentNumber || '',
         categories: userData.categories || [],
-        avatar: userData.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        avatar: userData.avatar || '',
         verified: true,
         createdAt: new Date().toISOString(),
         registrationSource: userData.registrationSource || 'Link Partilhado J Smart',
@@ -2525,9 +2597,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return [updatedUser, ...prev];
       });
 
+      // Synchronize workFeedPosts if avatar or name was updated
+      if (updated.avatar !== undefined || updated.name !== undefined) {
+        const newAvatar = updated.avatar !== undefined ? updated.avatar : updatedUser.avatar;
+        const newName = updated.name !== undefined ? updated.name : updatedUser.name;
+        
+        setWorkFeedPosts(prev => prev.map(post => {
+          if (post.professionalId === newUserId) {
+            const syncedPost = {
+              ...post,
+              professionalAvatar: newAvatar || '',
+              professionalName: newName || post.professionalName
+            };
+            try {
+              setDoc(doc(db, 'work_feed_posts', post.id), {
+                professionalAvatar: newAvatar || '',
+                professionalName: newName || post.professionalName
+              }, { merge: true }).catch(() => {});
+            } catch {}
+            return syncedPost;
+          }
+          return post;
+        }));
+      }
+
       // Write to Firestore for persistent storage & cross-device sync
       try {
-        setDoc(doc(db, 'users', newUserId), updatedUser, { merge: true }).catch(err => {
+        const userDocPayload = {
+          ...updatedUser,
+          photoURL: updatedUser.avatar || ''
+        };
+        setDoc(doc(db, 'users', newUserId), userDocPayload, { merge: true }).catch(err => {
           console.warn('Firestore user save notice:', err);
         });
 
@@ -2541,6 +2641,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             city: updatedUser.city || 'Luanda',
             role: 'profissional',
             avatar: updatedUser.avatar || '',
+            photoURL: updatedUser.avatar || '',
             categories: (updatedUser as any).categories || ['eletricista'],
             bio: (updatedUser as any).bio || 'Profissional prestador de serviços.',
             experienceYears: (updatedUser as any).experienceYears || 1,
@@ -3180,6 +3281,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       platformSettings,
       workFeedPosts,
       addWorkFeedPost,
+      updateWorkFeedPost,
       likeWorkFeedPost,
       deleteWorkFeedPost,
       isSubExpiredModalOpen,

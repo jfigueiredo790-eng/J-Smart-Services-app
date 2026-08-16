@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp, isFictitiousOrInvalidUser } from '../context/AppContext';
 import { AndroidPrepHub } from './AndroidPrepHub';
+import { UserAvatar } from './UserAvatar';
 import { 
   ShieldCheck, 
   Users, 
@@ -750,10 +751,13 @@ export const AdminDashboard: React.FC = () => {
                         <div>
                           {/* User avatar and header info */}
                           <div className="flex items-start gap-3">
-                            <img
-                              src={usr.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
-                              alt={usr.name}
-                              className="w-12 h-12 rounded-2xl object-cover border-2 border-white shadow-sm shrink-0"
+                            <UserAvatar
+                              src={usr.avatar}
+                              name={usr.name}
+                              sizeClassName="w-12 h-12"
+                              roundedClassName="rounded-2xl"
+                              role={usr.role}
+                              className="border-2 border-white shadow-sm shrink-0"
                             />
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between">
@@ -1443,7 +1447,14 @@ export const AdminDashboard: React.FC = () => {
                   {filteredProsByPlan.map(({ pro, status }) => (
                     <div key={pro.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
                       <div className="flex items-center gap-3">
-                        <img src={pro.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80'} alt={pro.name} className="w-11 h-11 rounded-xl object-cover border border-slate-200" />
+                        <UserAvatar 
+                          src={pro.avatar || (pro as any).photoURL} 
+                          name={pro.name} 
+                          sizeClassName="w-11 h-11" 
+                          roundedClassName="rounded-xl" 
+                          role="profissional"
+                          className="border border-slate-200" 
+                        />
                         <div>
                           <div className="flex items-center gap-2">
                             <h4 className="font-bold text-slate-900 text-sm">{pro.name}</h4>
@@ -1640,7 +1651,13 @@ export const AdminDashboard: React.FC = () => {
                 {lowRatingPros.map(lp => (
                   <div key={lp.id} className="bg-white p-3 rounded-xl border border-amber-200 flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2">
-                      <img src={lp.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80'} alt={lp.name} className="w-8 h-8 rounded-lg object-cover" />
+                      <UserAvatar 
+                        src={lp.avatar || (lp as any).photoURL} 
+                        name={lp.name} 
+                        sizeClassName="w-8 h-8" 
+                        roundedClassName="rounded-lg" 
+                        role="profissional"
+                      />
                       <div>
                         <p className="font-extrabold text-slate-900">{lp.name}</p>
                         <p className="text-[10px] text-amber-700 font-bold">Média: {lp.rating} ★ ({lp.reviewCount} avaliações)</p>
@@ -1673,7 +1690,14 @@ export const AdminDashboard: React.FC = () => {
               return (
                 <div key={pro.id} className="bg-slate-50 border border-slate-200 p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
                   <div className="flex items-center gap-3">
-                    <img src={pro.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80'} alt={pro.name} className="w-12 h-12 rounded-xl object-cover border border-slate-200" />
+                    <UserAvatar 
+                      src={pro.avatar || (pro as any).photoURL} 
+                      name={pro.name} 
+                      sizeClassName="w-12 h-12" 
+                      roundedClassName="rounded-xl" 
+                      role="profissional"
+                      className="border border-slate-200" 
+                    />
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <h4 className="font-bold text-slate-900 text-sm">{pro.name}</h4>
@@ -1824,10 +1848,13 @@ export const AdminDashboard: React.FC = () => {
                 return (
                   <div key={client.id} className="bg-slate-50 border border-slate-200 p-4 rounded-2xl flex items-start justify-between gap-3 text-xs">
                     <div className="flex items-start gap-3">
-                      <img 
-                        src={client.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'} 
-                        alt={client.name} 
-                        className="w-12 h-12 rounded-xl object-cover border border-slate-200 flex-shrink-0" 
+                      <UserAvatar 
+                        src={client.avatar} 
+                        name={client.name} 
+                        sizeClassName="w-12 h-12" 
+                        roundedClassName="rounded-xl" 
+                        role="cliente"
+                        className="border border-slate-200 flex-shrink-0" 
                       />
                       <div>
                         <div className="flex items-center gap-2">
@@ -2711,10 +2738,13 @@ export const AdminDashboard: React.FC = () => {
             </button>
 
             <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-              <img
-                src={viewingUserDetail.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
-                alt={viewingUserDetail.name}
-                className="w-16 h-16 rounded-2xl object-cover border-2 border-slate-200 shrink-0"
+              <UserAvatar
+                src={viewingUserDetail.avatar}
+                name={viewingUserDetail.name}
+                sizeClassName="w-16 h-16"
+                roundedClassName="rounded-2xl"
+                role={viewingUserDetail.role}
+                className="border-2 border-slate-200 shrink-0"
               />
               <div>
                 <h3 className="font-black text-slate-900 text-lg">{viewingUserDetail.name}</h3>

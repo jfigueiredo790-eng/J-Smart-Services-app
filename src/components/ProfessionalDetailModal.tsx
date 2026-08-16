@@ -2,6 +2,7 @@ import React from 'react';
 import { ProfessionalProfile } from '../types';
 import { useApp } from '../context/AppContext';
 import { getProPlanStatus } from '../utils/planUtils';
+import { UserAvatar } from './UserAvatar';
 import { 
   X, 
   Star, 
@@ -109,18 +110,16 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
         {/* Profile Info Overlay */}
         <div className="px-6 pb-6 relative">
           <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between -mt-14 mb-4 gap-4">
-            <div className="relative">
-              <img 
-                src={pro.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80'} 
-                alt={pro.name} 
-                className="w-24 h-24 rounded-3xl object-cover border-4 border-white shadow-md bg-white"
-              />
-              {pro.verified && (
-                <span className="absolute bottom-1 right-1 bg-emerald-500 text-white p-1 rounded-full shadow-md" title="Identidade Verificada">
-                  <CheckCircle2 className="w-5 h-5 fill-emerald-600 text-white" />
-                </span>
-              )}
-            </div>
+            <UserAvatar
+              src={pro.avatar || (pro as any).photoURL}
+              name={pro.name}
+              sizeClassName="w-24 h-24"
+              roundedClassName="rounded-3xl"
+              role="profissional"
+              isVerified={pro.verified}
+              showVerifiedBadge={true}
+              className="border-4 border-white shadow-md bg-white shrink-0"
+            />
 
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
@@ -322,7 +321,13 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
                   <div key={rev.id} className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <img src={rev.clientAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'} alt={rev.clientName} className="w-7 h-7 rounded-full object-cover" />
+                        <UserAvatar 
+                          src={rev.clientAvatar} 
+                          name={rev.clientName} 
+                          sizeClassName="w-7 h-7"
+                          roundedClassName="rounded-full"
+                          role="cliente"
+                        />
                         <span className="font-bold text-slate-900">{rev.clientName}</span>
                       </div>
                       <div className="flex items-center gap-1">

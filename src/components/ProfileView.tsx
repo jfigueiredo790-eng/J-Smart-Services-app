@@ -2,8 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { HelpSupportModal } from './HelpSupportModal';
 import { CategoryMultiSelect } from './CategoryMultiSelect';
+import { UserAvatar } from './UserAvatar';
 import { ANGOLA_PROVINCES, UserRole, AccountType } from '../types';
-import { compressImageFile } from '../utils/imageUtils';
+import { uploadProfilePhotoToStorage } from '../utils/imageUtils';
 import { 
   User as UserIcon, 
   ShieldCheck, 
@@ -58,6 +59,7 @@ export const ProfileView: React.FC = () => {
 
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
   const [avatar, setAvatar] = useState(currentUser.avatar || '');
 
@@ -78,15 +80,23 @@ export const ProfileView: React.FC = () => {
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setIsUploadingPhoto(true);
       try {
-        const compressed = await compressImageFile(file, 600, 0.82);
-        setAvatar(compressed);
-        updateUserProfile({ avatar: compressed });
-        setSavedSuccess(true);
-        setTimeout(() => setSavedSuccess(false), 3000);
+        const uploadRes = await uploadProfilePhotoToStorage(file, currentUser.id || `user-${Date.now()}`);
+        if (uploadRes.success && uploadRes.url) {
+          setAvatar(uploadRes.url);
+          updateUserProfile({ avatar: uploadRes.url, photoURL: uploadRes.url });
+          setSavedSuccess(true);
+          setTimeout(() => setSavedSuccess(false), 3500);
+        } else {
+          throw new Error(uploadRes.error || 'Falha ao processar a imagem');
+        }
       } catch (err) {
         console.error('Erro ao processar imagem da galeria:', err);
         alert('Não foi possível carregar esta fotografia da galeria. Tente outra imagem.');
+      } finally {
+        setIsUploadingPhoto(false);
+        if (e.target) e.target.value = '';
       }
     }
   };
@@ -95,6 +105,7 @@ export const ProfileView: React.FC = () => {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    const finalAvatar = avatar || currentUser.avatar || '';
     updateUserProfile({
       name,
       phone,
@@ -103,7 +114,8 @@ export const ProfileView: React.FC = () => {
       province,
       documentNumber: documentNumber.trim(),
       ...(currentUser.role === 'admin' ? { accountType } : {}),
-      avatar: avatar || currentUser.avatar,
+      avatar: finalAvatar,
+      photoURL: finalAvatar,
       categories: selectedCategories,
       bio,
       experienceYears: Math.max(0, Number(experienceYears) || 0),
@@ -138,16 +150,26 @@ export const ProfileView: React.FC = () => {
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 relative z-10">
           <div 
             className="relative group cursor-pointer shrink-0" 
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => !isUploadingPhoto && fileInputRef.current?.click()}
             title="Clique para abrir a galeria e escolher uma foto de perfil"
           >
-            <img 
-              src={currentUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'} 
-              alt={currentUser.name} 
-              className="w-20 h-20 rounded-2xl object-cover border-2 border-emerald-400 shadow-md group-hover:opacity-80 transition-all"
+            <UserAvatar
+              src={avatar || currentUser.avatar}
+              name={currentUser.name}
+              sizeClassName="w-20 h-20"
+              roundedClassName="rounded-2xl"
+              role={currentUser.role}
+              isVerified={currentUser.verified}
+              className="border-2 border-emerald-400 shadow-md group-hover:opacity-80 transition-all"
             />
+            {isUploadingPhoto && (
+              <div className="absolute inset-0 bg-slate-900/70 rounded-2xl flex items-center justify-center">
+                <RefreshCw className="w-6 h-6 text-emerald-400 animate-spin" />
+              </div>
+            )}
             <button 
               type="button"
+              disabled={isUploadingPhoto}
               onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
               className="absolute -bottom-1 -right-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 p-1.5 rounded-full shadow-lg border-2 border-slate-900 transition-transform hover:scale-110 flex items-center justify-center"
               title="Abrir Galeria para escolher Foto de Perfil"
