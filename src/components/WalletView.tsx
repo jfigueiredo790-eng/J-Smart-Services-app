@@ -29,9 +29,12 @@ export const WalletView: React.FC = () => {
   // Deposit Form State
   const [depositAmount, setDepositAmount] = useState('15000');
   const [paymentMethod, setPaymentMethod] = useState<'mc_express' | 'iban'>('mc_express');
-  const [depositProofImage, setDepositProofImage] = useState<string>('https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=80');
+  const [depositProofImage, setDepositProofImage] = useState<string | null>(null);
+  const [depositProofFileName, setDepositProofFileName] = useState<string>('');
+  const [depositProofFileType, setDepositProofFileType] = useState<'image' | 'pdf' | null>(null);
   const [depositProofNote, setDepositProofNote] = useState<string>('');
   const [depositSuccess, setDepositSuccess] = useState(false);
+  const [depositUploadError, setDepositUploadError] = useState<string | null>(null);
 
   // Modal Image Preview State
   const [viewProofUrl, setViewProofUrl] = useState<string | null>(null);
@@ -58,18 +61,39 @@ export const WalletView: React.FC = () => {
 
   const handleDepositFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setDepositProofImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    setDepositUploadError(null);
+    const fileExt = file.name.split('.').pop()?.toLowerCase() || '';
+    const fileMime = file.type.toLowerCase();
+
+    const isImage = fileMime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp'].includes(fileExt);
+    const isPdf = fileMime === 'application/pdf' || fileExt === 'pdf';
+
+    if (!isImage && !isPdf) {
+      setDepositUploadError('Por favor selecione uma imagem (JPG, PNG) ou documento PDF.');
+      return;
     }
+
+    setDepositProofFileName(file.name);
+    setDepositProofFileType(isPdf ? 'pdf' : 'image');
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setDepositProofImage(reader.result as string);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleDeposit = (e: React.FormEvent) => {
     e.preventDefault();
     const amount = Number(depositAmount);
+    
+    if (!depositProofImage) {
+      setDepositUploadError('⚠️ É obrigatório anexar o comprovativo real de pagamento do seu dispositivo.');
+      return;
+    }
+
     if (amount > 0) {
       submitPaymentWithProof({
         amountKz: amount,
@@ -77,12 +101,17 @@ export const WalletView: React.FC = () => {
         description: `Carregamento de Saldo na Carteira`,
         paymentMethod: paymentMethod === 'mc_express' ? 'Multicaixa Express' : 'Transferência IBAN',
         proofUrl: depositProofImage,
+        proofFileName: depositProofFileName,
+        proofFileType: depositProofFileType || 'image',
         proofNote: depositProofNote || `Carregamento de ${amount.toLocaleString('pt-AO')} Kz`
       });
       setDepositSuccess(true);
       setTimeout(() => {
         setDepositSuccess(false);
         setIsDepositOpen(false);
+        setDepositProofImage(null);
+        setDepositProofFileName('');
+        setDepositProofFileType(null);
       }, 2000);
     }
   };
@@ -413,19 +442,69 @@ export const WalletView: React.FC = () => {
                 <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
-                      <ImageIcon className="w-4 h-4 text-emerald-600" />
-                      Comprovativo de Pagamento *
+                      <FileText className="w-4 h-4 text-emerald-600" />
+                      Comprovativo de Pagamento (Foto ou PDF) *
                     </span>
                     <label className="cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all flex items-center gap-1">
                       <Upload className="w-3 h-3" />
-                      <span>Anexar Foto</span>
-                      <input type="file" accept="image/*" onChange={handleDepositFileUpload} className="hidden" />
+                      <span>{depositProofImage ? 'Trocar Ficheiro' : 'Anexar Ficheiro'}</span>
+                      <input 
+                        type="file" 
+                        accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" 
+                        onChange={handleDepositFileUpload} 
+                        className="hidden" 
+                      />
                     </label>
                   </div>
 
-                  {depositProofImage && (
-                    <div className="rounded-lg overflow-hidden border border-slate-200 max-h-32 flex items-center justify-center bg-white">
-                      <img src={depositProofImage} alt="Comprovativo Deposit" className="max-h-32 object-contain" />
+                  {depositUploadError && (
+                    <div className="p-2 bg-rose-100 text-rose-800 text-[11px] rounded-lg font-bold flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{depositUploadError}</span>
+                    </div>
+                  )}
+
+                  {depositProofImage ? (
+                    depositProofFileType === 'pdf' ? (
+                      <div className="p-3 bg-white rounded-lg border border-rose-200 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-6 h-6 text-rose-600" />
+                          <div>
+                            <p className="font-extrabold text-slate-900 text-xs truncate max-w-[200px]">{depositProofFileName || 'Documento.pdf'}</p>
+                            <span className="text-[10px] text-rose-700 font-bold">Documento PDF Selecionado</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDepositProofImage(null);
+                            setDepositProofFileName('');
+                            setDepositProofFileType(null);
+                          }}
+                          className="text-rose-600 hover:text-rose-800 text-[10px] font-extrabold bg-rose-50 px-2 py-1 rounded"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="relative rounded-lg overflow-hidden border border-slate-200 max-h-32 flex items-center justify-center bg-white">
+                        <img src={depositProofImage} alt="Comprovativo Deposit" className="max-h-32 object-contain" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDepositProofImage(null);
+                            setDepositProofFileName('');
+                            setDepositProofFileType(null);
+                          }}
+                          className="absolute top-1 right-1 bg-rose-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow"
+                        >
+                          ✕ Remover
+                        </button>
+                      </div>
+                    )
+                  ) : (
+                    <div className="p-3 border border-dashed border-slate-300 rounded-lg text-center bg-white text-[11px] text-slate-500">
+                      Nenhum ficheiro selecionado. Selecione uma foto ou PDF do comprovativo.
                     </div>
                   )}
 
@@ -475,7 +554,22 @@ export const WalletView: React.FC = () => {
               </button>
             </div>
             <div className="overflow-y-auto flex-1 flex items-center justify-center bg-slate-100 p-2 rounded-2xl border border-slate-200">
-              <img src={viewProofUrl} alt="Comprovativo Completo" className="max-h-[60vh] object-contain rounded-lg shadow" />
+              {viewProofUrl.startsWith('data:application/pdf') || viewProofUrl.endsWith('.pdf') ? (
+                <div className="text-center p-6 space-y-3">
+                  <FileText className="w-12 h-12 text-rose-600 mx-auto" />
+                  <p className="font-extrabold text-slate-900 text-sm">Documento PDF</p>
+                  <a
+                    href={viewProofUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-xl inline-block"
+                  >
+                    Abrir Documento PDF
+                  </a>
+                </div>
+              ) : (
+                <img src={viewProofUrl} alt="Comprovativo Completo" className="max-h-[60vh] object-contain rounded-lg shadow" />
+              )}
             </div>
             <button
               onClick={() => setViewProofUrl(null)}

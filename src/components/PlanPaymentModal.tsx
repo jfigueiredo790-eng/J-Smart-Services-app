@@ -1,6 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { X, CheckCircle2, Copy, MessageSquare, ShieldCheck, AlertCircle, Phone, Building2, ExternalLink, ArrowRight, Upload, Image as ImageIcon, FileText, Send } from 'lucide-react';
+import { 
+  X, 
+  CheckCircle2, 
+  Copy, 
+  ShieldCheck, 
+  AlertCircle, 
+  Phone, 
+  Building2, 
+  ArrowRight, 
+  Upload, 
+  Image as ImageIcon, 
+  FileText, 
+  Send,
+  Trash2,
+  RefreshCw,
+  FileCheck
+} from 'lucide-react';
 
 interface PlanPaymentModalProps {
   planKey: 'plan_7d' | 'plan_14d' | 'plan_30d';
@@ -8,90 +24,21 @@ interface PlanPaymentModalProps {
   onSuccess: () => void;
 }
 
-const generateBankReceiptSvg = (
-  amountStr: string,
-  methodName: string,
-  userName: string,
-  userPhone: string,
-  holderName: string,
-  bankName: string,
-  ibanOrPhone: string
-) => {
-  const dateStr = new Date().toLocaleDateString('pt-AO');
-  const timeStr = new Date().toLocaleTimeString('pt-AO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const docRef = `500295******${Math.floor(1000 + Math.random() * 9000)}`;
-
-  const cleanIban = ibanOrPhone.replace(/\s+/g, '');
-  const formattedIban = cleanIban.length > 15 
-    ? `AO06.${cleanIban.slice(4, 8)}.${cleanIban.slice(8, 12)}.${cleanIban.slice(12, 16)}.${cleanIban.slice(16, 21)}`
-    : cleanIban;
-
-  const titleText = methodName.toLowerCase().includes('express')
-    ? 'TRANSFERÊNCIA EXPRESS REALIZADA COM SUCESSO'
-    : 'TRANSFERÊNCIA IBAN REALIZADA COM SUCESSO';
-
-  const svgString = `<svg xmlns="http://www.w3.org/2000/svg" width="540" height="640" viewBox="0 0 540 640" fill="none">
-  <!-- Card Canvas -->
-  <rect width="540" height="640" rx="12" fill="#FFFFFF"/>
-  <rect width="540" height="640" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="2"/>
-  
-  <!-- Top Orange Header Band -->
-  <path d="M0 12C0 5.37258 5.37258 0 12 0H528C534.627 0 540 5.37258 540 12V60H0V12Z" fill="#FFFFFF"/>
-  <path d="M0 0H310L270 50H0V0Z" fill="#F59E0B"/>
-
-  <!-- Date / Ref top right -->
-  <text x="510" y="28" fill="#1E293B" font-family="Arial, sans-serif" font-weight="700" font-size="13" text-anchor="end">${dateStr} ${timeStr}</text>
-  <text x="510" y="46" fill="#64748B" font-family="Courier, monospace" font-weight="600" font-size="12" text-anchor="end">${docRef}</text>
-
-  <!-- Status / Success Title -->
-  <text x="270" y="115" fill="#D97706" font-family="Arial, sans-serif" font-weight="900" font-size="16" text-anchor="middle" letter-spacing="0.5">${titleText}</text>
-
-  <!-- Large Amount Section -->
-  <text x="270" y="175" fill="#0F172A" font-family="Arial, sans-serif" font-weight="900" font-size="30" text-anchor="middle">${amountStr},00 Kz</text>
-  <text x="270" y="196" fill="#D97706" font-family="Arial, sans-serif" font-weight="800" font-size="12" text-anchor="middle" letter-spacing="1">MONTANTE</text>
-
-  <!-- IBAN / Destination Number -->
-  <text x="270" y="255" fill="#0F172A" font-family="Arial, sans-serif" font-weight="900" font-size="17" text-anchor="middle">${formattedIban}</text>
-  <text x="270" y="275" fill="#D97706" font-family="Arial, sans-serif" font-weight="800" font-size="12" text-anchor="middle" letter-spacing="1">${methodName.toLowerCase().includes('express') ? 'N.º EXPRESS (DESTINO)' : 'IBAN (DESTINO)'}</text>
-
-  <!-- Beneficiary / Holder -->
-  <text x="270" y="335" fill="#0F172A" font-family="Arial, sans-serif" font-weight="900" font-size="17" text-anchor="middle">${(holderName || 'ANTÓNIO ABEL FIGUEIREDO JÚLIO').toUpperCase()}</text>
-  <text x="270" y="355" fill="#D97706" font-family="Arial, sans-serif" font-weight="800" font-size="12" text-anchor="middle" letter-spacing="1">TITULAR / BENEFICIÁRIO (BANCO BCI)</text>
-
-  <!-- Bank Name Tag -->
-  <text x="270" y="388" fill="#475569" font-family="Arial, sans-serif" font-weight="700" font-size="12" text-anchor="middle">INSTITUIÇÃO: ${bankName.toUpperCase()}</text>
-
-  <!-- Horizontal Divider Line -->
-  <line x1="30" y1="415" x2="510" y2="415" stroke="#CBD5E1" stroke-width="1.5"/>
-
-  <!-- Cost and Total Row -->
-  <text x="60" y="445" fill="#64748B" font-family="Arial, sans-serif" font-weight="700" font-size="13">Custo</text>
-  <text x="60" y="468" fill="#0F172A" font-family="Arial, sans-serif" font-weight="900" font-size="15">Isento</text>
-
-  <text x="480" y="445" fill="#64748B" font-family="Arial, sans-serif" font-weight="700" font-size="13" text-anchor="end">Total</text>
-  <text x="480" y="468" fill="#0F172A" font-family="Arial, sans-serif" font-weight="900" font-size="16" text-anchor="end">${amountStr},00 Kz</text>
-
-  <!-- Horizontal Divider Line -->
-  <line x1="30" y1="495" x2="510" y2="495" stroke="#F1F5F9" stroke-width="1.5"/>
-
-  <!-- Current Balance Row -->
-  <text x="270" y="530" fill="#0F172A" font-family="Arial, sans-serif" font-weight="900" font-size="14" text-anchor="middle">SALDO ACTUAL: ***** Kz 👁️</text>
-
-  <!-- Bottom Badges / Notice -->
-  <rect x="30" y="560" width="480" height="50" rx="10" fill="#FEF3C7" stroke="#F59E0B" stroke-width="1"/>
-  <text x="270" y="582" fill="#92400E" font-family="Arial, sans-serif" font-weight="800" font-size="11" text-anchor="middle">COMPROVATIVO EMITIDO PARA VALIDAÇÃO NA J SMART SERVICES</text>
-  <text x="270" y="598" fill="#B45309" font-family="Arial, sans-serif" font-weight="700" font-size="10" text-anchor="middle">ORDENANTE: ${(userName || 'Profissional J Smart').toUpperCase()} (${userPhone || '956011985'})</text>
-</svg>`;
-
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svgString)}`;
-};
-
 export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onClose, onSuccess }) => {
   const { currentUser, submitPaymentWithProof, platformSettings } = useApp();
   const [paymentMethod, setPaymentMethod] = useState<'express' | 'iban'>('express');
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+
+  // File proof upload state - strictly initialized to NULL (No dummy, sample or mock receipts)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
+  const [proofFileType, setProofFileType] = useState<'image' | 'pdf' | null>(null);
+  const [proofFileName, setProofFileName] = useState<string>('');
+  const [proofFileSizeStr, setProofFileSizeStr] = useState<string>('');
+  const [proofNote, setProofNote] = useState<string>('');
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const planDetails = {
     plan_7d: { name: 'Plano Semanal (7 Dias)', priceKz: 1500, priceStr: '1.500 Kz', period: '7 Dias' },
@@ -105,57 +52,68 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
   const ibanHolder = platformSettings?.adminHolderName || 'António Abel Figueiredo Júlio';
   const bankName = platformSettings?.adminBankName || 'Banco BCI (Banco de Comércio e Indústria)';
 
-  // Initial Proof Receipt Image styled like an authentic bank transfer receipt
-  const [proofImage, setProofImage] = useState<string>(() => 
-    generateBankReceiptSvg(
-      planDetails.priceStr,
-      'Multicaixa Express',
-      currentUser.name,
-      currentUser.phone,
-      ibanHolder,
-      bankName,
-      adminPhone
-    )
-  );
-
-  useEffect(() => {
-    // Regenerate receipt preview if payment method switches
-    setProofImage(
-      generateBankReceiptSvg(
-        planDetails.priceStr,
-        paymentMethod === 'express' ? 'Multicaixa Express' : 'Transferência IBAN (BCI)',
-        currentUser.name,
-        currentUser.phone,
-        ibanHolder,
-        bankName,
-        paymentMethod === 'express' ? adminPhone : ibanNumber
-      )
-    );
-  }, [paymentMethod, planDetails.priceStr, currentUser.name, currentUser.phone, ibanHolder, bankName, adminPhone, ibanNumber]);
-
-  const [proofNote, setProofNote] = useState<string>('');
-  const [uploadError, setUploadError] = useState<string | null>(null);
-
   const handleCopy = (text: string, fieldName: string) => {
     navigator.clipboard.writeText(text);
     setCopiedField(fieldName);
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        setUploadError('O ficheiro é demasiado grande. Máximo 5MB.');
-        return;
-      }
-      setUploadError(null);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProofImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    // Reset previous errors
+    setUploadError(null);
+
+    // Validate size (max 10MB)
+    const MAX_SIZE_BYTES = 10 * 1024 * 1024;
+    if (file.size > MAX_SIZE_BYTES) {
+      setUploadError('O ficheiro selecionado ultrapassa o limite de 10MB. Por favor escolha um ficheiro menor.');
+      return;
     }
+
+    const fileExt = file.name.split('.').pop()?.toLowerCase() || '';
+    const fileMime = file.type.toLowerCase();
+
+    const isImage = fileMime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp'].includes(fileExt);
+    const isPdf = fileMime === 'application/pdf' || fileExt === 'pdf';
+
+    if (!isImage && !isPdf) {
+      setUploadError('Formato inválido. Por favor selecione uma imagem (JPG, JPEG, PNG, WEBP) ou um documento PDF.');
+      return;
+    }
+
+    setSelectedFile(file);
+    setProofFileName(file.name);
+    setProofFileSizeStr(formatFileSize(file.size));
+    setProofFileType(isPdf ? 'pdf' : 'image');
+
+    // Read file as Data URL for local preview and transmission
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setProofPreviewUrl(result);
+      setUploadError(null);
+    };
+    reader.onerror = () => {
+      setUploadError('Erro ao ler o ficheiro no seu dispositivo. Tente novamente.');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    setProofPreviewUrl(null);
+    setProofFileType(null);
+    setProofFileName('');
+    setProofFileSizeStr('');
+    setUploadError(null);
   };
 
   const whatsappMessage = encodeURIComponent(
@@ -168,6 +126,7 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
     `• Profissional: ${currentUser.name}\n` +
     `• Telefone: ${currentUser.phone}\n` +
     `• E-mail: ${currentUser.email}\n` +
+    `• Ficheiro Comprovativo: ${proofFileName || 'Anexado'}\n` +
     `• Referência/Nota: ${proofNote || 'Comprovativo oficial anexado'}\n\n` +
     `Solicito a verificação e ativação do meu pacote na plataforma.`
   );
@@ -175,8 +134,9 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
   const whatsappUrl = `https://wa.me/244956011985?text=${whatsappMessage}`;
 
   const handleSubmit = () => {
-    if (!proofImage) {
-      setUploadError('Por favor anexe a imagem/foto do comprovativo de pagamento.');
+    // Strict Validation: SEM FICHEIRO = SEM ENVIO
+    if (!proofPreviewUrl || !selectedFile) {
+      setUploadError('⚠️ É obrigatório selecionar um ficheiro real de comprovativo (imagem ou PDF) do seu dispositivo antes de submeter.');
       return;
     }
 
@@ -184,26 +144,40 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
     setUploadError(null);
 
     setTimeout(() => {
-      submitPaymentWithProof({
+      const res = submitPaymentWithProof({
         amountKz: planDetails.priceKz,
         type: 'payment',
         description: `Ativação de ${planDetails.name}`,
         paymentMethod: paymentMethod === 'express' ? 'Multicaixa Express (956011985)' : 'Transferência IBAN (Banco BCI)',
-        proofUrl: proofImage,
-        proofNote: proofNote || `Comprovativo enviado para ${planDetails.name} - Banco BCI / Express`,
+        proofUrl: proofPreviewUrl,
+        proofFileName: proofFileName,
+        proofFileType: proofFileType || 'image',
+        proofFileSize: selectedFile.size,
+        proofNote: proofNote || `Comprovativo (${proofFileName}) enviado para ${planDetails.name}`,
         planId: planKey
       });
 
       setIsSubmitting(false);
-      setSubmitted(true);
-      setTimeout(() => {
-        onSuccess();
-      }, 3000);
-    }, 1000);
+
+      if (res.success) {
+        setSubmitted(true);
+        setTimeout(() => {
+          onSuccess();
+        }, 3000);
+      } else {
+        setUploadError(res.message);
+      }
+    }, 800);
   };
 
   const handleCombinedSubmitAndWhatsApp = () => {
-    // Open WhatsApp in a new tab AND submit to admin on platform
+    // Strict Validation: SEM FICHEIRO = SEM ENVIO
+    if (!proofPreviewUrl || !selectedFile) {
+      setUploadError('⚠️ É obrigatório selecionar um ficheiro real de comprovativo (imagem ou PDF) do seu dispositivo antes de enviar.');
+      return;
+    }
+
+    // Open WhatsApp with populated message
     window.open(whatsappUrl, '_blank');
     handleSubmit();
   };
@@ -216,11 +190,11 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
             <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-200">
-              Pagamento com Comprovativo Bancário
+              Pagamento com Comprovativo Real
             </span>
             <h3 className="font-extrabold text-slate-900 text-lg mt-1">{planDetails.name}</h3>
           </div>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-full">
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-full transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -230,13 +204,13 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
             <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
               <CheckCircle2 className="w-10 h-10 text-emerald-600" />
             </div>
-            <h4 className="font-extrabold text-slate-900 text-base">Comprovativo Submetido ao Administrador!</h4>
+            <h4 className="font-extrabold text-slate-900 text-base">Comprovativo Enviado para Validação!</h4>
             <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-left space-y-2">
               <p className="text-xs text-emerald-950 leading-relaxed font-bold">
-                ✓ O seu comprovativo de pagamento foi enviado para a aprovação do Administrador na plataforma e para a área administrativa.
+                ✓ O seu comprovativo ({proofFileName}) foi submetido com sucesso à Área Administrativa.
               </p>
               <p className="text-xs text-slate-600 leading-relaxed">
-                O administrador irá conferir o valor no extrato do Banco BCI / Express e aprovar o seu pacote em breve.
+                O estado do seu plano está como <strong>"Aguardando validação"</strong>. O administrador irá conferir o valor no extrato bancário e ativar o seu pacote em breve.
               </p>
             </div>
           </div>
@@ -354,59 +328,164 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
               )}
             </div>
 
-            {/* STEP 3: Anexar e Enviar Comprovativo */}
+            {/* STEP 3: Anexar Comprovativo Real do Dispositivo */}
             <div className="bg-amber-50/80 border border-amber-200 p-4 rounded-2xl space-y-3">
               <div className="flex items-start gap-2.5">
                 <ShieldCheck className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
                 <div>
                   <h4 className="font-extrabold text-amber-950 text-xs uppercase tracking-wider">
-                    2. Comprovativo de Pagamento *
+                    2. Anexar Comprovativo Real do Pagamento *
                   </h4>
                   <p className="text-slate-700 text-[11px] mt-0.5 leading-relaxed">
-                    Envie o comprovativo de uma só vez para o <strong>WhatsApp da Área Administrativa (956011985)</strong> e também para a <strong>Aprovação do Administrador na Plataforma</strong>.
+                    Selecione o ficheiro do comprovativo no seu dispositivo (<strong>Foto JPG, PNG, WEBP</strong> ou <strong>Documento PDF</strong>).
                   </p>
                 </div>
               </div>
 
               {/* Upload & Preview Box */}
               <div className="bg-white p-3.5 rounded-2xl border border-amber-300 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
-                    <ImageIcon className="w-4 h-4 text-emerald-600" />
-                    Comprovativo Bancário (Foto/Ficheiro)
-                  </span>
-                  <label className="cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 shadow-sm">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Carregar Foto</span>
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      onChange={handleFileUpload} 
-                      className="hidden" 
-                    />
+                
+                {/* File Picker Trigger */}
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-900 mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <FileCheck className="w-4 h-4 text-emerald-600" />
+                      Ficheiro do Comprovativo (Imagem ou PDF)
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-bold">Máx. 10MB</span>
                   </label>
+
+                  {/* Empty State: Prompting User to Select Real File */}
+                  {!selectedFile && (
+                    <label className="border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-slate-50 hover:bg-emerald-50/30 rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer transition-all text-center group">
+                      <div className="w-12 h-12 rounded-full bg-emerald-100 group-hover:bg-emerald-200 text-emerald-700 flex items-center justify-center mb-2 transition-transform group-hover:scale-105">
+                        <Upload className="w-6 h-6" />
+                      </div>
+                      <span className="text-xs font-extrabold text-slate-800">
+                        Clique para Selecionar o Comprovativo
+                      </span>
+                      <span className="text-[10px] text-slate-500 mt-1">
+                        Suporta fotos (JPG, JPEG, PNG, WEBP) ou documentos (PDF)
+                      </span>
+                      <input 
+                        type="file" 
+                        accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf"
+                        onChange={handleFileUpload} 
+                        className="hidden" 
+                      />
+                    </label>
+                  )}
+
+                  {/* Preview State: Real Image Selected */}
+                  {selectedFile && proofFileType === 'image' && proofPreviewUrl && (
+                    <div className="space-y-2">
+                      <div className="relative rounded-2xl overflow-hidden border border-slate-300 bg-slate-950 flex items-center justify-center p-2">
+                        <img 
+                          src={proofPreviewUrl} 
+                          alt="Comprovativo Selecionado" 
+                          className="max-h-56 w-full object-contain rounded-xl" 
+                        />
+                        <span className="absolute bottom-3 right-3 bg-emerald-600 text-white text-[10px] px-2.5 py-0.5 rounded-full font-black shadow flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Foto Pronta
+                        </span>
+                      </div>
+
+                      {/* File Details Bar */}
+                      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
+                        <div className="flex items-center gap-2 truncate pr-2">
+                          <ImageIcon className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <div className="truncate">
+                            <p className="font-extrabold text-slate-900 truncate">{proofFileName}</p>
+                            <p className="text-[10px] text-slate-500 font-bold">{proofFileSizeStr}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <label className="cursor-pointer bg-slate-200 hover:bg-slate-300 text-slate-800 text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1">
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Trocar</span>
+                            <input 
+                              type="file" 
+                              accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf"
+                              onChange={handleFileUpload} 
+                              className="hidden" 
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={handleRemoveFile}
+                            className="bg-rose-100 hover:bg-rose-200 text-rose-700 p-1.5 rounded-lg transition-colors"
+                            title="Remover ficheiro"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Preview State: Real PDF Selected */}
+                  {selectedFile && proofFileType === 'pdf' && (
+                    <div className="space-y-2">
+                      <div className="bg-gradient-to-br from-rose-50 to-amber-50 border-2 border-rose-200 rounded-2xl p-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-md">
+                            <FileText className="w-7 h-7" />
+                          </div>
+                          <div>
+                            <span className="text-[10px] font-black uppercase text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md">
+                              Documento PDF
+                            </span>
+                            <p className="font-extrabold text-slate-900 text-xs mt-1 truncate max-w-[220px]">
+                              {proofFileName}
+                            </p>
+                            <p className="text-[10px] text-slate-500 font-bold">{proofFileSizeStr}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <label className="cursor-pointer bg-white hover:bg-slate-100 text-slate-800 text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg border border-slate-200 transition-colors flex items-center gap-1">
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Trocar</span>
+                            <input 
+                              type="file" 
+                              accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf"
+                              onChange={handleFileUpload} 
+                              className="hidden" 
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={handleRemoveFile}
+                            className="bg-rose-100 hover:bg-rose-200 text-rose-700 p-1.5 rounded-lg transition-colors"
+                            title="Remover PDF"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <p className="text-[10px] text-slate-500 flex items-center gap-1 font-medium">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        O documento PDF será enviado na íntegra para conferência do Administrador.
+                      </p>
+                    </div>
+                  )}
+
                 </div>
 
-                {proofImage && (
-                  <div className="relative rounded-xl overflow-hidden border border-slate-300 bg-slate-900 shadow-sm flex items-center justify-center p-1">
-                    <img src={proofImage} alt="Comprovativo Bancário" className="max-h-56 w-full object-contain rounded-lg" />
-                    <span className="absolute bottom-2 right-2 bg-emerald-700 text-white text-[9px] px-2 py-0.5 rounded-full font-bold shadow">
-                      ✓ Comprovativo Pronto
-                    </span>
-                  </div>
-                )}
-
                 {uploadError && (
-                  <p className="text-xs text-rose-600 font-bold flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                    {uploadError}
-                  </p>
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2 text-rose-700 text-xs font-bold animate-fade-in">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{uploadError}</span>
+                  </div>
                 )}
 
                 {/* Optional Note / Reference Input */}
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    Número de Referência / Observações (Opcional):
+                    Número de Transação / Observações (Opcional):
                   </label>
                   <div className="relative">
                     <FileText className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -414,21 +493,25 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
                       type="text"
                       value={proofNote}
                       onChange={(e) => setProofNote(e.target.value)}
-                      placeholder="Ex: Ref BCI #889104, Express 956011985..."
+                      placeholder="Ex: N.º Operação BCI 789124, Express 956011985..."
                       className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Action Buttons: Dual Action as requested by user */}
+              {/* Action Buttons */}
               <div className="space-y-2 pt-1">
                 {/* Send via WhatsApp AND Platform at once */}
                 <button
                   type="button"
                   onClick={handleCombinedSubmitAndWhatsApp}
                   disabled={isSubmitting}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3.5 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-xs"
+                  className={`w-full font-extrabold py-3.5 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-xs ${
+                    !selectedFile 
+                      ? 'bg-slate-300 text-slate-600 hover:bg-slate-400 cursor-pointer' 
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  }`}
                 >
                   <Send className="w-4 h-4" />
                   <span>Enviar para WhatsApp (956011985) & Submeter na Plataforma</span>
@@ -439,13 +522,17 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
                   type="button"
                   onClick={handleSubmit}
                   disabled={isSubmitting}
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 px-4 rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 text-xs"
+                  className={`w-full font-extrabold py-3 px-4 rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 text-xs ${
+                    !selectedFile 
+                      ? 'bg-slate-200 text-slate-600 hover:bg-slate-300 cursor-pointer' 
+                      : 'bg-slate-900 hover:bg-slate-800 text-white'
+                  }`}
                 >
                   {isSubmitting ? (
                     <span>A submeter comprovativo ao administrador...</span>
                   ) : (
                     <>
-                      <span>Submeter Apenas na Plataforma para Aprovação</span>
+                      <span>Submeter Apenas na Plataforma para Validação</span>
                       <ArrowRight className="w-4 h-4 text-emerald-400" />
                     </>
                   )}

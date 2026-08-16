@@ -232,6 +232,9 @@ export interface WalletTransaction {
   requestId?: string;
   planId?: ProSubscriptionPlan;
   proofUrl?: string;
+  proofFileName?: string;
+  proofFileType?: string;
+  proofFileSize?: number;
   proofNote?: string;
   rejectionReason?: string;
   status: 'concluido' | 'pendente' | 'rejeitado';

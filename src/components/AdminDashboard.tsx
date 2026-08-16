@@ -1000,26 +1000,58 @@ export const AdminDashboard: React.FC = () => {
                             )}
                           </div>
 
-                          {/* Proof Receipt Image Card */}
-                          <div className="mt-3 bg-white p-2 rounded-xl border border-slate-200 space-y-1">
-                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
-                              📷 Comprovativo de Pagamento Anexado:
-                            </span>
+                          {/* Proof Receipt Image / PDF Card */}
+                          <div className="mt-3 bg-white p-2.5 rounded-xl border border-slate-200 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                                📎 Comprovativo Anexado ({tx.proofFileType === 'pdf' || tx.proofUrl?.startsWith('data:application/pdf') ? 'Documento PDF' : 'Imagem'}):
+                              </span>
+                              {tx.proofFileName && (
+                                <span className="text-[10px] text-slate-400 font-mono truncate max-w-[150px]">
+                                  {tx.proofFileName}
+                                </span>
+                              )}
+                            </div>
+
                             {tx.proofUrl ? (
-                              <div className="relative group cursor-pointer" onClick={() => setViewingProofTx(tx)}>
-                                <img
-                                  src={tx.proofUrl}
-                                  alt="Comprovativo"
-                                  className="w-full h-36 object-cover rounded-lg border border-slate-200 transition-all group-hover:brightness-90"
-                                />
-                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-slate-950/50 transition-all rounded-lg">
-                                  <span className="bg-white text-slate-900 text-xs font-black px-3 py-1.5 rounded-full shadow">
-                                    🔍 Ampliar Comprovativo
+                              tx.proofFileType === 'pdf' || tx.proofUrl.startsWith('data:application/pdf') || tx.proofFileName?.toLowerCase().endsWith('.pdf') ? (
+                                <div 
+                                  onClick={() => setViewingProofTx(tx)}
+                                  className="cursor-pointer bg-gradient-to-br from-rose-50 to-amber-50 hover:from-rose-100 hover:to-amber-100 p-3 rounded-xl border border-rose-200 flex items-center justify-between transition-all group"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-lg bg-rose-600 text-white flex items-center justify-center shadow-sm">
+                                      <FileText className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                      <span className="text-[9px] font-black uppercase tracking-wider text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded">
+                                        PDF
+                                      </span>
+                                      <p className="font-extrabold text-slate-900 text-xs mt-0.5 truncate max-w-[180px]">
+                                        {tx.proofFileName || 'Comprovativo_Pagamento.pdf'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className="text-xs font-black text-rose-700 bg-white group-hover:bg-rose-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-rose-300 transition-colors shadow-sm">
+                                    Examinar PDF 🔍
                                   </span>
                                 </div>
-                              </div>
+                              ) : (
+                                <div className="relative group cursor-pointer" onClick={() => setViewingProofTx(tx)}>
+                                  <img
+                                    src={tx.proofUrl}
+                                    alt="Comprovativo"
+                                    className="w-full h-36 object-cover rounded-lg border border-slate-200 transition-all group-hover:brightness-90"
+                                  />
+                                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-slate-950/50 transition-all rounded-lg">
+                                    <span className="bg-white text-slate-900 text-xs font-black px-3 py-1.5 rounded-full shadow">
+                                      🔍 Ampliar Comprovativo
+                                    </span>
+                                  </div>
+                                </div>
+                              )
                             ) : (
-                              <p className="text-xs text-slate-400 italic">Nenhuma foto anexada.</p>
+                              <p className="text-xs text-slate-400 italic">Nenhum ficheiro anexado.</p>
                             )}
                           </div>
                         </div>
@@ -1078,9 +1110,10 @@ export const AdminDashboard: React.FC = () => {
                         {tx.proofUrl && (
                           <button
                             onClick={() => setViewingProofTx(tx)}
-                            className="text-[10px] font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 px-2 py-1 rounded-lg"
+                            className="text-[10px] font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 px-2 py-1 rounded-lg flex items-center gap-1"
                           >
-                            Ver Foto
+                            <FileText className="w-3 h-3 text-emerald-600" />
+                            <span>Ver Comprovativo</span>
                           </button>
                         )}
                         <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full ${isApproved ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
@@ -1096,30 +1129,70 @@ export const AdminDashboard: React.FC = () => {
         );
       })()}
 
-      {/* MODAL: PROOF IMAGE ZOOM & VERIFICATION */}
+      {/* MODAL: PROOF IMAGE / PDF ZOOM & VERIFICATION */}
       {viewingProofTx && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-xl rounded-3xl p-6 border border-slate-200 shadow-2xl space-y-4 max-h-[92vh] flex flex-col">
+          <div className="bg-white w-full max-w-2xl rounded-3xl p-6 border border-slate-200 shadow-2xl space-y-4 max-h-[94vh] flex flex-col">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
                 <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
                   Conferência de Comprovativo Bancário
                 </span>
-                <h3 className="font-extrabold text-slate-900 text-base mt-0.5">{viewingProofTx.userName} • {viewingProofTx.amountKz.toLocaleString('pt-AO')} Kz</h3>
+                <h3 className="font-extrabold text-slate-900 text-base mt-0.5">
+                  {viewingProofTx.userName} • {viewingProofTx.amountKz.toLocaleString('pt-AO')} Kz
+                </h3>
               </div>
               <button onClick={() => setViewingProofTx(null)} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-full">
                 ✕
               </button>
             </div>
 
-            <div className="overflow-y-auto flex-1 bg-slate-900 p-2 rounded-2xl flex items-center justify-center border border-slate-800">
-              <img src={viewingProofTx.proofUrl} alt="Comprovativo Zoom" className="max-h-[55vh] object-contain rounded-lg" />
+            <div className="overflow-y-auto flex-1 bg-slate-900 p-2 rounded-2xl flex items-center justify-center border border-slate-800 min-h-[300px]">
+              {viewingProofTx.proofFileType === 'pdf' || viewingProofTx.proofUrl?.startsWith('data:application/pdf') || viewingProofTx.proofFileName?.toLowerCase().endsWith('.pdf') ? (
+                <div className="w-full h-[55vh] flex flex-col items-center justify-center bg-white rounded-xl p-4 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-rose-600 text-white flex items-center justify-center shadow-lg">
+                    <FileText className="w-9 h-9" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-slate-900 text-sm">
+                      {viewingProofTx.proofFileName || 'Documento Comprovativo PDF'}
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Ficheiro PDF original submetido pelo profissional
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <a
+                      href={viewingProofTx.proofUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2.5 rounded-xl shadow-md flex items-center gap-1.5"
+                    >
+                      <span>Abrir / Descarregar PDF</span>
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <img 
+                  src={viewingProofTx.proofUrl} 
+                  alt="Comprovativo Zoom" 
+                  className="max-h-[55vh] object-contain rounded-lg" 
+                />
+              )}
             </div>
 
-            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs space-y-1">
-              <p><strong>Descrição:</strong> {viewingProofTx.description}</p>
-              <p><strong>Método:</strong> {viewingProofTx.paymentMethod}</p>
-              {viewingProofTx.proofNote && <p><strong>Nota:</strong> {viewingProofTx.proofNote}</p>}
+            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs space-y-1">
+              <div className="grid grid-cols-2 gap-2">
+                <p><strong>Descrição:</strong> {viewingProofTx.description}</p>
+                <p><strong>Método:</strong> {viewingProofTx.paymentMethod}</p>
+                {viewingProofTx.proofFileName && (
+                  <p><strong>Nome do Ficheiro:</strong> {viewingProofTx.proofFileName}</p>
+                )}
+                <p><strong>Data de Envio:</strong> {new Date(viewingProofTx.createdAt).toLocaleString('pt-AO')}</p>
+              </div>
+              {viewingProofTx.proofNote && (
+                <p className="pt-1 border-t border-slate-200 mt-1"><strong>Nota do Utilizador:</strong> {viewingProofTx.proofNote}</p>
+              )}
             </div>
 
             <div className="flex gap-2 pt-1">

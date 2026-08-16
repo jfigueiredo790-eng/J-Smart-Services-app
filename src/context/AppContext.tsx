@@ -223,6 +223,9 @@ interface AppContextType {
     description: string;
     paymentMethod: string;
     proofUrl: string;
+    proofFileName?: string;
+    proofFileType?: string;
+    proofFileSize?: number;
     proofNote?: string;
     planId?: ProSubscriptionPlan;
   }) => { success: boolean; message: string };
@@ -2749,9 +2752,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     description: string;
     paymentMethod: string;
     proofUrl: string;
+    proofFileName?: string;
+    proofFileType?: string;
+    proofFileSize?: number;
     proofNote?: string;
     planId?: ProSubscriptionPlan;
   }): { success: boolean; message: string } => {
+    if (!params.proofUrl || !params.proofUrl.trim()) {
+      return {
+        success: false,
+        message: 'É obrigatório selecionar um ficheiro de comprovativo (imagem ou PDF) antes de submeter.'
+      };
+    }
+
     const txId = `tx-proof-${Date.now()}`;
     const newTx: WalletTransaction = {
       id: txId,
@@ -2764,6 +2777,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       description: params.description,
       paymentMethod: params.paymentMethod,
       proofUrl: params.proofUrl,
+      proofFileName: params.proofFileName,
+      proofFileType: params.proofFileType,
+      proofFileSize: params.proofFileSize,
       proofNote: params.proofNote,
       planId: params.planId,
       status: 'pendente',
