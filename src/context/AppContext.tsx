@@ -134,7 +134,7 @@ interface AppContextType {
     postId: string,
     updatedData: Partial<Pick<WorkFeedPost, 'title' | 'description' | 'categoryName' | 'categoryId' | 'mediaUrl' | 'mediaType' | 'mediaUrls' | 'location' | 'priceKz'>>
   ) => Promise<{ success: boolean; message?: string }>;
-  likeWorkFeedPost: (postId: string) => void;
+  likeWorkFeedPost: (postId: string, reaction?: string) => void;
   deleteWorkFeedPost: (postId: string) => void;
   isSubExpiredModalOpen: boolean;
   setIsSubExpiredModalOpen: (open: boolean) => void;
@@ -626,28 +626,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true };
   };
 
-  const likeWorkFeedPost = (postId: string) => {
-    setWorkFeedPosts(prev => prev.map(p => {
-      if (p.id === postId) {
-        const hasLiked = p.likedBy.includes(currentUser.id);
-        const updatedLikedBy = hasLiked
-          ? p.likedBy.filter(id => id !== currentUser.id)
-          : [...p.likedBy, currentUser.id];
-        
-        const updatedPost = {
-          ...p,
-          likedBy: updatedLikedBy,
-          likesCount: updatedLikedBy.length
-        };
+  const likeWorkFeedPost = (postId: string, reactionEmoji: string = '❤️') => {
+    const reactorId = currentUser.id;
+    const reactorName = (currentUser.name || '').trim() || 'Um utilizador';
 
-        try {
-          setDoc(doc(db, 'work_feed_posts', postId), updatedPost, { merge: true }).catch(() => {});
-        } catch (e) {}
+    const targetPost = workFeedPosts.find(p => p.id === postId);
+    if (!targetPost) return;
 
-        return updatedPost;
+    const currentReactions: Record<string, string> = { ...(targetPost.reactions || {}) };
+    const hasLiked = targetPost.likedBy.includes(reactorId);
+    const existingReaction = currentReactions[reactorId];
+
+    let isAddingOrChangingReaction = false;
+    let updatedLikedBy: string[];
+    let updatedReactions: Record<string, string>;
+
+    if (hasLiked && existingReaction === reactionEmoji) {
+      // Toggle off: remove like/reaction
+      updatedLikedBy = targetPost.likedBy.filter(id => id !== reactorId);
+      updatedReactions = { ...currentReactions };
+      delete updatedReactions[reactorId];
+      isAddingOrChangingReaction = false;
+    } else {
+      // New like/reaction or changing reaction
+      updatedLikedBy = hasLiked ? targetPost.likedBy : [...targetPost.likedBy, reactorId];
+      updatedReactions = {
+        ...currentReactions,
+        [reactorId]: reactionEmoji
+      };
+      isAddingOrChangingReaction = true;
+    }
+
+    const updatedPost: WorkFeedPost = {
+      ...targetPost,
+      likedBy: updatedLikedBy,
+      likesCount: updatedLikedBy.length,
+      reactions: updatedReactions
+    };
+
+    setWorkFeedPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+
+    try {
+      setDoc(doc(db, 'work_feed_posts', postId), updatedPost, { merge: true }).catch(() => {});
+    } catch (e) {}
+
+    // Notificar o profissional proprietário da publicação
+    if (isAddingOrChangingReaction) {
+      const authorId = targetPost.professionalId || targetPost.ownerId;
+
+      // Não notificar o autor se ele reagir à própria publicação
+      if (authorId && authorId !== reactorId) {
+        const postTitleFormatted = targetPost.title && targetPost.title.trim()
+          ? `"${targetPost.title.trim()}"`
+          : (targetPost.description ? `"${targetPost.description.slice(0, 35).trim()}${targetPost.description.length > 35 ? '...' : ''}"` : 'à sua publicação');
+
+        addNotification({
+          userId: authorId,
+          targetRoleScope: 'profissional',
+          title: `${reactionEmoji} Nova Reação na sua Publicação`,
+          message: `${reactorName} reagiu ${reactionEmoji} à sua publicação ${postTitleFormatted}.`,
+          type: 'publicacao_reacao',
+          postId: targetPost.id,
+          reaction: reactionEmoji
+        });
       }
-      return p;
-    }));
+    }
   };
 
   const deleteWorkFeedPost = (postId: string) => {

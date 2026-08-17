@@ -51,7 +51,9 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, on
     markNotificationAsRead(n.id);
     onClose();
 
-    if (n.requestId) {
+    if (n.type === 'publicacao_reacao' || n.postId) {
+      setActiveTab('feed');
+    } else if (n.requestId) {
       if (n.type === 'mensagem_recebida' || n.type === 'proposta_recebida') {
         setActiveChatRequestId(n.requestId);
         setActiveTab('chat');
@@ -63,7 +65,14 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, on
     }
   };
 
-  const getNotificationIcon = (type?: string) => {
+  const getNotificationIcon = (type?: string, reaction?: string) => {
+    if (type === 'publicacao_reacao') {
+      return (
+        <span className="text-base leading-none select-none" title={`Reação: ${reaction || '❤️'}`}>
+          {reaction || '❤️'}
+        </span>
+      );
+    }
     switch (type) {
       case 'mensagem_recebida':
         return <MessageSquare className="w-4 h-4 text-emerald-500" />;
@@ -178,7 +187,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, on
                 <div className={`p-2.5 rounded-xl shrink-0 ${
                   !n.read ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
                 }`}>
-                  {getNotificationIcon(n.type)}
+                  {getNotificationIcon(n.type, n.reaction)}
                 </div>
 
                 <div className="flex-1 min-w-0 pr-4">
@@ -197,6 +206,13 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, on
                       <Clock className="w-3 h-3" />
                       {new Date(n.createdAt).toLocaleDateString('pt-AO')} às {new Date(n.createdAt).toLocaleTimeString('pt-AO', { hour: '2-digit', minute: '2-digit' })}
                     </span>
+
+                    {(n.type === 'publicacao_reacao' || n.postId) && (
+                      <span className="text-emerald-700 font-bold flex items-center gap-0.5">
+                        <span>Ver no Feed</span>
+                        <ChevronRight className="w-3 h-3" />
+                      </span>
+                    )}
 
                     {n.requestId && (
                       <span className="text-emerald-700 font-bold flex items-center gap-0.5">

@@ -23,6 +23,7 @@ export interface WorkFeedPost {
   categoryId?: string;
   likesCount: number;
   likedBy: string[];
+  reactions?: Record<string, string>; // userId -> emoji (ex: '❤️', '👍', '👏', '🔥', '⭐')
   createdAt: string;
   updatedAt?: string;
   ownerId?: string;
@@ -221,10 +222,12 @@ export interface AppNotification {
   targetRoleScope?: 'cliente' | 'profissional' | 'duplo' | 'admin' | 'todos';
   title: string;
   message: string;
-  type: 'pedido_novo' | 'pedido_aceito' | 'pagamento_confirmado' | 'mensagem_recebida' | 'a_caminho' | 'concluido' | 'avaliacao_pendente' | 'trial_aviso' | 'plano_expira' | 'comunicado_jsmart';
+  type: 'pedido_novo' | 'pedido_aceito' | 'pagamento_confirmado' | 'mensagem_recebida' | 'a_caminho' | 'concluido' | 'avaliacao_pendente' | 'trial_aviso' | 'plano_expira' | 'comunicado_jsmart' | 'publicacao_reacao';
   read: boolean;
   createdAt: string;
   requestId?: string;
+  postId?: string;
+  reaction?: string;
 }
 
 export interface AdminAuditLog {

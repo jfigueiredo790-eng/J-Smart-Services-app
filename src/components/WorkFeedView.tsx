@@ -32,6 +32,14 @@ import {
   RefreshCw
 } from 'lucide-react';
 
+const AVAILABLE_REACTIONS = [
+  { emoji: '❤️', label: 'Amei' },
+  { emoji: '👍', label: 'Gosto' },
+  { emoji: '👏', label: 'Parabéns' },
+  { emoji: '🔥', label: 'Top' },
+  { emoji: '⭐', label: 'Excelente' },
+];
+
 export const WorkFeedView: React.FC = () => {
   const { 
     currentUser, 
@@ -54,6 +62,10 @@ export const WorkFeedView: React.FC = () => {
   // Menu de opções (⋮) por publicação
   const [activeMenuPostId, setActiveMenuPostId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Barra flutuante de reações
+  const [activeReactionPickerPostId, setActiveReactionPickerPostId] = useState<string | null>(null);
+  const reactionPickerRef = useRef<HTMLDivElement | null>(null);
 
   // New Post Form State
   const [newTitle, setNewTitle] = useState('');
@@ -82,11 +94,14 @@ export const WorkFeedView: React.FC = () => {
   const currentUserPlan = getProPlanStatus(currentUser);
   const isPro = userRole === 'profissional' || currentUser.role === 'profissional';
 
-  // Fechar menu de 3 pontos ao clicar fora
+  // Fechar menu de 3 pontos e barra de reações ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setActiveMenuPostId(null);
+      }
+      if (reactionPickerRef.current && !reactionPickerRef.current.contains(e.target as Node)) {
+        setActiveReactionPickerPostId(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -651,19 +666,70 @@ export const WorkFeedView: React.FC = () => {
 
                   {/* Barra de Rodapé: Gostos + Perfil + Contacto */}
                   <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                    {/* Botão de Gostos */}
-                    <button
-                      id={`btn-like-${post.id}`}
-                      onClick={() => likeWorkFeedPost(post.id)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-extrabold transition-all ${
-                        isLiked
-                          ? 'bg-rose-50 text-rose-600 border border-rose-200 scale-105'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      <Heart className={`w-4 h-4 ${isLiked ? 'fill-rose-500 text-rose-600' : ''}`} />
-                      <span>{post.likesCount || 0} {post.likesCount === 1 ? 'Gosto' : 'Gostos'}</span>
-                    </button>
+                    {/* Barra de Reações & Gostos */}
+                    <div className="relative" ref={activeReactionPickerPostId === post.id ? reactionPickerRef : undefined}>
+                      {/* Menu flutuante de reações */}
+                      {activeReactionPickerPostId === post.id && (
+                        <div className="absolute bottom-full left-0 mb-2 z-30 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/90 p-1.5 flex items-center gap-1 animate-scale-up">
+                          {AVAILABLE_REACTIONS.map(r => (
+                            <button
+                              key={r.emoji}
+                              type="button"
+                              onClick={() => {
+                                likeWorkFeedPost(post.id, r.emoji);
+                                setActiveReactionPickerPostId(null);
+                              }}
+                              className={`p-1.5 hover:scale-125 transition-transform text-lg rounded-xl flex items-center justify-center hover:bg-slate-100 ${
+                                (post.reactions?.[currentUser.id] === r.emoji) ? 'bg-emerald-100/70 ring-2 ring-emerald-500 scale-110' : ''
+                              }`}
+                              title={`${r.label} (${r.emoji})`}
+                            >
+                              <span>{r.emoji}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="inline-flex items-center rounded-full bg-slate-100 p-0.5 border border-slate-200/60 shadow-xs">
+                        {/* Botão Principal de Reação */}
+                        <button
+                          id={`btn-like-${post.id}`}
+                          onClick={() => {
+                            const currentReact = post.reactions?.[currentUser.id];
+                            if (isLiked && currentReact) {
+                              likeWorkFeedPost(post.id, currentReact);
+                            } else if (isLiked) {
+                              likeWorkFeedPost(post.id, '❤️');
+                            } else {
+                              likeWorkFeedPost(post.id, '❤️');
+                            }
+                          }}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black transition-all ${
+                            isLiked
+                              ? 'bg-rose-50 text-rose-600 border border-rose-200'
+                              : 'text-slate-700 hover:bg-white hover:text-slate-900'
+                          }`}
+                        >
+                          {isLiked ? (
+                            <span className="text-sm leading-none">{post.reactions?.[currentUser.id] || '❤️'}</span>
+                          ) : (
+                            <Heart className="w-3.5 h-3.5 text-slate-500" />
+                          )}
+                          <span>{post.likesCount || 0} {post.likesCount === 1 ? 'Reação' : 'Reações'}</span>
+                        </button>
+
+                        {/* Botão Seletor de Emojis */}
+                        <button
+                          type="button"
+                          id={`btn-reaction-picker-${post.id}`}
+                          onClick={() => setActiveReactionPickerPostId(activeReactionPickerPostId === post.id ? null : post.id)}
+                          className="px-2 py-1 text-slate-500 hover:text-slate-900 rounded-full hover:bg-white transition-all text-xs flex items-center justify-center"
+                          title="Escolher reação (❤️, 👍, 👏, 🔥, ⭐)"
+                        >
+                          <span className="text-xs">➕</span>
+                        </button>
+                      </div>
+                    </div>
 
                     <div className="flex items-center gap-2">
                       {/* Ver Perfil do Profissional */}
