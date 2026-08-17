@@ -221,13 +221,6 @@ export const ChatView: React.FC = () => {
     }
   };
 
-  const quickReplies = [
-    'Qual é a localização exacta em Luanda/Angola?',
-    'Posso passar hoje no local para avaliar.',
-    'Aceito a proposta de orçamento.',
-    'Tem fotos do trabalho a realizar?'
-  ];
-
   // Informações do interlocutor na conversa ativa
   const targetName = currentUser.role === 'cliente' 
     ? (activeConversation?.professionalName || activeReq?.professionalName || 'Profissional J Smart')
@@ -807,19 +800,6 @@ export const ChatView: React.FC = () => {
                 </div>
               ) : (
                 <>
-                  {/* Sugestões de Respostas Rápidas */}
-                  <div className="bg-slate-900 border-t border-slate-800 p-2 overflow-x-auto whitespace-nowrap flex gap-1.5 text-xs shrink-0 scrollbar-none">
-                    {quickReplies.map((reply, i) => (
-                      <button
-                        key={i}
-                        onClick={() => sendChatMessage(activeChatRequestId, reply)}
-                        className="bg-slate-800 hover:bg-emerald-950 hover:text-emerald-300 text-slate-300 text-[11px] px-3 py-1 rounded-full border border-slate-700 flex-shrink-0 transition-colors"
-                      >
-                        + {reply}
-                      </button>
-                    ))}
-                  </div>
-
                   {/* Input invisível para envio de imagens da galeria */}
                   <input 
                     type="file" 
@@ -827,34 +807,44 @@ export const ChatView: React.FC = () => {
                     accept="image/*" 
                     onChange={handleSendImageFromGallery} 
                     className="hidden" 
+                    id="chat-gallery-input"
                   />
 
-                  {/* Formulário de Envio de Mensagem */}
-                  <form onSubmit={handleSend} className="p-3 bg-slate-900 border-t border-slate-800 flex items-center gap-2 shrink-0">
+                  {/* Formulário Responsivo de Envio de Mensagem [Anexar] [Escreva a sua mensagem...] [Enviar] */}
+                  <form 
+                    onSubmit={handleSend} 
+                    className="w-full p-2.5 sm:p-3 bg-slate-900 border-t border-slate-800 flex items-center gap-1.5 sm:gap-2 shrink-0 box-border"
+                  >
+                    {/* Botão Anexar Foto da Galeria */}
                     <button
                       type="button"
                       onClick={() => chatImageInputRef.current?.click()}
-                      title="Anexar Fotografia"
-                      className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors border border-slate-700 flex items-center justify-center shrink-0"
+                      title="Anexar Imagem da Galeria"
+                      aria-label="Anexar Imagem"
+                      className="h-10 w-10 sm:h-11 sm:w-11 bg-slate-800 hover:bg-slate-700 active:bg-slate-750 text-slate-300 rounded-xl transition-colors border border-slate-700 flex items-center justify-center shrink-0"
                     >
-                      <ImageIcon className="w-4 h-4 text-emerald-400" />
+                      <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
                     </button>
 
+                    {/* Campo de Texto da Mensagem */}
                     <input 
                       type="text"
                       value={inputMsg}
                       onChange={(e) => setInputMsg(e.target.value)}
                       placeholder="Escreva a sua mensagem..."
-                      className="flex-1 text-xs p-3 rounded-xl bg-slate-800 text-slate-100 placeholder-slate-500 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                      className="flex-1 min-w-0 h-10 sm:h-11 text-xs sm:text-sm px-3 sm:px-3.5 rounded-xl bg-slate-800 text-slate-100 placeholder-slate-500 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium box-border"
                     />
 
+                    {/* Botão Enviar Mensagem - Sempre Visível */}
                     <button
                       type="submit"
                       disabled={!inputMsg.trim()}
-                      className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold p-3 rounded-xl transition-all shadow-md shrink-0"
                       title="Enviar Mensagem"
+                      aria-label="Enviar Mensagem"
+                      className="h-10 px-3 sm:h-11 sm:px-4 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:border disabled:border-slate-700 text-slate-950 font-black text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 shrink-0"
                     >
-                      <Send className="w-4 h-4" />
+                      <span className="hidden xs:inline sm:inline text-xs font-black">Enviar</span>
+                      <Send className="w-4 h-4 shrink-0" />
                     </button>
                   </form>
                 </>
