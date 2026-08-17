@@ -201,23 +201,23 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, on
                     {n.message}
                   </p>
 
-                  <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-400">
+                  <div className="flex flex-wrap items-center gap-2.5 mt-2 text-[10px] text-slate-400">
                     <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
+                      <Clock className="w-3 h-3 shrink-0" />
                       {new Date(n.createdAt).toLocaleDateString('pt-AO')} às {new Date(n.createdAt).toLocaleTimeString('pt-AO', { hour: '2-digit', minute: '2-digit' })}
                     </span>
 
                     {(n.type === 'publicacao_reacao' || n.postId) && (
-                      <span className="text-emerald-700 font-bold flex items-center gap-0.5">
+                      <span className="text-emerald-700 font-bold flex items-center gap-0.5 shrink-0">
                         <span>Ver no Feed</span>
-                        <ChevronRight className="w-3 h-3" />
+                        <ChevronRight className="w-3 h-3 shrink-0" />
                       </span>
                     )}
 
                     {n.requestId && (
-                      <span className="text-emerald-700 font-bold flex items-center gap-0.5">
+                      <span className="text-emerald-700 font-bold flex items-center gap-0.5 shrink-0">
                         <span>Ver detalhes</span>
-                        <ChevronRight className="w-3 h-3" />
+                        <ChevronRight className="w-3 h-3 shrink-0" />
                       </span>
                     )}
                   </div>

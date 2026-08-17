@@ -1886,17 +1886,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
 
     if (req) {
-      const targetScope = currentUser.id === req.clientId ? 'profissional' : 'cliente';
-      addNotification({
-        userId: recipientId,
-        targetRoleScope: targetScope,
-        title: '💬 Nova Mensagem Recebida',
-        message: `${currentUser.name}: "${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"`,
-        type: 'mensagem_recebida',
-        requestId
-      });
-
-      // Atualizar no Firestore o timestamp do pedido
+      // Atualizar no Firestore o timestamp do pedido para manter a ordenação atualizada
       try {
         setDoc(doc(db, 'service_requests', requestId), {
           updatedAt: nowIso,

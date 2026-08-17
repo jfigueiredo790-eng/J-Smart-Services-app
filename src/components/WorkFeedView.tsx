@@ -664,10 +664,10 @@ export const WorkFeedView: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Barra de Rodapé: Gostos + Perfil + Contacto */}
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                  {/* Barra de Rodapé Responsiva: Reações + Ver Perfil + Contactar */}
+                  <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                     {/* Barra de Reações & Gostos */}
-                    <div className="relative" ref={activeReactionPickerPostId === post.id ? reactionPickerRef : undefined}>
+                    <div className="relative shrink-0" ref={activeReactionPickerPostId === post.id ? reactionPickerRef : undefined}>
                       {/* Menu flutuante de reações */}
                       {activeReactionPickerPostId === post.id && (
                         <div className="absolute bottom-full left-0 mb-2 z-30 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/90 p-1.5 flex items-center gap-1 animate-scale-up">
@@ -690,7 +690,7 @@ export const WorkFeedView: React.FC = () => {
                         </div>
                       )}
 
-                      <div className="inline-flex items-center rounded-full bg-slate-100 p-0.5 border border-slate-200/60 shadow-xs">
+                      <div className="inline-flex items-center rounded-full bg-slate-100 p-0.5 border border-slate-200/60 shadow-xs shrink-0">
                         {/* Botão Principal de Reação */}
                         <button
                           id={`btn-like-${post.id}`}
@@ -704,7 +704,7 @@ export const WorkFeedView: React.FC = () => {
                               likeWorkFeedPost(post.id, '❤️');
                             }
                           }}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black transition-all ${
+                          className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all ${
                             isLiked
                               ? 'bg-rose-50 text-rose-600 border border-rose-200'
                               : 'text-slate-700 hover:bg-white hover:text-slate-900'
@@ -713,9 +713,12 @@ export const WorkFeedView: React.FC = () => {
                           {isLiked ? (
                             <span className="text-sm leading-none">{post.reactions?.[currentUser.id] || '❤️'}</span>
                           ) : (
-                            <Heart className="w-3.5 h-3.5 text-slate-500" />
+                            <Heart className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                           )}
-                          <span>{post.likesCount || 0} {post.likesCount === 1 ? 'Reação' : 'Reações'}</span>
+                          <span className="font-bold">{post.likesCount || 0}</span>
+                          <span className="hidden min-[400px]:inline text-[11px] font-bold text-slate-500">
+                            {post.likesCount === 1 ? 'Reação' : 'Reações'}
+                          </span>
                         </button>
 
                         {/* Botão Seletor de Emojis */}
@@ -723,7 +726,7 @@ export const WorkFeedView: React.FC = () => {
                           type="button"
                           id={`btn-reaction-picker-${post.id}`}
                           onClick={() => setActiveReactionPickerPostId(activeReactionPickerPostId === post.id ? null : post.id)}
-                          className="px-2 py-1 text-slate-500 hover:text-slate-900 rounded-full hover:bg-white transition-all text-xs flex items-center justify-center"
+                          className="px-2 py-1 text-slate-500 hover:text-slate-900 rounded-full hover:bg-white transition-all text-xs flex items-center justify-center shrink-0"
                           title="Escolher reação (❤️, 👍, 👏, 🔥, ⭐)"
                         >
                           <span className="text-xs">➕</span>
@@ -731,29 +734,31 @@ export const WorkFeedView: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    {/* Grupo de Ações do Profissional (Ver Perfil & Contactar) */}
+                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                       {/* Ver Perfil do Profissional */}
                       <button
                         onClick={() => {
                           if (pro) setSelectedPro(pro);
                         }}
-                        className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs rounded-xl transition-all flex items-center gap-1"
+                        className="px-2.5 sm:px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs rounded-xl transition-all flex items-center justify-center gap-1 shrink-0 whitespace-nowrap active:scale-95"
                       >
-                        <UserIcon className="w-3.5 h-3.5" />
+                        <UserIcon className="w-3.5 h-3.5 text-slate-600 shrink-0" />
                         <span>Ver Perfil</span>
                       </button>
 
-                      {/* Contactar Profissional */}
+                      {/* Contactar Profissional - Totalmente visível e adaptativo */}
                       <button
+                        id={`btn-contact-pro-${post.id}`}
                         onClick={() => handleContactProFromPost(post)}
-                        className={`px-3.5 py-1.5 rounded-xl font-extrabold text-xs transition-all flex items-center gap-1 ${
+                        className={`px-3 sm:px-3.5 py-1.5 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap active:scale-95 shadow-sm ${
                           isInactivePro
                             ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
-                            : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20 active:scale-95'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
                         }`}
                         title={isInactivePro ? "Subscrição inativa — Ver perfil" : "Contactar o Profissional"}
                       >
-                        <MessageSquare className="w-3.5 h-3.5" />
+                        <MessageSquare className="w-3.5 h-3.5 shrink-0" />
                         <span>{isInactivePro ? 'Ver Perfil' : 'Contactar'}</span>
                       </button>
                     </div>
