@@ -76,6 +76,11 @@
         "iconName": { "type": "string" },
         "color": { "type": "string" },
         "popularCount": { "type": "number" },
+        "group": { "type": "string" },
+        "items": { "type": "array" },
+        "subcategories": { "type": "array" },
+        "imageUrl": { "type": "string" },
+        "isActive": { "type": "boolean" },
         "ownerId": { "type": "string" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
@@ -177,6 +182,10 @@
     "/servicos/{serviceId}": {
       "schema": { "$ref": "#/entities/Servico" },
       "description": "Coleção de categorias e tipos de serviços oferecidos"
+    },
+    "/categories/{catId}": {
+      "schema": { "$ref": "#/entities/Servico" },
+      "description": "Coleção principal de categorias e subcategorias"
     },
     "/pedidos/{requestId}": {
       "schema": { "$ref": "#/entities/Pedido" },

@@ -64,7 +64,7 @@ service cloud.firestore {
       allow create, update: if true;
     }
 
-    // --- CHAT MESSAGES ---
+    // --- CHAT MESSAGES & CONVERSATIONS ---
     match /chat_messages/{messageId} {
       // Allow reading chat messages for all active app users
       allow read: if true;
@@ -74,6 +74,10 @@ service cloud.firestore {
         request.resource.data.text.size() <= 1000;
         
       allow update, delete: if true;
+    }
+
+    match /conversations/{conversationId} {
+      allow read, write: if true;
     }
 
     // --- REVIEWS & RATINGS ---
@@ -112,12 +116,12 @@ service cloud.firestore {
     // --- CATEGORIES ---
     match /categories/{catId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if isAdmin();
     }
 
     match /servicos/{serviceId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if isAdmin();
     }
 
     // --- REPORTS & TICKETS ---

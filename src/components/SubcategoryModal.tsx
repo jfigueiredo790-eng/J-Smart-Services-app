@@ -16,7 +16,7 @@ export const SubcategoryModal: React.FC<SubcategoryModalProps> = ({
   onSelectSubcategory,
   onRequestService,
 }) => {
-  const items = category.items || [];
+  const items = category.items || category.subcategories || [];
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in overflow-y-auto">

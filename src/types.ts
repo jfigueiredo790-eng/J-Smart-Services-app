@@ -118,6 +118,9 @@ export interface ServiceCategory {
   color: string;
   group?: string;
   items?: string[];
+  subcategories?: string[];
+  imageUrl?: string;
+  isActive?: boolean;
   ownerId?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -155,18 +158,50 @@ export interface ServiceRequest {
 export interface ChatMessage {
   id: string;
   requestId: string;
+  conversationId?: string;
   senderId: string;
   senderRole: UserRole;
   senderName: string;
   senderAvatar: string;
+  receiverId?: string;
   text: string;
   timestamp: string;
   status?: 'enviando' | 'enviada' | 'entregue' | 'lida' | 'falhou';
+  read?: boolean;
+  readBy?: string[];
   isQuickQuote?: boolean;
   quotePriceKz?: number;
   imageUrl?: string;
   locationPin?: { label: string; lat?: number; lng?: number };
+  participants?: string[];
   ownerId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ChatConversation {
+  id: string; // requestId ou conversationId único
+  requestId: string;
+  clientId: string;
+  clientName: string;
+  clientAvatar: string;
+  clientPhone?: string;
+  professionalId: string;
+  professionalName: string;
+  professionalAvatar: string;
+  professionalPhone?: string;
+  serviceTitle: string;
+  categoryName?: string;
+  province?: string;
+  status: RequestStatus;
+  budgetKz?: number;
+  lastMessageText?: string;
+  lastMessageTimestamp?: string;
+  lastMessageSenderId?: string;
+  lastMessageSenderName?: string;
+  lastMessageStatus?: 'enviando' | 'enviada' | 'entregue' | 'lida' | 'falhou';
+  unreadCount: number;
+  participants: string[];
   createdAt?: string;
   updatedAt?: string;
 }

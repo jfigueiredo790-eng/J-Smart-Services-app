@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp, isFictitiousOrInvalidUser } from '../context/AppContext';
 import { AndroidPrepHub } from './AndroidPrepHub';
 import { UserAvatar } from './UserAvatar';
+import { AdminCategoryManager } from './AdminCategoryManager';
 import { 
   ShieldCheck, 
   Users, 
@@ -1943,71 +1944,7 @@ export const AdminDashboard: React.FC = () => {
 
       {/* TAB 3: CATEGORIES */}
       {adminTab === 'categories' && (
-        <div className="space-y-6">
-          {/* Add Category Form */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
-            <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-              <Plus className="w-4 h-4 text-emerald-600" />
-              Adicionar Nova Categoria de Serviço
-            </h3>
-
-            <form onSubmit={handleAddCategory} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1">Nome da Categoria</label>
-                <input
-                  type="text"
-                  value={newCatName}
-                  onChange={(e) => setNewCatName(e.target.value)}
-                  placeholder="Ex: Serralheiro, Pladur, Arquateto"
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1">Descrição Breve</label>
-                <input
-                  type="text"
-                  value={newCatDesc}
-                  onChange={(e) => setNewCatDesc(e.target.value)}
-                  placeholder="Ex: Serviços de serralharia e portões em Angola"
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex items-end">
-                <button
-                  type="submit"
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Adicionar Categoria</span>
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* Categories Grid */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
-            <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
-              Categorias Ativas ({categories.length})
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {categories.map(cat => (
-                <div key={cat.id} className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
-                  <div>
-                    <p className="font-extrabold text-slate-900">{cat.name}</p>
-                    <p className="text-[10px] text-slate-500">{cat.description}</p>
-                  </div>
-                  <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[10px]">
-                    ID: {cat.id}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <AdminCategoryManager />
       )}
 
       {/* TAB 4: COMMISSIONS & SETTINGS */}

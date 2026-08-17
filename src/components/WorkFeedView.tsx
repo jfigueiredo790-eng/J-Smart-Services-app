@@ -367,7 +367,7 @@ export const WorkFeedView: React.FC = () => {
               <span>📸 Feed de Trabalhos Concluídos</span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-xl leading-relaxed">
-              Descubra serviços e projetos reais executados pelos profissionais qualificados da J Smart Services em Angola.
+              Descubra serviços e projetos reais executados pelos profissionais qualificados pela plataforma J Smart Services ✅.
             </p>
           </div>
 

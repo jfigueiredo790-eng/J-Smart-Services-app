@@ -102,7 +102,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
       <div className="flex items-center justify-between text-xs my-3 pt-1">
         <div className="flex items-center gap-2">
           <UserAvatar 
-            src={isPro ? request.clientAvatar : request.professionalAvatar} 
+            src={targetAvatar} 
             name={isPro ? request.clientName : (request.professionalName || 'Profissional')} 
             sizeClassName="w-8 h-8"
             roundedClassName="rounded-full"

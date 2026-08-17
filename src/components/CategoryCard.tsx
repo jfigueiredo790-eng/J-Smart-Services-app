@@ -10,7 +10,7 @@ interface CategoryCardProps {
 }
 
 export const CategoryCard: React.FC<CategoryCardProps> = ({ category, onClick, isSelected }) => {
-  const subCount = category.items?.length || 0;
+  const subCount = category.items?.length || category.subcategories?.length || 0;
 
   return (
     <div

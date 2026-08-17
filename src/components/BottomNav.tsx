@@ -21,7 +21,8 @@ export const BottomNav: React.FC = () => {
     setActiveTab, 
     userRole, 
     requests, 
-    unreadNotificationsCount 
+    unreadNotificationsCount,
+    unreadChatMessagesCount 
   } = useApp();
 
   const [isNotifModalOpen, setIsNotifModalOpen] = useState(false);
@@ -150,6 +151,11 @@ export const BottomNav: React.FC = () => {
             )}
             <MessageSquare className={`w-5 h-5 mb-0.5 transition-transform ${activeTab === 'chat' ? 'text-emerald-400 stroke-[2.5] scale-110' : ''}`} />
             <span>Chat</span>
+            {unreadChatMessagesCount > 0 && (
+              <span className="absolute top-1 right-2 bg-emerald-500 text-slate-950 font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center border border-slate-900 shadow-md">
+                {unreadChatMessagesCount > 9 ? '9+' : unreadChatMessagesCount}
+              </span>
+            )}
           </button>
 
           {/* 8. Pro Dashboard option if Professional */}

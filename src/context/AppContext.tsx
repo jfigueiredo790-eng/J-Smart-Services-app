@@ -7,6 +7,7 @@ import {
   ProfessionalProfile, 
   ServiceRequest, 
   ChatMessage, 
+  ChatConversation,
   Review, 
   ServiceCategory,
   RequestStatus,
@@ -153,6 +154,10 @@ interface AppContextType {
   setSelectedPro: (pro: ProfessionalProfile | null) => void;
   activeChatRequestId: string | null;
   setActiveChatRequestId: (reqId: string | null) => void;
+  conversations: ChatConversation[];
+  unreadChatMessagesCount: number;
+  markConversationAsRead: (conversationId: string) => Promise<void>;
+  startOrOpenConversation: (proId: string, serviceTitle?: string, categoryId?: string, initialMessage?: string) => string;
   
   // Modals state
   isNewRequestOpen: boolean;
@@ -245,7 +250,17 @@ interface AppContextType {
   updateCodeOfConductRules: (rules: CodeOfConductSection[]) => void;
   isRulesModalOpen: boolean;
   setIsRulesModalOpen: (isOpen: boolean) => void;
-  addCategory: (category: Omit<ServiceCategory, 'id'>) => void;
+  
+  // Category and Subcategory Management (Admin only)
+  addCategory: (category: Omit<ServiceCategory, 'id'> | ServiceCategory) => Promise<{ success: boolean; message: string; category?: ServiceCategory }>;
+  updateCategory: (categoryId: string, updates: Partial<ServiceCategory>) => Promise<{ success: boolean; message: string }>;
+  deleteCategory: (categoryId: string, force?: boolean) => Promise<{ success: boolean; message: string; inUse?: boolean; usageCount?: { pros: number; requests: number; posts: number } }>;
+  toggleCategoryStatus: (categoryId: string) => Promise<{ success: boolean; message: string }>;
+  addSubcategory: (categoryId: string, subcategoryName: string) => Promise<{ success: boolean; message: string }>;
+  updateSubcategory: (categoryId: string, oldName: string, newName: string) => Promise<{ success: boolean; message: string }>;
+  deleteSubcategory: (categoryId: string, subcategoryName: string) => Promise<{ success: boolean; message: string }>;
+  checkCategoryUsage: (categoryId: string) => { pros: number; requests: number; posts: number; total: number };
+
   addStaffAdmin: (staffData: { name: string; email: string; phone: string; adminSubRole: AdminSubRole }) => void;
   logAdminAction: (action: string, targetId?: string, details?: string) => Promise<AdminAuditLog>;
   runAutoTestSuite: () => { success: boolean; totalTests: number; passedTests: number; logResults: { step: string; status: 'pass' | 'fail'; message: string }[] };
@@ -422,6 +437,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return CATEGORIES;
     }
   });
+
+  useEffect(() => {
+    localStorage.setItem(`${LOCAL_STORAGE_KEY}_cats`, JSON.stringify(categories));
+  }, [categories]);
 
   const [requests, setRequests] = useState<ServiceRequest[]>(() => {
     const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_reqs`);
@@ -958,7 +977,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               ...raw,
               avatar: photo,
               photoURL: photo
-            } as User;
+            } as unknown as User;
             if (!isFictitiousOrInvalidUser(uData)) {
               fsUsers.push(uData);
             }
@@ -990,7 +1009,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               ...raw,
               avatar: photo,
               photoURL: photo
-            } as ProfessionalProfile;
+            } as unknown as ProfessionalProfile;
             if (!isFictitiousOrInvalidUser(pData) && !pData.isDeleted && pData.status !== 'deleted') {
               fsPros.push(pData);
             }
@@ -1088,6 +1107,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }, (err) => {
         console.warn('Firestore work feed snapshot notice:', err.message);
+      }));
+
+      // 9. Categories and Subcategories (sync in real time from Firestore)
+      const categoriesRef = collection(db, 'categories');
+      unsubscribes.push(onSnapshot(categoriesRef, (snapshot) => {
+        if (!snapshot.empty) {
+          const fsCats: ServiceCategory[] = [];
+          snapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            const items = data.items || data.subcategories || [];
+            fsCats.push({
+              id: docSnap.id,
+              name: data.name || docSnap.id,
+              iconName: data.iconName || 'Briefcase',
+              description: data.description || '',
+              popularCount: data.popularCount ?? 100,
+              color: data.color || 'emerald',
+              group: data.group || 'Casa & Manutenção',
+              items: items,
+              subcategories: items,
+              imageUrl: data.imageUrl || '',
+              isActive: data.isActive !== false,
+              ownerId: data.ownerId || '',
+              createdAt: data.createdAt || new Date().toISOString(),
+              updatedAt: data.updatedAt || new Date().toISOString()
+            });
+          });
+
+          setCategories(prev => {
+            const fsMap = new Map(fsCats.map(c => [c.id, c]));
+            const merged = [...fsCats];
+            // Include any default categories not yet synced into Firestore
+            CATEGORIES.forEach(defaultCat => {
+              if (!fsMap.has(defaultCat.id)) {
+                merged.push({
+                  ...defaultCat,
+                  isActive: defaultCat.isActive !== false,
+                  subcategories: defaultCat.items || []
+                });
+              }
+            });
+            return merged;
+          });
+        }
+      }, (err) => {
+        console.warn('Firestore categories snapshot notice:', err.message);
       }));
 
     } catch (err) {
@@ -1482,6 +1547,244 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Conversas Reais Agregadas e Ordenadas por Recência (Capítulo de Mensagens & Chat)
+  const conversations = React.useMemo<ChatConversation[]>(() => {
+    if (!currentUser || !currentUser.id) return [];
+
+    const convMap = new Map<string, ChatConversation>();
+
+    // 1. Converter pedidos de serviço em conversas segregadas
+    requests.forEach(req => {
+      const isClient = req.clientId === currentUser.id;
+      const isPro = req.professionalId === currentUser.id;
+      const isAdmin = currentUser.role === 'admin';
+
+      if (!isClient && !isPro && !isAdmin) {
+        return;
+      }
+
+      const proProfile = professionals.find(p => p.id === req.professionalId);
+      const clientProfile = allUsers.find(u => u.id === req.clientId);
+
+      const clientName = clientProfile?.name || req.clientName || 'Cliente';
+      const clientAvatar = clientProfile?.avatar || (clientProfile as any)?.photoURL || req.clientAvatar || '';
+      const clientPhone = clientProfile?.phone || req.clientPhone || '';
+
+      const proName = proProfile?.name || req.professionalName || (req.status === 'pendente' ? 'Profissional a Atribuir' : 'Profissional');
+      const proAvatar = proProfile?.avatar || (proProfile as any)?.photoURL || req.professionalAvatar || '';
+      const proPhone = proProfile?.phone || '';
+
+      // Mensagens deste pedido/conversa
+      const threadMsgs = messages.filter(m => m.requestId === req.id || m.conversationId === req.id);
+      threadMsgs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      const lastMsg = threadMsgs[threadMsgs.length - 1];
+
+      // Contagem de mensagens não lidas enviadas pelo outro utilizador
+      const unreadCount = threadMsgs.filter(m => 
+        m.senderId !== currentUser.id && 
+        m.status !== 'lida' && 
+        !m.read
+      ).length;
+
+      const lastTimestamp = lastMsg?.timestamp || req.updatedAt || req.createdAt;
+
+      convMap.set(req.id, {
+        id: req.id,
+        requestId: req.id,
+        clientId: req.clientId,
+        clientName,
+        clientAvatar,
+        clientPhone,
+        professionalId: req.professionalId || '',
+        professionalName: proName,
+        professionalAvatar: proAvatar,
+        professionalPhone: proPhone,
+        serviceTitle: req.title || 'Serviço Solicitado',
+        categoryName: req.categoryName || 'Geral',
+        province: req.province || 'Luanda',
+        status: req.status,
+        budgetKz: req.budgetKz,
+        lastMessageText: lastMsg?.text || (req.description ? `${req.description.slice(0, 55)}${req.description.length > 55 ? '...' : ''}` : 'Conversa aberta'),
+        lastMessageTimestamp: lastTimestamp,
+        lastMessageSenderId: lastMsg?.senderId,
+        lastMessageSenderName: lastMsg?.senderName,
+        lastMessageStatus: lastMsg?.status,
+        unreadCount,
+        participants: [req.clientId, req.professionalId || ''].filter(Boolean),
+        createdAt: req.createdAt,
+        updatedAt: req.updatedAt || lastTimestamp
+      });
+    });
+
+    // 2. Verificar mensagens diretas que possam ter conversationId avulso
+    messages.forEach(msg => {
+      const threadId = msg.conversationId || msg.requestId;
+      if (!threadId || convMap.has(threadId)) return;
+
+      const isParticipant = msg.senderId === currentUser.id || msg.receiverId === currentUser.id || (msg.participants && msg.participants.includes(currentUser.id)) || currentUser.role === 'admin';
+      if (!isParticipant) return;
+
+      const otherUserId = msg.senderId === currentUser.id ? msg.receiverId : msg.senderId;
+      const otherUser = allUsers.find(u => u.id === otherUserId) || professionals.find(p => p.id === otherUserId);
+
+      const threadMsgs = messages.filter(m => (m.conversationId === threadId || m.requestId === threadId));
+      threadMsgs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      const lastMsg = threadMsgs[threadMsgs.length - 1];
+
+      const unreadCount = threadMsgs.filter(m => 
+        m.senderId !== currentUser.id && 
+        m.status !== 'lida' && 
+        !m.read
+      ).length;
+
+      const lastTimestamp = lastMsg?.timestamp || msg.timestamp;
+
+      convMap.set(threadId, {
+        id: threadId,
+        requestId: threadId,
+        clientId: msg.senderRole === 'cliente' ? msg.senderId : (otherUserId || ''),
+        clientName: msg.senderRole === 'cliente' ? msg.senderName : (otherUser?.name || 'Cliente'),
+        clientAvatar: msg.senderRole === 'cliente' ? msg.senderAvatar : (otherUser?.avatar || ''),
+        professionalId: msg.senderRole === 'profissional' ? msg.senderId : (otherUserId || ''),
+        professionalName: msg.senderRole === 'profissional' ? msg.senderName : (otherUser?.name || 'Profissional'),
+        professionalAvatar: msg.senderRole === 'profissional' ? msg.senderAvatar : (otherUser?.avatar || ''),
+        serviceTitle: 'Atendimento Direto',
+        categoryName: 'Geral',
+        province: otherUser?.province || 'Luanda',
+        status: 'em_progresso',
+        lastMessageText: lastMsg?.text || msg.text,
+        lastMessageTimestamp: lastTimestamp,
+        lastMessageSenderId: lastMsg?.senderId,
+        lastMessageSenderName: lastMsg?.senderName,
+        lastMessageStatus: lastMsg?.status,
+        unreadCount,
+        participants: msg.participants || [msg.senderId, otherUserId || ''].filter(Boolean),
+        createdAt: msg.createdAt || msg.timestamp,
+        updatedAt: lastTimestamp
+      });
+    });
+
+    const list = Array.from(convMap.values());
+    // Ordenar de forma decrescente: as conversas com mensagens/atualizações mais recentes aparecem no topo
+    list.sort((a, b) => {
+      const timeA = new Date(a.lastMessageTimestamp || a.updatedAt || a.createdAt || 0).getTime();
+      const timeB = new Date(b.lastMessageTimestamp || b.updatedAt || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+
+    return list;
+  }, [requests, messages, currentUser, professionals, allUsers]);
+
+  // Total de mensagens não lidas no chat para o utilizador atual
+  const unreadChatMessagesCount = React.useMemo(() => {
+    return conversations.reduce((acc, conv) => acc + (conv.unreadCount || 0), 0);
+  }, [conversations]);
+
+  // Marcar todas as mensagens de uma conversa como lidas
+  const markConversationAsRead = async (conversationId: string) => {
+    if (!conversationId || !currentUser || !currentUser.id) return;
+
+    const unreadMsgs = messages.filter(m => 
+      (m.requestId === conversationId || m.conversationId === conversationId) && 
+      m.senderId !== currentUser.id && 
+      (m.status !== 'lida' || !m.read)
+    );
+
+    if (unreadMsgs.length === 0) return;
+
+    // Atualização imediata no estado local para resposta instantânea na UI
+    setMessages(prev => prev.map(m => {
+      if ((m.requestId === conversationId || m.conversationId === conversationId) && m.senderId !== currentUser.id) {
+        return {
+          ...m,
+          status: 'lida',
+          read: true,
+          readBy: m.readBy ? (m.readBy.includes(currentUser.id) ? m.readBy : [...m.readBy, currentUser.id]) : [currentUser.id]
+        };
+      }
+      return m;
+    }));
+
+    // Sincronização em background com o Firestore
+    try {
+      unreadMsgs.forEach(async (msg) => {
+        await setDoc(doc(db, 'chat_messages', msg.id), {
+          status: 'lida',
+          read: true,
+          readBy: msg.readBy ? [...new Set([...msg.readBy, currentUser.id])] : [currentUser.id],
+          updatedAt: new Date().toISOString()
+        }, { merge: true }).catch(() => {});
+      });
+    } catch (e) {
+      // Ignorar erros transitórios
+    }
+  };
+
+  // Iniciar ou abrir conversa com um profissional específico
+  const startOrOpenConversation = (
+    proId: string, 
+    serviceTitle = 'Serviço Personalizado', 
+    categoryId = 'pedido-personalizado', 
+    initialMessage?: string
+  ): string => {
+    const existing = requests.find(r => 
+      r.clientId === currentUser.id && 
+      r.professionalId === proId && 
+      r.status !== 'cancelado'
+    );
+
+    if (existing) {
+      setActiveChatRequestId(existing.id);
+      setActiveTab('chat');
+      if (initialMessage && initialMessage.trim()) {
+        sendChatMessage(existing.id, initialMessage.trim());
+      }
+      return existing.id;
+    }
+
+    const pro = professionals.find(p => p.id === proId);
+    const cat = categories.find(c => c.id === categoryId) || categories[0];
+
+    const newReqId = `req-${Date.now()}`;
+    const newReq: ServiceRequest = {
+      id: newReqId,
+      clientId: currentUser.id,
+      clientName: currentUser.name,
+      clientAvatar: currentUser.avatar,
+      clientPhone: currentUser.phone,
+      professionalId: proId,
+      professionalName: pro?.name || 'Profissional',
+      professionalAvatar: pro?.avatar || '',
+      categoryId: cat?.id || 'pedido-personalizado',
+      categoryName: cat?.name || 'Serviço Personalizado',
+      title: serviceTitle,
+      description: initialMessage || `Conversa de atendimento e solicitação de orçamento com ${pro?.name || 'o profissional'}.`,
+      province: currentUser.province || 'Luanda',
+      address: currentUser.address || currentUser.province || 'Luanda',
+      urgency: 'Normal',
+      scheduledDate: new Date().toISOString().split('T')[0],
+      budgetKz: pro?.hourlyRateKz || 15000,
+      status: 'aceito', // Ativo para permitir troca imediata de mensagens
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      hasReview: false
+    };
+
+    setRequests(prev => [newReq, ...prev]);
+    setActiveChatRequestId(newReqId);
+    setActiveTab('chat');
+
+    try {
+      setDoc(doc(db, 'service_requests', newReqId), newReq).catch(() => {});
+    } catch (e) {}
+
+    if (initialMessage && initialMessage.trim()) {
+      sendChatMessage(newReqId, initialMessage.trim());
+    }
+
+    return newReqId;
+  };
+
   const sendChatMessage = async (
     requestId: string, 
     text: string, 
@@ -1499,31 +1802,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const messageId = `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const nowIso = new Date().toISOString();
+    const recipientId = req ? (currentUser.id === req.clientId ? (req.professionalId || 'pro-1') : req.clientId) : '';
+
     const newMsg: ChatMessage = {
       id: messageId,
       requestId,
+      conversationId: requestId,
       senderId: currentUser.id,
       senderRole: currentUser.role,
       senderName: currentUser.name,
       senderAvatar: currentUser.avatar,
+      receiverId: recipientId,
+      participants: [currentUser.id, recipientId].filter(Boolean),
       text,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
       status: 'enviando', // Initial state
+      read: false,
+      readBy: [currentUser.id],
       isQuickQuote: isQuote,
       quotePriceKz,
       imageUrl,
-      locationPin
+      locationPin,
+      createdAt: nowIso,
+      updatedAt: nowIso
     };
 
     setMessages(prev => [...prev, newMsg]);
 
-    // If pro sends quick quote, update request budget
-    if (isQuote && quotePriceKz) {
-      setRequests(prev => prev.map(r => r.id === requestId ? { ...r, budgetKz: quotePriceKz } : r));
-    }
+    // Atualizar o timestamp do pedido para subir imediatamente para o topo da lista de conversas
+    setRequests(prev => prev.map(r => {
+      if (r.id === requestId) {
+        return {
+          ...r,
+          budgetKz: isQuote && quotePriceKz ? quotePriceKz : r.budgetKz,
+          updatedAt: nowIso
+        };
+      }
+      return r;
+    }));
 
     if (req) {
-      const recipientId = currentUser.id === req.clientId ? (req.professionalId || 'pro-1') : req.clientId;
       const targetScope = currentUser.id === req.clientId ? 'profissional' : 'cliente';
       addNotification({
         userId: recipientId,
@@ -1533,9 +1852,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'mensagem_recebida',
         requestId
       });
+
+      // Atualizar no Firestore o timestamp do pedido
+      try {
+        setDoc(doc(db, 'service_requests', requestId), {
+          updatedAt: nowIso,
+          ...(isQuote && quotePriceKz ? { budgetKz: quotePriceKz } : {})
+        }, { merge: true }).catch(() => {});
+      } catch (e) {}
     }
 
-    // Persist to Firestore and update state to 'entregue'
+    // Persistir no Firestore e atualizar estado para 'entregue'
     try {
       const docData: ChatMessage = { ...newMsg, status: 'entregue' };
       await setDoc(doc(db, 'chat_messages', messageId), docData);
@@ -3227,12 +3554,235 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     logAdminAction('Atualização do Código de Conduta', 'all', 'Novas regras salvas pelo Administrador');
   };
 
-  const addCategory = (catData: Omit<ServiceCategory, 'id'>) => {
+  const checkCategoryUsage = (categoryId: string) => {
+    const pros = professionals.filter(p => p.categories && p.categories.includes(categoryId)).length;
+    const reqCount = requests.filter(r => r.categoryId === categoryId).length;
+    const posts = workFeedPosts.filter(w => w.categoryId === categoryId).length;
+    return { pros, requests: reqCount, posts, total: pros + reqCount + posts };
+  };
+
+  const addCategory = async (catData: Omit<ServiceCategory, 'id'> | ServiceCategory): Promise<{ success: boolean; message: string; category?: ServiceCategory }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas o administrador autorizado pode adicionar categorias.' };
+    }
+
+    if (!catData.name || !catData.name.trim()) {
+      return { success: false, message: 'O nome da categoria é obrigatório.' };
+    }
+
+    const trimmedName = catData.name.trim();
+    const cleanId = (catData as ServiceCategory).id || trimmedName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `cat-${Date.now()}`;
+    
+    // Check if category already exists
+    const duplicate = categories.find(c => c.id === cleanId || c.name.toLowerCase() === trimmedName.toLowerCase());
+    if (duplicate) {
+      return { success: false, message: `Já existe uma categoria com o nome "${trimmedName}" (ID: ${duplicate.id}).` };
+    }
+
+    const itemsList = Array.isArray(catData.items) ? catData.items : (Array.isArray(catData.subcategories) ? catData.subcategories : []);
+    const timestamp = new Date().toISOString();
+
     const newCat: ServiceCategory = {
-      ...catData,
-      id: catData.name.toLowerCase().replace(/\s+/g, '-')
+      id: cleanId,
+      name: trimmedName,
+      description: catData.description?.trim() || 'Serviço qualificado e de confiança em Angola',
+      iconName: catData.iconName || 'Briefcase',
+      color: catData.color || 'emerald',
+      group: catData.group?.trim() || 'Casa & Manutenção',
+      popularCount: catData.popularCount || 100,
+      items: itemsList,
+      subcategories: itemsList,
+      imageUrl: catData.imageUrl || '',
+      isActive: catData.isActive !== false,
+      ownerId: currentUser.id,
+      createdAt: timestamp,
+      updatedAt: timestamp
     };
-    setCategories(prev => [...prev, newCat]);
+
+    try {
+      // 1. Persist to Firestore categories collection
+      await setDoc(doc(db, 'categories', cleanId), newCat, { merge: true });
+      
+      // 2. Persist to Firestore servicos collection (blueprint mapping)
+      try {
+        await setDoc(doc(db, 'servicos', cleanId), newCat, { merge: true });
+      } catch {}
+
+      // 3. Update local state
+      setCategories(prev => [...prev, newCat]);
+
+      // 4. Log audit action
+      await logAdminAction(
+        'Adição de Categoria',
+        cleanId,
+        `Categoria "${newCat.name}" criada com sucesso (${itemsList.length} subcategorias). Grupo: ${newCat.group}`
+      );
+
+      return { success: true, message: `Categoria "${newCat.name}" adicionada com sucesso!`, category: newCat };
+    } catch (err: any) {
+      console.error('Erro ao salvar categoria no Firestore:', err);
+      // Still update local state for offline resilience
+      setCategories(prev => [...prev, newCat]);
+      return { success: true, message: `Categoria "${newCat.name}" adicionada com sucesso localmente.`, category: newCat };
+    }
+  };
+
+  const updateCategory = async (categoryId: string, updates: Partial<ServiceCategory>): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas o administrador autorizado pode editar categorias.' };
+    }
+
+    const existing = categories.find(c => c.id === categoryId);
+    if (!existing) {
+      return { success: false, message: 'Categoria não encontrada.' };
+    }
+
+    const timestamp = new Date().toISOString();
+    const itemsList = updates.items || updates.subcategories || existing.items || existing.subcategories || [];
+
+    const updatedCat: ServiceCategory = {
+      ...existing,
+      ...updates,
+      items: itemsList,
+      subcategories: itemsList,
+      updatedAt: timestamp
+    };
+
+    try {
+      await setDoc(doc(db, 'categories', categoryId), updatedCat, { merge: true });
+      try {
+        await setDoc(doc(db, 'servicos', categoryId), updatedCat, { merge: true });
+      } catch {}
+
+      setCategories(prev => prev.map(c => c.id === categoryId ? updatedCat : c));
+
+      await logAdminAction(
+        'Atualização de Categoria',
+        categoryId,
+        `Categoria "${updatedCat.name}" atualizada pelo Administrador.`
+      );
+
+      return { success: true, message: `Categoria "${updatedCat.name}" atualizada com sucesso!` };
+    } catch (err: any) {
+      console.error('Erro ao atualizar categoria no Firestore:', err);
+      setCategories(prev => prev.map(c => c.id === categoryId ? updatedCat : c));
+      return { success: true, message: `Categoria "${updatedCat.name}" atualizada com sucesso.` };
+    }
+  };
+
+  const toggleCategoryStatus = async (categoryId: string): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas o administrador pode alterar o estado da categoria.' };
+    }
+
+    const existing = categories.find(c => c.id === categoryId);
+    if (!existing) return { success: false, message: 'Categoria não encontrada.' };
+
+    const newIsActive = existing.isActive === false ? true : false;
+    return updateCategory(categoryId, { isActive: newIsActive });
+  };
+
+  const deleteCategory = async (categoryId: string, force = false): Promise<{ success: boolean; message: string; inUse?: boolean; usageCount?: { pros: number; requests: number; posts: number } }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas o administrador autorizado pode excluir categorias.' };
+    }
+
+    const existing = categories.find(c => c.id === categoryId);
+    if (!existing) {
+      return { success: false, message: 'Categoria não encontrada.' };
+    }
+
+    const usage = checkCategoryUsage(categoryId);
+    if (usage.total > 0 && !force) {
+      return {
+        success: false,
+        inUse: true,
+        usageCount: { pros: usage.pros, requests: usage.requests, posts: usage.posts },
+        message: `Esta categoria está associada a ${usage.pros} profissional(is), ${usage.requests} pedido(s) e ${usage.posts} publicação(ões). Desative a categoria ou confirme a exclusão forçada.`
+      };
+    }
+
+    try {
+      await deleteDoc(doc(db, 'categories', categoryId));
+      try {
+        await deleteDoc(doc(db, 'servicos', categoryId));
+      } catch {}
+
+      setCategories(prev => prev.filter(c => c.id !== categoryId));
+
+      await logAdminAction(
+        'Exclusão de Categoria',
+        categoryId,
+        `Categoria "${existing.name}" (ID: ${categoryId}) excluída definitivamente.`
+      );
+
+      return { success: true, message: `Categoria "${existing.name}" excluída com sucesso da base de dados!` };
+    } catch (err: any) {
+      console.error('Erro ao excluir categoria do Firestore:', err);
+      setCategories(prev => prev.filter(c => c.id !== categoryId));
+      return { success: true, message: `Categoria "${existing.name}" removida com sucesso.` };
+    }
+  };
+
+  const addSubcategory = async (categoryId: string, subcategoryName: string): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas o administrador autorizado pode adicionar subcategorias.' };
+    }
+
+    const trimmed = subcategoryName.trim();
+    if (!trimmed) {
+      return { success: false, message: 'O nome da subcategoria não pode estar vazio.' };
+    }
+
+    const existing = categories.find(c => c.id === categoryId);
+    if (!existing) {
+      return { success: false, message: 'Categoria principal não encontrada.' };
+    }
+
+    const currentItems = existing.items || existing.subcategories || [];
+    if (currentItems.some(item => item.toLowerCase() === trimmed.toLowerCase())) {
+      return { success: false, message: `A subcategoria "${trimmed}" já existe nesta categoria.` };
+    }
+
+    const newItems = [...currentItems, trimmed];
+    return updateCategory(categoryId, { items: newItems, subcategories: newItems });
+  };
+
+  const updateSubcategory = async (categoryId: string, oldName: string, newName: string): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas o administrador autorizado pode editar subcategorias.' };
+    }
+
+    const trimmedNew = newName.trim();
+    if (!trimmedNew) {
+      return { success: false, message: 'O novo nome da subcategoria não pode estar vazio.' };
+    }
+
+    const existing = categories.find(c => c.id === categoryId);
+    if (!existing) {
+      return { success: false, message: 'Categoria principal não encontrada.' };
+    }
+
+    const currentItems = existing.items || existing.subcategories || [];
+    const newItems = currentItems.map(item => item === oldName ? trimmedNew : item);
+
+    return updateCategory(categoryId, { items: newItems, subcategories: newItems });
+  };
+
+  const deleteSubcategory = async (categoryId: string, subcategoryName: string): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas o administrador autorizado pode excluir subcategorias.' };
+    }
+
+    const existing = categories.find(c => c.id === categoryId);
+    if (!existing) {
+      return { success: false, message: 'Categoria principal não encontrada.' };
+    }
+
+    const currentItems = existing.items || existing.subcategories || [];
+    const newItems = currentItems.filter(item => item !== subcategoryName);
+
+    return updateCategory(categoryId, { items: newItems, subcategories: newItems });
   };
 
   const resetDemoData = () => {
@@ -3298,6 +3848,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSelectedPro,
       activeChatRequestId,
       setActiveChatRequestId,
+      conversations,
+      unreadChatMessagesCount,
+      markConversationAsRead,
+      startOrOpenConversation,
       isNewRequestOpen,
       setIsNewRequestOpen,
       isReviewModalOpen,
@@ -3342,6 +3896,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isRulesModalOpen,
       setIsRulesModalOpen,
       addCategory,
+      updateCategory,
+      deleteCategory,
+      toggleCategoryStatus,
+      addSubcategory,
+      updateSubcategory,
+      deleteSubcategory,
+      checkCategoryUsage,
       addStaffAdmin,
       logAdminAction,
       runAutoTestSuite,
