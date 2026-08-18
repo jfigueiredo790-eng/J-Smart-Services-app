@@ -312,15 +312,15 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
 
                   <div>
                     <span className="text-[10px] font-bold text-slate-500 uppercase block mt-2">IBAN Angolano (Banco BCI):</span>
-                    <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-slate-200 mt-1 font-mono font-extrabold text-slate-900 text-xs">
-                      <span className="truncate">{ibanNumber}</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-2.5 rounded-xl border border-slate-200 mt-1 font-mono font-extrabold text-slate-900 text-xs gap-2">
+                      <span className="break-all select-all font-mono text-xs">{ibanNumber}</span>
                       <button
                         type="button"
                         onClick={() => handleCopy(ibanNumber, 'iban')}
-                        className="text-xs text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded-lg shrink-0 ml-2"
+                        className="text-xs text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 bg-emerald-50 px-2.5 py-1.5 rounded-lg shrink-0 self-start sm:self-auto"
                       >
                         <Copy className="w-3.5 h-3.5" />
-                        <span>{copiedField === 'iban' ? 'Copiado!' : 'Copiar'}</span>
+                        <span>{copiedField === 'iban' ? 'Copiado!' : 'Copiar IBAN'}</span>
                       </button>
                     </div>
                   </div>
@@ -392,11 +392,11 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
                       </div>
 
                       {/* File Details Bar */}
-                      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
-                        <div className="flex items-center gap-2 truncate pr-2">
+                      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs gap-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
                           <ImageIcon className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <div className="truncate">
-                            <p className="font-extrabold text-slate-900 truncate">{proofFileName}</p>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-extrabold text-slate-900 break-all leading-tight">{proofFileName}</p>
                             <p className="text-[10px] text-slate-500 font-bold">{proofFileSizeStr}</p>
                           </div>
                         </div>
@@ -428,16 +428,16 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
                   {/* Preview State: Real PDF Selected */}
                   {selectedFile && proofFileType === 'pdf' && (
                     <div className="space-y-2">
-                      <div className="bg-gradient-to-br from-rose-50 to-amber-50 border-2 border-rose-200 rounded-2xl p-4 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-md">
+                      <div className="bg-gradient-to-br from-rose-50 to-amber-50 border-2 border-rose-200 rounded-2xl p-4 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className="w-12 h-12 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-md shrink-0">
                             <FileText className="w-7 h-7" />
                           </div>
-                          <div>
+                          <div className="min-w-0 flex-1">
                             <span className="text-[10px] font-black uppercase text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md">
                               Documento PDF
                             </span>
-                            <p className="font-extrabold text-slate-900 text-xs mt-1 truncate max-w-[220px]">
+                            <p className="font-extrabold text-slate-900 text-xs mt-1 break-all leading-tight">
                               {proofFileName}
                             </p>
                             <p className="text-[10px] text-slate-500 font-bold">{proofFileSizeStr}</p>

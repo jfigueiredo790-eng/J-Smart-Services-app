@@ -192,12 +192,12 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, on
 
                 <div className="flex-1 min-w-0 pr-4">
                   <div className="flex items-center justify-between gap-2">
-                    <h4 className={`text-xs font-bold truncate ${!n.read ? 'text-slate-900 font-extrabold' : 'text-slate-700'}`}>
+                    <h4 className={`text-xs break-words leading-snug ${!n.read ? 'text-slate-900 font-extrabold' : 'text-slate-700 font-bold'}`}>
                       {n.title}
                     </h4>
                   </div>
 
-                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed break-words">
                     {n.message}
                   </p>
 

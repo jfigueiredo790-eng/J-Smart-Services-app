@@ -47,13 +47,13 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({ category, onClick, i
       </div>
 
       <div className="mt-3">
-        <div className="flex items-center justify-between">
-          <h3 className={`font-extrabold text-sm tracking-tight ${isSelected ? 'text-white' : 'text-slate-900 group-hover:text-emerald-700'}`}>
+        <div className="flex items-center justify-between gap-1.5">
+          <h3 className={`font-extrabold text-sm tracking-tight break-words leading-snug ${isSelected ? 'text-white' : 'text-slate-900 group-hover:text-emerald-700'}`}>
             {category.name}
           </h3>
-          <ChevronRight className={`w-4 h-4 transition-transform group-hover:translate-x-0.5 ${isSelected ? 'text-emerald-200' : 'text-slate-400 group-hover:text-emerald-600'}`} />
+          <ChevronRight className={`w-4 h-4 shrink-0 transition-transform group-hover:translate-x-0.5 ${isSelected ? 'text-emerald-200' : 'text-slate-400 group-hover:text-emerald-600'}`} />
         </div>
-        <p className={`text-[11px] line-clamp-2 mt-0.5 leading-relaxed ${isSelected ? 'text-emerald-100' : 'text-slate-500'}`}>
+        <p className={`text-[11px] mt-1 leading-relaxed break-words ${isSelected ? 'text-emerald-100' : 'text-slate-500'}`}>
           {category.description}
         </p>
       </div>

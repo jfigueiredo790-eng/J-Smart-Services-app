@@ -65,6 +65,8 @@ export const AdminDashboard: React.FC = () => {
     addStaffAdmin,
     adminUnlockProPlan,
     adminChangeUserAccountType,
+    adminUpdateProCategories,
+    auditAndFixBuggedCategories,
     runAutoTestSuite,
     codeOfConductRules,
     updateCodeOfConductRules
@@ -74,6 +76,22 @@ export const AdminDashboard: React.FC = () => {
   const [editableRules, setEditableRules] = useState(() => codeOfConductRules);
   const [rulesSaveSuccess, setRulesSaveSuccess] = useState(false);
   const [newRuleInput, setNewRuleInput] = useState<{ [sectionId: string]: string }>({});
+  
+  // Category Audit State
+  const [auditReport, setAuditReport] = useState<{
+    scannedCount: number;
+    affectedCount: number;
+    fixedCount: number;
+    details: Array<{
+      proId: string;
+      proName: string;
+      beforeCategories: string[];
+      afterCategories: string[];
+      reason: string;
+      actionTaken: 'corrigido' | 'mantido' | 'analisado';
+    }>;
+  } | null>(null);
+  const [isAuditing, setIsAuditing] = useState(false);
 
   // Global Administrative Toast Feedback & Confirmation Modal State
   const [adminFeedback, setAdminFeedback] = useState<{
@@ -761,10 +779,10 @@ export const AdminDashboard: React.FC = () => {
                               className="border-2 border-white shadow-sm shrink-0"
                             />
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between">
-                                <h5 className="font-black text-slate-900 text-sm truncate">{usr.name}</h5>
+                              <div className="flex items-start justify-between gap-1">
+                                <h5 className="font-black text-slate-900 text-sm break-words leading-tight">{usr.name}</h5>
                                 {usr.blocked && (
-                                  <span className="text-[9px] bg-rose-600 text-white font-extrabold px-1.5 py-0.5 rounded-md uppercase">
+                                  <span className="text-[9px] bg-rose-600 text-white font-extrabold px-1.5 py-0.5 rounded-md uppercase shrink-0">
                                     Bloqueado
                                   </span>
                                 )}
@@ -807,9 +825,9 @@ export const AdminDashboard: React.FC = () => {
                               <span className="font-extrabold text-slate-900">{usr.phone || 'Sem contacto'}</span>
                             </div>
 
-                            <div className="flex items-center justify-between">
-                              <span className="font-medium text-slate-400">E-mail:</span>
-                              <span className="font-bold text-slate-800 truncate max-w-[170px]">{usr.email}</span>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-slate-400 shrink-0">E-mail:</span>
+                              <span className="font-bold text-slate-800 break-all text-right">{usr.email}</span>
                             </div>
 
                             <div className="flex items-center justify-between">
@@ -1012,7 +1030,7 @@ export const AdminDashboard: React.FC = () => {
                                 📎 Comprovativo Anexado ({tx.proofFileType === 'pdf' || tx.proofUrl?.startsWith('data:application/pdf') ? 'Documento PDF' : 'Imagem'}):
                               </span>
                               {tx.proofFileName && (
-                                <span className="text-[10px] text-slate-400 font-mono truncate max-w-[150px]">
+                                <span className="text-[10px] text-slate-400 font-mono break-all text-right">
                                   {tx.proofFileName}
                                 </span>
                               )}
@@ -1022,17 +1040,17 @@ export const AdminDashboard: React.FC = () => {
                               tx.proofFileType === 'pdf' || tx.proofUrl.startsWith('data:application/pdf') || tx.proofFileName?.toLowerCase().endsWith('.pdf') ? (
                                 <div 
                                   onClick={() => setViewingProofTx(tx)}
-                                  className="cursor-pointer bg-gradient-to-br from-rose-50 to-amber-50 hover:from-rose-100 hover:to-amber-100 p-3 rounded-xl border border-rose-200 flex items-center justify-between transition-all group"
+                                  className="cursor-pointer bg-gradient-to-br from-rose-50 to-amber-50 hover:from-rose-100 hover:to-amber-100 p-3 rounded-xl border border-rose-200 flex items-center justify-between transition-all group gap-2"
                                 >
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-lg bg-rose-600 text-white flex items-center justify-center shadow-sm">
+                                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                                    <div className="w-10 h-10 rounded-lg bg-rose-600 text-white flex items-center justify-center shadow-sm shrink-0">
                                       <FileText className="w-6 h-6" />
                                     </div>
-                                    <div>
+                                    <div className="min-w-0 flex-1">
                                       <span className="text-[9px] font-black uppercase tracking-wider text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded">
                                         PDF
                                       </span>
-                                      <p className="font-extrabold text-slate-900 text-xs mt-0.5 truncate max-w-[180px]">
+                                      <p className="font-extrabold text-slate-900 text-xs mt-0.5 break-all leading-snug">
                                         {tx.proofFileName || 'Comprovativo_Pagamento.pdf'}
                                       </p>
                                     </div>
@@ -2397,8 +2415,146 @@ export const AdminDashboard: React.FC = () => {
       )}
 
       {/* TAB 8: LOGS DE AUDITORIA E SEGURANÇA */}
+      {/* TAB 8: AUDITORIA DE SEGURANÇA E CATEGORIAS */}
       {adminTab === 'audit' && (
-        <div className="space-y-4">
+        <div className="space-y-6">
+          {/* Card de Auditoria & Correção de Áreas de Atuação */}
+          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl p-6 border border-slate-700 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-emerald-400" />
+                  <h3 className="text-base font-extrabold text-white tracking-wide">
+                    Auditoria de Áreas de Atuação (Correção de Seleção Automática)
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-300 mt-1 max-w-2xl">
+                  Diagnostica e corrige perfis reais onde a opção "Electricista" foi adicionada indevidamente pelo erro de seleção automática no cadastro. Mantém intactos os verdadeiros electricistas e preserva a integridade de todas as contas.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={isAuditing}
+                  onClick={async () => {
+                    setIsAuditing(true);
+                    try {
+                      const res = await auditAndFixBuggedCategories({ dryRun: true });
+                      setAuditReport(res);
+                      showToast('info', `Diagnóstico concluído: ${res.scannedCount} profissionais analisados. ${res.affectedCount} caso(s) identificado(s).`);
+                    } catch (e: any) {
+                      showToast('error', 'Falha ao executar auditoria.');
+                    } finally {
+                      setIsAuditing(false);
+                    }
+                  }}
+                  className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-black px-4 py-2.5 rounded-xl border border-slate-600 transition-all flex items-center gap-1.5 shadow"
+                >
+                  <Search className="w-4 h-4 text-sky-400" />
+                  <span>{isAuditing ? 'A analisar...' : 'Diagnosticar (Pré-visualização)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isAuditing}
+                  onClick={async () => {
+                    if (!confirm('Deseja aplicar a correção segura para os profissionais diagnosticados com seleção automática de Electricista? Apenas casos com evidência clara serão corrigidos.')) {
+                      return;
+                    }
+                    setIsAuditing(true);
+                    try {
+                      const res = await auditAndFixBuggedCategories({ dryRun: false });
+                      setAuditReport(res);
+                      showToast('success', `Correção concluída com sucesso! ${res.fixedCount} profissional(is) corrigido(s).`);
+                    } catch (e: any) {
+                      showToast('error', 'Falha ao executar correção.');
+                    } finally {
+                      setIsAuditing(false);
+                    }
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-900/40"
+                >
+                  <Check className="w-4 h-4 text-white" />
+                  <span>Aplicar Correção Segura</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Relatório de Auditoria */}
+            {auditReport && (
+              <div className="bg-slate-950/60 rounded-2xl p-4 border border-slate-800 space-y-3 animate-fade-in">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs border-b border-slate-800 pb-2.5">
+                  <div className="flex items-center gap-4">
+                    <span>Profissionais Analisados: <strong className="text-white">{auditReport.scannedCount}</strong></span>
+                    <span>Casos com Evidência: <strong className="text-amber-400">{auditReport.affectedCount}</strong></span>
+                    <span>Corrigidos: <strong className="text-emerald-400">{auditReport.fixedCount}</strong></span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAuditReport(null)}
+                    className="text-slate-400 hover:text-white text-[11px]"
+                  >
+                    Fechar Relatório ✕
+                  </button>
+                </div>
+
+                {auditReport.details.length === 0 ? (
+                  <p className="text-xs text-emerald-400 py-2">
+                    ✓ Nenhum caso problemático encontrado nos profissionais registados. Todas as áreas estão consistentes!
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1 text-xs">
+                    {auditReport.details.map((item, idx) => (
+                      <div key={idx} className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white">{item.proName}</span>
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
+                              item.actionTaken === 'corrigido'
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            }`}>
+                              {item.actionTaken === 'corrigido' ? 'CORRIGIDO' : item.actionTaken === 'analisado' ? 'PROPOSTO' : 'MANTIDO'}
+                            </span>
+                          </div>
+                          <p className="text-slate-400 text-[11px] mt-0.5">{item.reason}</p>
+                          <div className="flex items-center gap-2 text-[10px] mt-1 text-slate-300 font-mono">
+                            <span>Antes: [{item.beforeCategories.join(', ')}]</span>
+                            <span>➔</span>
+                            <span className="text-emerald-400">Depois: [{item.afterCategories.join(', ')}]</span>
+                          </div>
+                        </div>
+
+                        {item.actionTaken !== 'corrigido' && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const res = await adminUpdateProCategories(item.proId, item.afterCategories);
+                              if (res.success) {
+                                showToast('success', `Profissional ${item.proName} atualizado com sucesso!`);
+                                setAuditReport(prev => prev ? {
+                                  ...prev,
+                                  fixedCount: prev.fixedCount + 1,
+                                  details: prev.details.map(d => d.proId === item.proId ? { ...d, actionTaken: 'corrigido' } : d)
+                                } : null);
+                              } else {
+                                showToast('error', res.message);
+                              }
+                            }}
+                            className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg whitespace-nowrap"
+                          >
+                            Corrigir Este Perfil
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
             <div>
               <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
@@ -2711,7 +2867,7 @@ export const AdminDashboard: React.FC = () => {
                 </div>
                 <div>
                   <span className="text-[10px] font-bold text-slate-400 block uppercase">E-mail</span>
-                  <span className="font-bold text-slate-900 truncate block">{viewingUserDetail.email}</span>
+                  <span className="font-bold text-slate-900 break-all block">{viewingUserDetail.email}</span>
                 </div>
                 <div className="mt-2">
                   <span className="text-[10px] font-bold text-slate-400 block uppercase">Nº Bilhete Identidade</span>
@@ -2769,6 +2925,116 @@ export const AdminDashboard: React.FC = () => {
                   <option value="duplo">🔄 Conta Dupla</option>
                 </select>
               </div>
+
+              {/* Áreas de Atuação do Profissional */}
+              {(viewingUserDetail.role === 'profissional' || viewingUserDetail.accountType === 'duplo' || viewingUserDetail.accountType === 'profissional' || ('categories' in viewingUserDetail && Array.isArray((viewingUserDetail as any).categories))) && (
+                <div className="bg-emerald-50/80 p-3.5 rounded-2xl border border-emerald-200/90 space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                    <div>
+                      <span className="text-emerald-900 font-extrabold text-xs flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Áreas de Atuação / Profissões ({( (viewingUserDetail as any).categories || [] ).length})</span>
+                      </span>
+                      <span className="text-[10px] text-emerald-700 font-medium">Especialidades associadas ao perfil</span>
+                    </div>
+
+                    {((viewingUserDetail as any).categories || []).some((c: string) => c === 'eletricista' || c === 'electricista') && ((viewingUserDetail as any).categories || []).length > 1 && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const currentCats: string[] = (viewingUserDetail as any).categories || [];
+                          const corrected = currentCats.filter(c => c !== 'eletricista' && c !== 'electricista');
+                          const res = await adminUpdateProCategories(viewingUserDetail.id, corrected);
+                          if (res.success) {
+                            showToast('success', "Electricista removido do perfil com sucesso!");
+                            setViewingUserDetail(prev => prev ? { ...prev, categories: corrected } : null);
+                          } else {
+                            showToast('error', res.message);
+                          }
+                        }}
+                        className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] px-2.5 py-1 rounded-xl shadow-xs transition-all flex items-center gap-1 self-start sm:self-auto"
+                        title="Remover Electricista adicionado por erro do formulário"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Remover 'Electricista'</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {(((viewingUserDetail as any).categories as string[]) || []).length === 0 ? (
+                      <span className="text-[11px] text-slate-400 italic">Nenhuma área selecionada</span>
+                    ) : (
+                      (((viewingUserDetail as any).categories as string[]) || []).map((catId: string) => {
+                        const catObj = categories.find(c => c.id === catId);
+                        const isElec = catId === 'eletricista' || catId === 'electricista';
+                        return (
+                          <span
+                            key={catId}
+                            className={`text-[11px] font-black px-2.5 py-1 rounded-xl border flex items-center gap-1.5 ${
+                              isElec
+                                ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                : 'bg-white text-slate-800 border-emerald-300 shadow-xs'
+                            }`}
+                          >
+                            <span>{catObj?.name || catId}</span>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const currentCats: string[] = (viewingUserDetail as any).categories || [];
+                                const updated = currentCats.filter(c => c !== catId);
+                                const res = await adminUpdateProCategories(viewingUserDetail.id, updated);
+                                if (res.success) {
+                                  showToast('success', `Área "${catObj?.name || catId}" removida.`);
+                                  setViewingUserDetail(prev => prev ? { ...prev, categories: updated } : null);
+                                } else {
+                                  showToast('error', res.message);
+                                }
+                              }}
+                              className="text-slate-400 hover:text-rose-600 ml-0.5"
+                              title="Remover esta área"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Dropdown para Adicionar Nova Área */}
+                  <div className="pt-1 border-t border-emerald-200/60">
+                    <select
+                      defaultValue=""
+                      onChange={async (e) => {
+                        const chosen = e.target.value;
+                        if (!chosen) return;
+                        const currentCats: string[] = (viewingUserDetail as any).categories || [];
+                        if (currentCats.includes(chosen)) {
+                          showToast('info', 'O profissional já possui esta área.');
+                          e.target.value = '';
+                          return;
+                        }
+                        const updated = [...currentCats, chosen];
+                        const res = await adminUpdateProCategories(viewingUserDetail.id, updated);
+                        if (res.success) {
+                          showToast('success', 'Nova área adicionada com sucesso!');
+                          setViewingUserDetail(prev => prev ? { ...prev, categories: updated } : null);
+                        } else {
+                          showToast('error', res.message);
+                        }
+                        e.target.value = '';
+                      }}
+                      className="bg-white text-xs font-bold text-slate-800 border border-emerald-300 rounded-xl px-2.5 py-1.5 focus:outline-none w-full"
+                    >
+                      <option value="">➕ Adicionar outra profissão / especialidade...</option>
+                      {categories.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="pt-2 flex flex-col sm:flex-row gap-2">

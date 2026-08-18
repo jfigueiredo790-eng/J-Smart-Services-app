@@ -420,8 +420,8 @@ export const ChatView: React.FC = () => {
                     {/* Conteúdo da Conversa */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1 mb-0.5">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <h4 className={`text-xs truncate ${hasUnread ? 'font-black text-white' : isSelected ? 'font-bold text-white' : 'font-semibold text-slate-200'}`}>
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <h4 className={`text-xs break-words leading-tight ${hasUnread ? 'font-black text-white' : isSelected ? 'font-bold text-white' : 'font-semibold text-slate-200'}`}>
                             {otherPartyName}
                           </h4>
                           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -432,8 +432,8 @@ export const ChatView: React.FC = () => {
                       </div>
 
                       {/* Tag do Serviço & Província */}
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <span className="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700 truncate max-w-[150px]">
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                        <span className="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700 break-words leading-tight">
                           {conv.serviceTitle}
                         </span>
                         {conv.province && (
@@ -523,12 +523,12 @@ export const ChatView: React.FC = () => {
                     className="border border-emerald-500 shrink-0"
                   />
 
-                  <div className="min-w-0">
-                    <h3 className="font-bold text-sm text-white flex items-center gap-1.5 truncate">
-                      <span className="truncate">{targetName}</span>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-bold text-sm text-white flex items-center gap-1.5 break-words">
+                      <span>{targetName}</span>
                       <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
                     </h3>
-                    <p className="text-[11px] text-slate-400 truncate max-w-[180px] sm:max-w-xs md:max-w-md">
+                    <p className="text-[11px] text-slate-400 break-words leading-tight mt-0.5">
                       {activeConversation.serviceTitle} • <span className="text-emerald-400 font-medium">{activeConversation.province || 'Angola'}</span>
                     </p>
                   </div>

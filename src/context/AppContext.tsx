@@ -223,6 +223,20 @@ interface AppContextType {
   subscribeToPlan: (planType: ProSubscriptionPlan, bypassBalance?: boolean) => { success: boolean; message: string };
   adminUnlockProPlan: (proId: string, planType: ProSubscriptionPlan) => Promise<{ success: boolean; message: string }>;
   adminChangeUserAccountType: (userId: string, newAccountType: AccountType) => Promise<{ success: boolean; message: string }>;
+  adminUpdateProCategories: (userId: string, newCategories: string[]) => Promise<{ success: boolean; message: string }>;
+  auditAndFixBuggedCategories: (options?: { dryRun?: boolean }) => Promise<{
+    scannedCount: number;
+    affectedCount: number;
+    fixedCount: number;
+    details: Array<{
+      proId: string;
+      proName: string;
+      beforeCategories: string[];
+      afterCategories: string[];
+      reason: string;
+      actionTaken: 'corrigido' | 'mantido' | 'analisado';
+    }>;
+  }>;
   
   // Wallet & Admin Actions
   addWalletDeposit: (amountKz: number, method: string) => void;
@@ -1242,7 +1256,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ...currentUser,
           role: 'profissional',
           accountType: 'duplo',
-          categories: ['eletricista'],
+          categories: (currentUser as any).categories && Array.isArray((currentUser as any).categories) ? (currentUser as any).categories : [],
           bio: 'Profissional qualificado em prestação de serviços.',
           experienceYears: 2,
           hourlyRateKz: 15000,
@@ -2086,7 +2100,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           role: 'profissional',
           accountType: userData.accountType || 'profissional',
           avatar: newUserObj.avatar,
-          categories: userData.categories && userData.categories.length > 0 ? userData.categories : ['trancas-penteados'],
+          categories: Array.isArray(userData.categories) ? userData.categories : [],
           bio: userData.bio || 'Profissional qualificado em prestação de serviços.',
           experienceYears: userData.experienceYears || 2,
           hourlyRateKz: userData.hourlyRateKz || 15000,
@@ -2917,7 +2931,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         city: updatedUser.city || 'Luanda',
         role: 'profissional',
         avatar: updatedUser.avatar || '',
-        categories: (updatedUser as any).categories || ['eletricista'],
+        categories: Array.isArray((updatedUser as any).categories) ? (updatedUser as any).categories : [],
         bio: (updatedUser as any).bio || 'Profissional prestador de serviços.',
         experienceYears: typeof (updatedUser as any).experienceYears === 'number'
           ? Math.max(0, (updatedUser as any).experienceYears)
@@ -3002,7 +3016,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             role: 'profissional',
             avatar: updatedUser.avatar || '',
             photoURL: updatedUser.avatar || '',
-            categories: (updatedUser as any).categories || ['eletricista'],
+            categories: Array.isArray((updatedUser as any).categories) ? (updatedUser as any).categories : [],
             bio: (updatedUser as any).bio || 'Profissional prestador de serviços.',
             experienceYears: (updatedUser as any).experienceYears || 1,
             hourlyRateKz: (updatedUser as any).hourlyRateKz || 15000,
@@ -3564,6 +3578,153 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const adminUpdateProCategories = async (userId: string, newCategories: string[]): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'admin') {
+      return { success: false, message: 'Permissão negada. Apenas administradores podem atualizar áreas de atuação.' };
+    }
+
+    try {
+      const sanitized = Array.isArray(newCategories) ? newCategories : [];
+      await setDoc(doc(db, 'users', userId), { categories: sanitized }, { merge: true });
+      await setDoc(doc(db, 'professionals', userId), { categories: sanitized }, { merge: true });
+
+      await logAdminAction('Atualização de Áreas de Atuação', userId, `Áreas alteradas para: [${sanitized.join(', ')}]`);
+
+      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, categories: sanitized } : u));
+      setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, categories: sanitized } : p));
+
+      if (currentUser.id === userId) {
+        setCurrentUser(prev => ({ ...prev, categories: sanitized }));
+      }
+
+      return { success: true, message: 'Áreas de atuação do profissional atualizadas com sucesso!' };
+    } catch (err: any) {
+      console.error('Erro ao atualizar áreas no Firestore:', err);
+      return { success: false, message: `Falha ao atualizar categorias: ${err.message || err}` };
+    }
+  };
+
+  const auditAndFixBuggedCategories = async (options?: { dryRun?: boolean }): Promise<{
+    scannedCount: number;
+    affectedCount: number;
+    fixedCount: number;
+    details: Array<{
+      proId: string;
+      proName: string;
+      beforeCategories: string[];
+      afterCategories: string[];
+      reason: string;
+      actionTaken: 'corrigido' | 'mantido' | 'analisado';
+    }>;
+  }> => {
+    const results: Array<{
+      proId: string;
+      proName: string;
+      beforeCategories: string[];
+      afterCategories: string[];
+      reason: string;
+      actionTaken: 'corrigido' | 'mantido' | 'analisado';
+    }> = [];
+
+    const nonEletricianKeywords = [
+      'decorad', 'festa', 'evento', 'pintor', 'pintura', 'canalizad', 'plumber',
+      'cabeleir', 'tranc', 'cabelo', 'unha', 'manicure', 'estetica', 'limpeza', 'faxina',
+      'pedreir', 'obra', 'mecanic', 'mecanico', 'costur', 'alfaiat', 'fotograf', 'filmagem',
+      'motorista', 'transporte', 'mudanca', 'cozinha', 'chef', 'doce', 'bolo', 'buffet',
+      'seguranca', 'vigilante', 'tatuad', 'barbeir', 'serralh', 'marceneir', 'moveis', 'estofad'
+    ];
+
+    let fixedCount = 0;
+
+    for (const pro of professionals) {
+      if (isFictitiousOrInvalidUser(pro)) continue;
+      const cats = Array.isArray(pro.categories) ? pro.categories : [];
+      if (cats.length === 0) continue;
+
+      const hasEletricista = cats.includes('eletricista') || cats.includes('electricista');
+      if (!hasEletricista) continue;
+
+      // Case: Professional has eletricista PLUS other categories (e.g. ['eletricista', 'decoracao'])
+      // where eletricista was placed at index 0 by the bug
+      if (cats.length > 1 && (cats[0] === 'eletricista' || cats[0] === 'electricista')) {
+        const otherCats = cats.filter(c => c !== 'eletricista' && c !== 'electricista');
+        const bioLower = (pro.bio || '').toLowerCase();
+        const nameLower = (pro.name || '').toLowerCase();
+        
+        const mentionsNonElec = nonEletricianKeywords.some(k => bioLower.includes(k) || nameLower.includes(k));
+        const mentionsElecSpecifically = bioLower.includes('quadro') || bioLower.includes('eletricidade') || bioLower.includes('disjuntor') || bioLower.includes('curto-circuito') || nameLower.includes('eletricista') || nameLower.includes('electricista');
+        const isAutoBioPattern = bioLower.includes('profissional qualificado em electricista') || bioLower.includes('profissional qualificado em eletricista');
+
+        if ((mentionsNonElec || isAutoBioPattern) && !mentionsElecSpecifically) {
+          const correctedCats = otherCats;
+          if (!options?.dryRun) {
+            try {
+              await setDoc(doc(db, 'users', pro.id), { categories: correctedCats }, { merge: true });
+              await setDoc(doc(db, 'professionals', pro.id), { categories: correctedCats }, { merge: true });
+            } catch (e) {
+              console.warn('Firestore pro fix notice:', e);
+            }
+            fixedCount++;
+          }
+
+          results.push({
+            proId: pro.id,
+            proName: pro.name,
+            beforeCategories: cats,
+            afterCategories: correctedCats,
+            reason: `Evidência clara de seleção automática: profissional de [${otherCats.join(', ')}] com 'eletricista' inserido automaticamente.`,
+            actionTaken: options?.dryRun ? 'analisado' : 'corrigido'
+          });
+          continue;
+        } else {
+          results.push({
+            proId: pro.id,
+            proName: pro.name,
+            beforeCategories: cats,
+            afterCategories: cats,
+            reason: `Mantido com segurança: o profissional possui ambas as áreas e pode ter selecionado legitimamente.`,
+            actionTaken: 'mantido'
+          });
+          continue;
+        }
+      }
+
+      // Case: Professional has ONLY eletricista but their name indicates another distinct trade
+      const bioLower = (pro.bio || '').toLowerCase();
+      const nameLower = (pro.name || '').toLowerCase();
+      const matchesOther = nonEletricianKeywords.find(k => nameLower.includes(k));
+      if (matchesOther && !nameLower.includes('eletric') && !bioLower.includes('eletric')) {
+        results.push({
+          proId: pro.id,
+          proName: pro.name,
+          beforeCategories: cats,
+          afterCategories: cats,
+          reason: `Atenção: Cadastrado apenas com [eletricista] mas o nome/bio sugere '${matchesOther}'. Verificação manual recomendada.`,
+          actionTaken: 'mantido'
+        });
+      }
+    }
+
+    if (!options?.dryRun && fixedCount > 0) {
+      setProfessionals(prev => prev.map(p => {
+        const found = results.find(r => r.proId === p.id && r.actionTaken === 'corrigido');
+        return found ? { ...p, categories: found.afterCategories } : p;
+      }));
+      setAllUsers(prev => prev.map(u => {
+        const found = results.find(r => r.proId === u.id && r.actionTaken === 'corrigido');
+        return found ? { ...u, categories: found.afterCategories } : u;
+      }));
+      await logAdminAction('Auditoria e Correção de Categorias', undefined, `${fixedCount} profissionais corrigidos do erro de seleção automática.`);
+    }
+
+    return {
+      scannedCount: professionals.filter(p => !isFictitiousOrInvalidUser(p)).length,
+      affectedCount: results.filter(r => r.beforeCategories.length !== r.afterCategories.length).length,
+      fixedCount,
+      details: results
+    };
+  };
+
   const updatePlatformSettings = async (newSettings: Partial<PlatformSettings>): Promise<{ success: boolean; message: string }> => {
     if (currentUser.role !== 'admin') {
       return { success: false, message: 'Permissão negada.' };
@@ -3914,6 +4075,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       subscribeToPlan,
       adminUnlockProPlan,
       adminChangeUserAccountType,
+      adminUpdateProCategories,
+      auditAndFixBuggedCategories,
       addWalletDeposit,
       submitPaymentWithProof,
       approvePaymentTransaction,

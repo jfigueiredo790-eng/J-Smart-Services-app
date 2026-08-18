@@ -85,7 +85,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
   const [address, setAddress] = useState('');
   const [documentNumber, setDocumentNumber] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string>('');
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([categories[0]?.id || 'eletricista']);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [experienceYears, setExperienceYears] = useState<number>(2);
   const [authError, setAuthError] = useState('');
   const [successInfo, setSuccessInfo] = useState('');
@@ -180,7 +180,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         .join(', ');
 
       const proData = isProRequired ? {
-        categories: selectedCategories.length > 0 ? selectedCategories : [categories[0]?.id || 'eletricista'],
+        categories: selectedCategories,
         bio: 'Profissional qualificado em ' + (activeCatNames || 'prestação de serviços'),
         experienceYears: Math.max(0, Number(experienceYears) || 0),
         experienceVerified: false,

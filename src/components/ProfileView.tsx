@@ -52,9 +52,9 @@ export const ProfileView: React.FC = () => {
   const [hourlyRateKz, setHourlyRateKz] = useState('hourlyRateKz' in currentUser ? (currentUser as any).hourlyRateKz : 15000);
   const [experienceYears, setExperienceYears] = useState<number>('experienceYears' in currentUser ? (Number((currentUser as any).experienceYears) >= 0 ? Number((currentUser as any).experienceYears) : 0) : 0);
   
-  const initialCategories = 'categories' in currentUser && Array.isArray((currentUser as any).categories) && (currentUser as any).categories.length > 0
+  const initialCategories = 'categories' in currentUser && Array.isArray((currentUser as any).categories)
     ? (currentUser as any).categories
-    : [categories[0]?.id || 'eletricista'];
+    : [];
   const [selectedCategories, setSelectedCategories] = useState<string[]>(initialCategories);
 
   const [savedSuccess, setSavedSuccess] = useState(false);

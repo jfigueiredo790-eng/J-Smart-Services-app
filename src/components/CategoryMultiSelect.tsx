@@ -22,11 +22,6 @@ export const CategoryMultiSelect: React.FC<CategoryMultiSelectProps> = ({
     const isAlreadySelected = selectedCategories.includes(catId);
 
     if (isAlreadySelected) {
-      if (selectedCategories.length <= 1) {
-        setWarningMsg('Deve selecionar pelo menos 1 área de atuação.');
-        setTimeout(() => setWarningMsg(null), 3000);
-        return;
-      }
       onChange(selectedCategories.filter(id => id !== catId));
       setWarningMsg(null);
     } else {
@@ -72,7 +67,7 @@ export const CategoryMultiSelect: React.FC<CategoryMultiSelectProps> = ({
       )}
 
       {/* Grid of category selector chips */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 max-h-56 overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 gap-2.5 pt-1 max-h-72 overflow-y-auto pr-1">
         {categories.map((cat) => {
           const isSelected = selectedCategories.includes(cat.id);
           return (
@@ -80,24 +75,24 @@ export const CategoryMultiSelect: React.FC<CategoryMultiSelectProps> = ({
               type="button"
               key={cat.id}
               onClick={() => toggleCategory(cat.id)}
-              className={`p-2.5 rounded-xl border text-left flex items-center gap-2 transition-all text-xs font-bold ${
+              className={`p-2.5 rounded-xl border text-left flex items-start sm:items-center gap-2 transition-all text-xs font-bold min-h-[50px] ${
                 isSelected
                   ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-500/20'
                   : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/50'
               }`}
             >
-              <div className={`p-1.5 rounded-lg shrink-0 ${
+              <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 sm:mt-0 ${
                 isSelected ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-600'
               }`}>
                 <CategoryIcon name={cat.iconName} className="w-3.5 h-3.5" />
               </div>
 
-              <span className="truncate flex-1 text-[11px] leading-tight">
+              <span className="flex-1 text-[11px] leading-tight font-bold break-words whitespace-normal">
                 {cat.name}
               </span>
 
               {isSelected && (
-                <div className="w-4 h-4 rounded-full bg-white text-emerald-700 flex items-center justify-center shrink-0">
+                <div className="w-4 h-4 rounded-full bg-white text-emerald-700 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
                   <Check className="w-3 h-3 stroke-[3]" />
                 </div>
               )}

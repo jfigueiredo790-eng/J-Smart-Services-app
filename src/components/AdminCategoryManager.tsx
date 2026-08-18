@@ -683,7 +683,7 @@ export const AdminCategoryManager: React.FC = () => {
                         </span>
                       </div>
 
-                      <p className="text-xs text-slate-500 leading-relaxed line-clamp-2">
+                      <p className="text-xs text-slate-500 leading-relaxed break-words">
                         {cat.description || 'Sem descrição cadastrada.'}
                       </p>
 
@@ -813,7 +813,7 @@ export const AdminCategoryManager: React.FC = () => {
                               <span className="w-5 h-5 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center text-[10px] font-black shrink-0">
                                 {sIdx + 1}
                               </span>
-                              <span className="font-bold text-xs text-slate-800 truncate" title={sub}>
+                              <span className="font-bold text-xs text-slate-800 break-words leading-tight flex-1">
                                 {sub}
                               </span>
                             </div>
@@ -969,8 +969,8 @@ export const AdminCategoryManager: React.FC = () => {
                             : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                         }`}
                       >
-                        <CategoryIcon name={ic.name} className="w-5 h-5" />
-                        <span className="text-[9px] font-bold truncate max-w-full">{ic.label}</span>
+                        <CategoryIcon name={ic.name} className="w-5 h-5 shrink-0" />
+                        <span className="text-[9px] font-bold break-words leading-tight text-center">{ic.label}</span>
                       </button>
                     );
                   })}

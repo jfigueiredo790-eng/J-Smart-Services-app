@@ -88,12 +88,12 @@ export const SubcategoryModal: React.FC<SubcategoryModalProps> = ({
                     {index + 1}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h4 className="font-extrabold text-slate-900 text-xs sm:text-sm group-hover:text-emerald-900 transition-colors truncate">
+                    <h4 className="font-extrabold text-slate-900 text-xs sm:text-sm group-hover:text-emerald-900 transition-colors break-words leading-snug">
                       {item}
                     </h4>
-                    <p className="text-[11px] text-slate-500 group-hover:text-emerald-700 flex items-center gap-1">
+                    <p className="text-[11px] text-slate-500 group-hover:text-emerald-700 flex items-center gap-1 mt-0.5">
                       <CheckCircle className="w-3 h-3 text-emerald-600 shrink-0" />
-                      Especialistas disponíveis em Luanda e províncias
+                      <span>Especialistas disponíveis em Luanda e províncias</span>
                     </p>
                   </div>
                 </div>

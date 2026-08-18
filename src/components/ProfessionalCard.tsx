@@ -101,11 +101,11 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({ pro, onOpenD
           />
 
           <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-1">
-              <h3 className="font-bold text-slate-900 text-base truncate flex items-center gap-1.5">
-                {pro.name}
+            <div className="flex items-start justify-between gap-1">
+              <h3 className="font-extrabold text-slate-900 text-base break-words leading-tight flex items-center gap-1.5">
+                <span>{pro.name}</span>
               </h3>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 {proPlan.isExpired ? (
                   <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1" title="Subscrição inativa">
                     ⚪ Subscrição inativa
@@ -124,9 +124,9 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({ pro, onOpenD
               </div>
             </div>
 
-            <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+            <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
               <MapPin className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-              <span className="truncate">{pro.city || pro.province}</span>
+              <span className="break-words font-medium">{pro.city || pro.province}</span>
             </p>
 
             {/* Category Tags */}
@@ -134,7 +134,7 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({ pro, onOpenD
               {proCatNames.map((catName, idx) => (
                 <span 
                   key={idx}
-                  className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md border border-emerald-100"
+                  className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md border border-emerald-100 break-words whitespace-normal"
                 >
                   {catName}
                 </span>
@@ -144,20 +144,20 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({ pro, onOpenD
         </div>
 
         {/* Bio excerpt */}
-        <p className="text-xs text-slate-600 mt-3 line-clamp-2 leading-relaxed">
+        <p className="text-xs text-slate-600 mt-3 leading-relaxed break-words">
           {pro.bio}
         </p>
 
         {/* Stats Row */}
         <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-slate-100 text-xs">
           <div className="flex items-center gap-1.5 text-slate-600">
-            <Briefcase className="w-3.5 h-3.5 text-slate-400" />
+            <Briefcase className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <span><strong className="text-slate-900 font-bold">{pro.completedJobs}</strong> serviços concluídos</span>
           </div>
           <div className="flex flex-col justify-center gap-0.5 text-slate-600">
             <div className="flex items-center gap-1">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span className="truncate">Exp: <strong className="text-slate-900 font-bold">{pro.experienceYears || 0} anos</strong></span>
+              <span className="break-words">Exp: <strong className="text-slate-900 font-bold">{pro.experienceYears || 0} anos</strong></span>
             </div>
             {pro.experienceVerified ? (
               <span className="text-[9px] font-extrabold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300 self-start">

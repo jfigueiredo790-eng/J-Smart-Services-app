@@ -26,7 +26,7 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({ onClose, preSe
   const { categories, createServiceRequest, currentUser } = useApp();
 
   const [categoryId, setCategoryId] = useState<string>(
-    preSelectedCategoryId || (preSelectedPro ? preSelectedPro.categories[0] : 'eletricista')
+    preSelectedCategoryId || (preSelectedPro?.categories && preSelectedPro.categories.length > 0 ? preSelectedPro.categories[0] : (categories[0]?.id || ''))
   );
 
   const [title, setTitle] = useState<string>('');

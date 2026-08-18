@@ -75,26 +75,26 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
       
       {/* Top Bar: Title & Status */}
       <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
-        <div>
-          <span className="text-[10px] font-bold text-emerald-700 uppercase bg-emerald-50 px-2 py-0.5 rounded-md">
+        <div className="min-w-0 flex-1">
+          <span className="text-[10px] font-bold text-emerald-700 uppercase bg-emerald-50 px-2 py-0.5 rounded-md break-words">
             {request.categoryName}
           </span>
-          <h3 className="font-extrabold text-slate-900 text-base mt-1 line-clamp-1">
+          <h3 className="font-extrabold text-slate-900 text-base mt-1 break-words leading-snug">
             {request.title}
           </h3>
-          <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-            <MapPin className="w-3.5 h-3.5 text-slate-400" />
+          <p className="text-xs text-slate-500 flex items-center gap-1 mt-1 break-words">
+            <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <span>{request.address}, {request.province}</span>
           </p>
         </div>
 
-        <div>
+        <div className="shrink-0">
           {getStatusBadge(request.status)}
         </div>
       </div>
 
       {/* Description */}
-      <p className="text-xs text-slate-600 my-3 line-clamp-2 leading-relaxed bg-slate-50 p-2.5 rounded-xl">
+      <p className="text-xs text-slate-600 my-3 leading-relaxed bg-slate-50 p-2.5 rounded-xl break-words whitespace-pre-line">
         {request.description}
       </p>
 

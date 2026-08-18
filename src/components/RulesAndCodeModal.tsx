@@ -189,7 +189,7 @@ export const RulesAndCodeModal: React.FC<RulesAndCodeModalProps> = ({ isOpen, on
                       <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
                         {section.title}
                       </h3>
-                      <p className="text-xs text-slate-500 mt-0.5 font-normal line-clamp-1">
+                      <p className="text-xs text-slate-500 mt-0.5 font-normal break-words leading-relaxed">
                         {section.summary}
                       </p>
                     </div>

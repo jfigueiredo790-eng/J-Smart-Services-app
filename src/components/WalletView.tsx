@@ -470,7 +470,7 @@ export const WalletView: React.FC = () => {
                         <div className="flex items-center gap-2">
                           <FileText className="w-6 h-6 text-rose-600" />
                           <div>
-                            <p className="font-extrabold text-slate-900 text-xs truncate max-w-[200px]">{depositProofFileName || 'Documento.pdf'}</p>
+                            <p className="font-extrabold text-slate-900 text-xs break-all leading-tight">{depositProofFileName || 'Documento.pdf'}</p>
                             <span className="text-[10px] text-rose-700 font-bold">Documento PDF Selecionado</span>
                           </div>
                         </div>
