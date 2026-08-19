@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   Wallet, 
@@ -58,6 +58,14 @@ export const WalletView: React.FC = () => {
   ];
 
   const balance = currentUser.walletBalanceKz || 0;
+
+  // Strict User-Scoped Transaction History: Each user only views their own transactions
+  const myTransactions = useMemo(() => {
+    if (currentUser.role === 'admin' || userRole === 'admin') {
+      return walletTransactions;
+    }
+    return walletTransactions.filter(tx => tx.userId === currentUser.id);
+  }, [walletTransactions, currentUser.id, currentUser.role, userRole]);
 
   const handleDepositFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -296,18 +304,18 @@ export const WalletView: React.FC = () => {
             <Receipt className="w-4 h-4 text-emerald-600" />
             Histórico de Pagamentos e Transações de Planos
           </span>
-          <span className="text-xs font-bold text-slate-400">Total: {walletTransactions.length}</span>
+          <span className="text-xs font-bold text-slate-400">Total: {myTransactions.length}</span>
         </h3>
 
-        {walletTransactions.length === 0 ? (
+        {myTransactions.length === 0 ? (
           <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
             <Wallet className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-            <p className="text-xs font-bold text-slate-600">Ainda não possui transações registadas</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Subscreva um plano profissional para ver o histórico de pagamentos.</p>
+            <p className="text-xs font-bold text-slate-600">Ainda não existem pagamentos ou transações de planos para esta conta</p>
+            <p className="text-[11px] text-slate-400 mt-1">Os seus pagamentos, comprovativos e ativações de pacotes ficarão listados aqui assim que efetuar uma subscrição.</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {walletTransactions.map((tx) => {
+            {myTransactions.map((tx) => {
               const isPositive = tx.type === 'deposit' || tx.type === 'earning';
               const isPending = tx.status === 'pendente';
               const isRejected = tx.status === 'rejeitado';

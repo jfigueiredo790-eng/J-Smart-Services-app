@@ -20,7 +20,8 @@ import {
   Lock,
   Wifi,
   WifiOff,
-  TestTube
+  TestTube,
+  ArrowRightLeft
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -106,6 +107,27 @@ export const Header: React.FC = () => {
 
         {/* Right Controls: Network Connection, Test Suite (Admin Only), User Profile */}
         <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+
+          {/* Dual Account / Mode Quick Switcher */}
+          {(currentUser.accountType === 'duplo' || (!isAdmin && currentUser.role !== 'admin')) && (
+            <button
+              onClick={() => switchRole(userRole === 'cliente' ? 'profissional' : 'cliente')}
+              title={`Está no Modo ${userRole === 'cliente' ? 'Cliente' : 'Profissional'}. Clique para alternar para o Modo ${userRole === 'cliente' ? 'Profissional' : 'Cliente'}.`}
+              className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-black transition-all flex items-center gap-1.5 shadow-sm ${
+                userRole === 'profissional'
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+              }`}
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5 shrink-0" />
+              <span className="font-extrabold">
+                {userRole === 'profissional' ? 'Modo Pro' : 'Modo Cliente'}
+              </span>
+              <span className="hidden sm:inline text-[10px] opacity-90 underline ml-0.5">
+                {userRole === 'profissional' ? '→ Cliente' : '→ Pro'}
+              </span>
+            </button>
+          )}
 
           {/* Admin Portal Shortcut Button (Only visible for Administrators) */}
           {isAdmin && (

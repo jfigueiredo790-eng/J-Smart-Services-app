@@ -234,13 +234,26 @@ export const ProfileView: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
-                  {currentUser.accountType === 'duplo' && (
+                  {currentUser.accountType === 'duplo' ? (
                     <button
                       onClick={() => switchRole(userRole === 'cliente' ? 'profissional' : 'cliente')}
-                      className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-md"
+                      className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-md active:scale-95"
+                      title="Alternar entre Modo Cliente e Modo Profissional"
                     >
                       <ArrowRightLeft className="w-3.5 h-3.5" />
-                      <span>{userRole === 'cliente' ? 'Mudar para Profissional' : 'Mudar para Cliente'}</span>
+                      <span>{userRole === 'cliente' ? 'Mudar para Modo Profissional' : 'Mudar para Modo Cliente'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        updateUserProfile({ accountType: 'duplo' });
+                        switchRole(userRole === 'cliente' ? 'profissional' : 'cliente');
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-md"
+                      title="Ativar Conta Dupla (Cliente + Profissional)"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>Ativar Conta Dupla</span>
                     </button>
                   )}
 

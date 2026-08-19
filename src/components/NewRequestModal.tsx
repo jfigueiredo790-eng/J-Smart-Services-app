@@ -13,7 +13,8 @@ import {
   AlertCircle, 
   CheckCircle2,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  ArrowRightLeft
 } from 'lucide-react';
 
 interface NewRequestModalProps {
@@ -23,7 +24,7 @@ interface NewRequestModalProps {
 }
 
 export const NewRequestModal: React.FC<NewRequestModalProps> = ({ onClose, preSelectedPro, preSelectedCategoryId }) => {
-  const { categories, createServiceRequest, currentUser } = useApp();
+  const { categories, createServiceRequest, currentUser, switchRole } = useApp();
 
   const [categoryId, setCategoryId] = useState<string>(
     preSelectedCategoryId || (preSelectedPro?.categories && preSelectedPro.categories.length > 0 ? preSelectedPro.categories[0] : (categories[0]?.id || ''))
@@ -40,6 +41,49 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({ onClose, preSe
   const [budgetKz, setBudgetKz] = useState<number>(25000);
 
   const [errorMsg, setErrorMsg] = useState<string>('');
+
+  // Mode validation: Only clients can create service requests
+  if (currentUser.role === 'profissional') {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-200 text-center space-y-4">
+          <div className="w-14 h-14 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto text-amber-600 border border-amber-200">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+          <div>
+            <h3 className="text-lg font-black text-slate-900">Modo Profissional Ativo</h3>
+            <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+              Enquanto estiver a navegar no <strong>Modo Profissional</strong>, não é possível criar pedidos de serviços. Os profissionais utilizam a plataforma para receber pedidos de clientes e divulgar trabalhos.
+            </p>
+          </div>
+          {currentUser.accountType === 'duplo' ? (
+            <div className="space-y-2 pt-2">
+              <button
+                onClick={() => switchRole('cliente')}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>Mudar para Modo Cliente e Continuar</span>
+              </button>
+              <button
+                onClick={onClose}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-xl text-xs transition-colors"
+              >
+                Fechar
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onClose}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-4 rounded-xl text-xs transition-colors"
+            >
+              Compreendi
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const selectedCategoryObj = categories.find(c => c.id === categoryId);
 

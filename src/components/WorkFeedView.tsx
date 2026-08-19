@@ -29,7 +29,8 @@ import {
   Banknote,
   Check,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  ArrowRightLeft
 } from 'lucide-react';
 
 const AVAILABLE_REACTIONS = [
@@ -52,7 +53,8 @@ export const WorkFeedView: React.FC = () => {
     categories, 
     professionals, 
     setSelectedPro, 
-    triggerBlockedActionPrompt
+    triggerBlockedActionPrompt,
+    switchRole
   } = useApp();
 
   const [selectedCatFilter, setSelectedCatFilter] = useState<string>('Todas');
@@ -92,7 +94,7 @@ export const WorkFeedView: React.FC = () => {
   const [editFeedback, setEditFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const currentUserPlan = getProPlanStatus(currentUser);
-  const isPro = userRole === 'profissional' || currentUser.role === 'profissional';
+  const isPro = currentUser.role === 'profissional' || currentUser.role === 'admin';
 
   // Fechar menu de 3 pontos e barra de reações ao clicar fora
   useEffect(() => {
@@ -131,7 +133,17 @@ export const WorkFeedView: React.FC = () => {
 
   const handleOpenPublishModal = () => {
     if (!isPro) {
-      alert('Apenas profissionais registados na J Smart Services podem publicar trabalhos no Feed.');
+      if (currentUser.accountType === 'duplo') {
+        const wantsToSwitch = window.confirm(
+          'A funcionalidade de divulgação e publicidade de trabalhos é exclusiva para o Modo Profissional.\n\nDeseja alternar agora para o Modo Profissional para publicar o seu trabalho?'
+        );
+        if (wantsToSwitch) {
+          switchRole('profissional');
+          setIsPublishModalOpen(true);
+        }
+        return;
+      }
+      alert('A publicação de trabalhos e divulgação de serviços no Feed é exclusiva para profissionais registados na J Smart Services.');
       return;
     }
 
@@ -408,6 +420,15 @@ export const WorkFeedView: React.FC = () => {
                   <span>Publicação Bloqueada (Escolher Plano)</span>
                 </>
               )}
+            </button>
+          ) : currentUser.accountType === 'duplo' ? (
+            <button
+              onClick={() => switchRole('profissional')}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-4 py-2.5 rounded-2xl transition-all shadow-md flex items-center gap-1.5 shrink-0"
+              title="Mudar para Modo Profissional para criar publicações de serviços"
+            >
+              <ArrowRightLeft className="w-4 h-4 shrink-0" />
+              <span>Mudar p/ Modo Pro e Publicar</span>
             </button>
           ) : (
             <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/15 text-xs text-emerald-200 flex items-center gap-2 shrink-0">

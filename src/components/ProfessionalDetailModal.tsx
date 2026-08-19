@@ -26,7 +26,7 @@ interface ProfessionalDetailModalProps {
 }
 
 export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = ({ pro, onClose, onRequestService }) => {
-  const { reviews, categories, setActiveTab, setActiveChatRequestId, requests, currentUser, setIsReviewModalOpen, setReviewingRequestId } = useApp();
+  const { reviews, categories, setActiveTab, setActiveChatRequestId, requests, currentUser, switchRole, setIsReviewModalOpen, setReviewingRequestId } = useApp();
 
   const proPlan = getProPlanStatus(pro);
 
@@ -44,7 +44,16 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
 
   const handleStartChat = () => {
     if (currentUser.role === 'profissional') {
-      alert('Está a navegar no Modo Profissional. Para conversar com um prestador, alterne o seu perfil para o Modo Cliente no menu.');
+      if (currentUser.accountType === 'duplo') {
+        const wantsToSwitch = window.confirm(
+          'Está no Modo Profissional. Para conversar com outro prestador de serviços, deve mudar para o Modo Cliente.\n\nDeseja alternar agora para o Modo Cliente?'
+        );
+        if (wantsToSwitch) {
+          switchRole('cliente');
+        }
+        return;
+      }
+      alert('Atenção: Está a navegar no Modo Profissional. Para conversar com um prestador, alterne o seu perfil para o Modo Cliente no menu.');
       return;
     }
 
@@ -70,7 +79,18 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
 
   const handleRequestServiceClick = () => {
     if (currentUser.role === 'profissional') {
-      alert('Está no Modo Profissional. Mude para o Modo Cliente no menu do perfil para solicitar um serviço.');
+      if (currentUser.accountType === 'duplo') {
+        const wantsToSwitch = window.confirm(
+          'Está a navegar no Modo Profissional. Para solicitar um serviço, deve estar no Modo Cliente.\n\nDeseja alternar agora para o Modo Cliente para enviar este pedido?'
+        );
+        if (wantsToSwitch) {
+          switchRole('cliente');
+          onClose();
+          onRequestService();
+        }
+        return;
+      }
+      alert('Atenção: Apenas utilizadores no Modo Cliente podem solicitar serviços. Os profissionais utilizam a plataforma para receber pedidos.');
       return;
     }
 

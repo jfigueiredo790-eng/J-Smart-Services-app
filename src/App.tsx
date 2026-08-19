@@ -74,7 +74,8 @@ function MainContent() {
     setIsRulesModalOpen,
     isSubExpiredModalOpen,
     setIsSubExpiredModalOpen,
-    subExpiredCustomMessage
+    subExpiredCustomMessage,
+    switchRole
   } = useApp();
 
   const [showSplash, setShowSplash] = useState(false); // Can be toggled or set on first entry
@@ -171,6 +172,21 @@ function MainContent() {
   }
 
   const handleOpenNewRequest = (pro?: ProfessionalProfile) => {
+    if (userRole === 'profissional' || currentUser.role === 'profissional') {
+      if (currentUser.accountType === 'duplo') {
+        const wantsToSwitch = window.confirm(
+          'Está a navegar no Modo Profissional. A criação de pedidos de serviços é exclusiva para o Modo Cliente.\n\nDeseja mudar agora para o Modo Cliente para continuar com o seu pedido?'
+        );
+        if (wantsToSwitch) {
+          switchRole('cliente');
+          setPreSelectedProForReq(pro || null);
+          setIsNewRequestOpen(true);
+        }
+        return;
+      }
+      alert('Atenção: Apenas utilizadores no Modo Cliente podem criar e enviar pedidos de serviços. Os profissionais utilizam a plataforma para receber pedidos e divulgar trabalhos.');
+      return;
+    }
     setPreSelectedProForReq(pro || null);
     setIsNewRequestOpen(true);
   };
@@ -783,7 +799,7 @@ function MainContent() {
               const cat = subModalCategory;
               setSelectedCategory(cat.id);
               setSubModalCategory(null);
-              setIsNewRequestOpen(true);
+              handleOpenNewRequest();
             }}
           />
         )}

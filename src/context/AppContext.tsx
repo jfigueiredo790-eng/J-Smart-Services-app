@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { 
   User, 
   UserRole, 
@@ -473,7 +473,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const DEFAULT_INITIAL_TXS: WalletTransaction[] = [];
 
-  const [walletTransactions, setWalletTransactions] = useState<WalletTransaction[]>(() => {
+  const [allWalletTransactions, setAllWalletTransactions] = useState<WalletTransaction[]>(() => {
     const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_txs`);
     if (saved) {
       try {
@@ -613,6 +613,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addWorkFeedPost = (post: Omit<WorkFeedPost, 'id' | 'createdAt' | 'likesCount' | 'likedBy'>) => {
+    // Mode validation: Only active Professional mode or Admin can publish work feed posts
+    if (currentUser.role !== 'profissional' && currentUser.role !== 'admin') {
+      const isDual = currentUser.accountType === 'duplo';
+      const msg = isDual
+        ? 'A funcionalidade de divulgação e publicidade de trabalhos é exclusiva para profissionais. Alterne para o Modo Profissional para publicar.'
+        : 'Apenas profissionais registados na J Smart Services podem criar publicações e divulgar serviços no Feed.';
+      alert(msg);
+      return { success: false, error: msg };
+    }
+
     const validation = validateProAction(currentUser);
     if (!validation.allowed) {
       if (validation.reason === 'blocked') {
@@ -851,8 +861,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [reviews]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_txs`, JSON.stringify(walletTransactions));
-  }, [walletTransactions]);
+    localStorage.setItem(`${LOCAL_STORAGE_KEY}_txs`, JSON.stringify(allWalletTransactions));
+  }, [allWalletTransactions]);
 
   useEffect(() => {
     localStorage.setItem(`${LOCAL_STORAGE_KEY}_reports`, JSON.stringify(reports));
@@ -1081,25 +1091,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Firestore pros snapshot notice:', err.message);
       }));
 
-      // 4. Wallet Transactions
-      const txsRef = collection(db, 'wallet_transactions');
-      unsubscribes.push(onSnapshot(txsRef, (snapshot) => {
-        if (!snapshot.empty) {
-          const fsTxs: WalletTransaction[] = [];
-          snapshot.forEach(docSnap => {
-            fsTxs.push({ id: docSnap.id, ...docSnap.data() } as WalletTransaction);
-          });
-          setWalletTransactions(prev => {
-            const fsIds = new Set(fsTxs.map(t => t.id));
-            const existingNonFs = prev.filter(t => !fsIds.has(t.id));
-            return [...fsTxs, ...existingNonFs];
-          });
-        }
-      }, (err) => {
-        console.warn('Firestore transactions snapshot notice:', err.message);
-      }));
-
-      // 5. Chat Messages (sync in real time across client & professional)
+      // 4. Chat Messages (sync in real time across client & professional)
       const msgsRef = collection(db, 'chat_messages');
       unsubscribes.push(onSnapshot(msgsRef, (snapshot) => {
         if (!snapshot.empty) {
@@ -1221,6 +1213,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  // Real-time Firestore sync for Wallet Transactions (Strictly scoped: Admin sees all, Professionals see only their own)
+  useEffect(() => {
+    if (!currentUser || !currentUser.id) return;
+
+    let txsQuery;
+    if (currentUser.role === 'admin') {
+      // Administrator receives all transactions across the entire platform
+      txsQuery = collection(db, 'wallet_transactions');
+    } else {
+      // Professional or Client: strictly queries ONLY records with their own unique userId from Firestore
+      txsQuery = query(
+        collection(db, 'wallet_transactions'),
+        where('userId', '==', currentUser.id)
+      );
+    }
+
+    const unsubscribe = onSnapshot(txsQuery, (snapshot) => {
+      const fsTxs: WalletTransaction[] = [];
+      snapshot.forEach(docSnap => {
+        fsTxs.push({ id: docSnap.id, ...docSnap.data() } as WalletTransaction);
+      });
+
+      setAllWalletTransactions(prev => {
+        if (currentUser.role === 'admin') {
+          const fsIds = new Set(fsTxs.map(t => t.id));
+          const existingNonFs = prev.filter(t => !fsIds.has(t.id));
+          return [...fsTxs, ...existingNonFs];
+        } else {
+          // Replace current user's records with fresh Firestore sync, retain any non-conflicting records
+          const otherUsersTxs = prev.filter(t => t.userId !== currentUser.id);
+          return [...fsTxs, ...otherUsersTxs];
+        }
+      });
+    }, (err) => {
+      console.warn('Firestore transactions snapshot notice:', err.message);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [currentUser?.id, currentUser?.role]);
+
   // Cross-tab synchronization via localStorage events
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
@@ -1245,12 +1279,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Switch role helper
   const switchRole = (role: UserRole) => {
     if (role === 'cliente') {
-      setCurrentUser(prev => ({ ...prev, role: 'cliente' }));
+      setCurrentUser(prev => ({ 
+        ...prev, 
+        role: 'cliente',
+        accountType: prev.accountType === 'duplo' || prev.accountType === 'profissional' ? 'duplo' : prev.accountType
+      }));
       setActiveTab('home');
     } else if (role === 'profissional') {
       const proUser = professionals.find(p => p.id === currentUser.id || (p.email && p.email === currentUser.email));
       if (proUser) {
-        setCurrentUser({ ...proUser, role: 'profissional' });
+        setCurrentUser({ 
+          ...proUser, 
+          role: 'profissional',
+          accountType: currentUser.accountType === 'duplo' ? 'duplo' : (proUser.accountType || 'profissional')
+        });
       } else {
         const newPro: ProfessionalProfile = {
           ...currentUser,
@@ -3126,7 +3168,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       description: `Ativação de Plano ${planInfo.label} (${planInfo.days} Dias) - Plataforma J Smart`
     };
 
-    setWalletTransactions(prev => [newTx, ...prev]);
+    setAllWalletTransactions(prev => [newTx, ...prev]);
 
     addNotification({
       userId: currentUser.id,
@@ -3214,7 +3256,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       paymentMethod: method
     };
 
-    setWalletTransactions(prev => [newTx, ...prev]);
+    setAllWalletTransactions(prev => [newTx, ...prev]);
     setCurrentUser(prev => ({
       ...prev,
       walletBalanceKz: (prev.walletBalanceKz || 0) + amountKz
@@ -3261,7 +3303,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString()
     };
 
-    setWalletTransactions(prev => [newTx, ...prev]);
+    setAllWalletTransactions(prev => [newTx, ...prev]);
 
     try {
       setDoc(doc(db, 'wallet_transactions', txId), newTx).catch(() => {});
@@ -3298,7 +3340,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, message: 'Permissão negada.' };
     }
 
-    const tx = walletTransactions.find(t => t.id === txId);
+    const tx = allWalletTransactions.find(t => t.id === txId);
     if (!tx) return { success: false, message: 'Transação não encontrada.' };
 
     const updateTxPayload = { status: 'concluido' as const, updatedAt: new Date().toISOString() };
@@ -3306,7 +3348,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await setDoc(doc(db, 'wallet_transactions', txId), updateTxPayload, { merge: true });
 
-      setWalletTransactions(prev => prev.map(t => {
+      setAllWalletTransactions(prev => prev.map(t => {
         if (t.id === txId) {
           return { ...t, ...updateTxPayload };
         }
@@ -3365,7 +3407,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, message: 'Permissão negada.' };
     }
 
-    const tx = walletTransactions.find(t => t.id === txId);
+    const tx = allWalletTransactions.find(t => t.id === txId);
     if (!tx) return { success: false, message: 'Transação não encontrada.' };
 
     const rejectPayload = { status: 'rejeitado' as const, rejectionReason: reason, updatedAt: new Date().toISOString() };
@@ -3373,7 +3415,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await setDoc(doc(db, 'wallet_transactions', txId), rejectPayload, { merge: true });
 
-      setWalletTransactions(prev => prev.map(t => {
+      setAllWalletTransactions(prev => prev.map(t => {
         if (t.id === txId) {
           return { ...t, ...rejectPayload };
         }
@@ -3412,7 +3454,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       iban
     };
 
-    setWalletTransactions(prev => [newTx, ...prev]);
+    setAllWalletTransactions(prev => [newTx, ...prev]);
     setCurrentUser(prev => ({
       ...prev,
       walletBalanceKz: Math.max(0, (prev.walletBalanceKz || 0) - amountKz)
@@ -4000,11 +4042,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setRequests([]);
     setMessages([]);
     setReviews([]);
-    setWalletTransactions([]);
+    setAllWalletTransactions([]);
     setReports([]);
     setPlatformSettings(DEFAULT_SETTINGS);
     setActiveTab('home');
   };
+
+  // Scoped wallet transactions: Admin sees all transactions, Professionals see strictly their own, Clients see empty array
+  const walletTransactions = useMemo(() => {
+    if (currentUser.role === 'admin') {
+      return allWalletTransactions;
+    }
+    if (currentUser.role === 'profissional') {
+      return allWalletTransactions.filter(t => t.userId === currentUser.id);
+    }
+    return [];
+  }, [allWalletTransactions, currentUser.id, currentUser.role]);
 
   return (
     <AppContext.Provider value={{

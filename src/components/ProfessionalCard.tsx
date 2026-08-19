@@ -21,7 +21,7 @@ interface ProfessionalCardProps {
 }
 
 export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({ pro, onOpenDetail, onRequestService }) => {
-  const { categories, setActiveTab, setActiveChatRequestId, requests, currentUser } = useApp();
+  const { categories, setActiveTab, setActiveChatRequestId, requests, currentUser, switchRole } = useApp();
 
   const proPlan = getProPlanStatus(pro);
 
@@ -35,7 +35,16 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({ pro, onOpenD
     e.stopPropagation();
 
     if (currentUser.role === 'profissional') {
-      alert('Está a navegar no Modo Profissional. Para conversar com um prestador, alterne o seu perfil para o Modo Cliente.');
+      if (currentUser.accountType === 'duplo') {
+        const wantsToSwitch = window.confirm(
+          'Está no Modo Profissional. Para conversar com outro prestador de serviços, deve mudar para o Modo Cliente.\n\nDeseja alternar agora para o Modo Cliente?'
+        );
+        if (wantsToSwitch) {
+          switchRole('cliente');
+        }
+        return;
+      }
+      alert('Atenção: Está a navegar no Modo Profissional. Para conversar com um prestador, alterne o seu perfil para o Modo Cliente.');
       return;
     }
 
@@ -64,7 +73,17 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({ pro, onOpenD
     e.stopPropagation();
 
     if (currentUser.role === 'profissional') {
-      alert('Está no Modo Profissional. Mude para o Modo Cliente no seu perfil para solicitar um serviço.');
+      if (currentUser.accountType === 'duplo') {
+        const wantsToSwitch = window.confirm(
+          'Está a navegar no Modo Profissional. Para solicitar um serviço, deve estar no Modo Cliente.\n\nDeseja alternar agora para o Modo Cliente para enviar este pedido?'
+        );
+        if (wantsToSwitch) {
+          switchRole('cliente');
+          onRequestService();
+        }
+        return;
+      }
+      alert('Atenção: Apenas utilizadores no Modo Cliente podem solicitar serviços. Os profissionais utilizam a plataforma para receber pedidos.');
       return;
     }
 
