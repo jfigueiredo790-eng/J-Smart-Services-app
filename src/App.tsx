@@ -342,24 +342,24 @@ function MainContent() {
 
                 <div className="flex flex-col sm:flex-row gap-2 pt-1">
                   <a
-                    href={`https://wa.me/?text=${encodeURIComponent(
-                      '🇦🇴 Olá! Registei-me na aplicação J Smart Services Angola. Se precisas de um canalizador, eletricista, técnico de AC ou pintor verificado com pagamento seguro por Multicaixa Express, experimenta grátis aqui: https://jsmartservices.ao'
+                    href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                      '🔧 Precisas de um serviço ou de um técnico? Entra na J Smart Services, procura o serviço que precisas e encontra profissionais para te ajudar.\n\n👉 Acede agora:\nhttps://j-smart-services-app.jfigueiredo790.workers.dev'
                     )}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-3.5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all"
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-3.5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
                   >
                     <Send className="w-4 h-4" />
                     <span>Convidar Clientes no WhatsApp</span>
                   </a>
 
                   <a
-                    href={`https://wa.me/?text=${encodeURIComponent(
-                      '👷‍♂️ Olá! Junta-te aos profissionais verificados no J Smart Services Angola! Recebe pedidos de trabalho de clientes diretos em Angola com 0% de comissão inicial. Regista-te já: https://jsmartservices.ao'
+                    href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                      '💼 Tens uma profissão e queres divulgar e prestar os teus serviços? Junta-te à J Smart Services e encontra clientes que procuram pelos teus serviços.\n\n👉 Cadastra-te aqui:\nhttps://j-smart-services-app.jfigueiredo790.workers.dev'
                     )}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-extrabold px-3.5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all"
+                    className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-extrabold px-3.5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
                   >
                     <Share2 className="w-4 h-4 text-emerald-400" />
                     <span>Convidar Profissionais</span>

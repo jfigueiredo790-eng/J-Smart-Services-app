@@ -452,7 +452,7 @@ export const AdminDashboard: React.FC = () => {
 
       {/* TAB MASTER: TODOS OS CADASTRADOS NA J SMART SERVICES */}
       {adminTab === 'all_registered' && (() => {
-        const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/?register=true` : 'https://jsmart-services.ao/?register=true';
+        const shareUrl = typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('localhost') ? `${window.location.origin}/?register=true` : 'https://j-smart-services-app.jfigueiredo790.workers.dev/?register=true';
         const waText = encodeURIComponent('Cadastra-te na plataforma J Smart Services para prestar ou solicitar serviços em Angola: ' + shareUrl);
         const waShareUrl = `https://api.whatsapp.com/send?text=${waText}`;
 
