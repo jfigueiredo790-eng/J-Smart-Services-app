@@ -350,8 +350,6 @@ export const checkProAutoApproval = (pro: Partial<ProfessionalProfile>): { isApp
   if (!pro.categories || pro.categories.length === 0) missingFields.push('Pelo menos 1 Categoria de serviço');
   if (!pro.bio || pro.bio.trim().length < 10) missingFields.push('Biografia/Apresentação (mín. 10 letras)');
   if (!pro.hourlyRateKz || pro.hourlyRateKz <= 0) missingFields.push('Tarifa Horária em Kz');
-  if (!pro.documentType || pro.documentType.trim() === '') missingFields.push('Tipo de Documento (BI / Alvará)');
-  if (!pro.documentNumber || pro.documentNumber.trim() === '') missingFields.push('Nº do Documento de Identidade');
 
   return {
     isApproved: missingFields.length === 0,

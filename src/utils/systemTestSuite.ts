@@ -141,7 +141,7 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       details: [
         '1. Conta Profissional / Conta Dupla: ✅ Exibe selecção de Áreas de Actuação',
         '2. Conta Cliente: ❌ Oculta selecção de Áreas de Actuação',
-        '3. Campos base (Nome, Província, Email, Telefone, BI, Endereço): ✅ Requeridos para todos',
+        '3. Campos base (Nome, Província, Email, Telefone, Endereço): ✅ Requeridos para todos',
       ],
     };
   });

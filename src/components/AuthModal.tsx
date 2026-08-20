@@ -83,7 +83,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
   const [password, setPassword] = useState('');
   const [province, setProvince] = useState('Luanda');
   const [address, setAddress] = useState('');
-  const [documentNumber, setDocumentNumber] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string>('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [experienceYears, setExperienceYears] = useState<number>(2);
@@ -154,10 +153,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         setAuthError('Por favor introduza um Número de Telefone válido.');
         return;
       }
-      if (!documentNumber.trim()) {
-        setAuthError('Por favor introduza o Nº do Bilhete de Identidade (BI).');
-        return;
-      }
       if (!password.trim() || password.length < 6) {
         setAuthError('A palavra-passe deve conter pelo menos 6 caracteres.');
         return;
@@ -187,7 +182,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         hourlyRateKz: 15000,
         address: address.trim(),
         documentType: 'Bilhete de Identidade',
-        documentNumber: documentNumber.trim(),
+        documentNumber: '',
         rating: 5.0,
         reviewCount: 0,
         completedJobs: 0,
@@ -209,7 +204,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         accountType,
         province,
         address: address.trim(),
-        documentNumber: documentNumber.trim(),
+        documentNumber: '',
         categories: selectedCategories,
         avatar: avatarUrl || '',
         verified: true,
@@ -631,22 +626,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                       required
                     />
                   </div>
-                </div>
-
-                {/* 6. Nº do Bilhete de Identidade (BI) */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Nº do Bilhete de Identidade (BI) *</span>
-                  </label>
-                  <input 
-                    type="text" 
-                    value={documentNumber} 
-                    onChange={(e) => setDocumentNumber(e.target.value)}
-                    placeholder="Ex: 004821943LA041" 
-                    className="w-full text-xs p-3 rounded-xl border border-slate-200 font-bold uppercase text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    required
-                  />
                 </div>
 
                 {/* Palavra-passe de Registo */}
