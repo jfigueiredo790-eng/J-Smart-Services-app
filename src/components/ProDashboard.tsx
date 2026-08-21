@@ -27,11 +27,11 @@ export const ProDashboard: React.FC = () => {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [selectedPlanKey, setSelectedPlanKey] = useState<'plan_7d' | 'plan_14d' | 'plan_30d' | null>(null);
 
-  const proRequests = requests.filter(r => r.professionalId === currentUser.id || r.status === 'pendente');
+  const proRequests = requests.filter(r => r.professionalId === currentUser.id || r.status === 'pendente' || r.status === 'novamente_disponivel');
 
-  const activeJobs = proRequests.filter(r => r.status === 'em_progresso' || r.status === 'aceito');
-  const openLeads = requests.filter(r => r.status === 'pendente');
-  const completedJobs = proRequests.filter(r => r.status === 'concluido');
+  const activeJobs = proRequests.filter(r => (r.status === 'em_progresso' || r.status === 'aceito') && r.professionalId === currentUser.id);
+  const openLeads = requests.filter(r => (r.status === 'pendente' || r.status === 'novamente_disponivel') && r.clientId !== currentUser.id && (!r.professionalId || r.professionalId === currentUser.id));
+  const completedJobs = proRequests.filter(r => r.status === 'concluido' && r.professionalId === currentUser.id);
 
   const totalEarningsKz = completedJobs.reduce((acc, curr) => acc + curr.budgetKz, 0);
 

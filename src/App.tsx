@@ -150,20 +150,22 @@ function MainContent() {
     // Sort by highest rating first (Bem avaliados)
     .sort((a, b) => b.rating - a.rating);
 
-  // Filter requests for 'requests' tab
-  const [requestFilter, setRequestFilter] = useState<'todos' | 'pendentes' | 'progresso' | 'concluidos'>('todos');
+  // Filter requests for 'requests' tab (Organização em 6 estados)
+  const [requestFilter, setRequestFilter] = useState<'todos' | 'pendentes' | 'aceitos' | 'novamente_disponivel' | 'concluidos' | 'cancelados'>('todos');
 
   const filteredRequests = requests.filter(req => {
-    // If role is client, show client's requests. If pro, show pro's or unassigned pending requests.
+    // If role is client, show client's requests. If pro, show pro's or unassigned open opportunities.
     if (userRole === 'cliente') {
-      if (req.clientId !== currentUser.id) return false;
+      if (req.clientId !== currentUser.id && currentUser.role !== 'admin') return false;
     } else if (userRole === 'profissional') {
-      if (req.professionalId !== currentUser.id && req.status !== 'pendente') return false;
+      if (req.professionalId !== currentUser.id && req.status !== 'pendente' && req.status !== 'novamente_disponivel' && currentUser.role !== 'admin') return false;
     }
 
     if (requestFilter === 'pendentes') return req.status === 'pendente';
-    if (requestFilter === 'progresso') return req.status === 'em_progresso' || req.status === 'aceito';
+    if (requestFilter === 'aceitos') return req.status === 'aceito' || req.status === 'em_progresso';
+    if (requestFilter === 'novamente_disponivel') return req.status === 'novamente_disponivel';
     if (requestFilter === 'concluidos') return req.status === 'concluido';
+    if (requestFilter === 'cancelados') return req.status === 'cancelado';
     return true;
   });
 
@@ -630,31 +632,43 @@ function MainContent() {
                 )}
               </div>
 
-              {/* Request Status Filter Bar */}
-              <div className="flex bg-white p-1 rounded-2xl border border-slate-200 text-xs font-bold">
+              {/* Request Status Filter Bar (6 Estados de Pedidos) */}
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar bg-white p-1.5 rounded-2xl border border-slate-200 text-xs font-bold shadow-xs">
                 <button
                   onClick={() => setRequestFilter('todos')}
-                  className={`flex-1 py-2 rounded-xl transition-all ${requestFilter === 'todos' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  className={`px-3.5 py-2 rounded-xl transition-all whitespace-nowrap shrink-0 ${requestFilter === 'todos' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
                 >
                   Todos ({requests.length})
                 </button>
                 <button
                   onClick={() => setRequestFilter('pendentes')}
-                  className={`flex-1 py-2 rounded-xl transition-all ${requestFilter === 'pendentes' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  className={`px-3 py-2 rounded-xl transition-all whitespace-nowrap shrink-0 ${requestFilter === 'pendentes' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
                 >
-                  Pendentes
+                  ⏳ Pendentes
                 </button>
                 <button
-                  onClick={() => setRequestFilter('progresso')}
-                  className={`flex-1 py-2 rounded-xl transition-all ${requestFilter === 'progresso' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  onClick={() => setRequestFilter('novamente_disponivel')}
+                  className={`px-3 py-2 rounded-xl transition-all whitespace-nowrap shrink-0 ${requestFilter === 'novamente_disponivel' ? 'bg-amber-400 text-slate-950 font-black shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
                 >
-                  Em Progresso
+                  🟡 Novamente Disponíveis
+                </button>
+                <button
+                  onClick={() => setRequestFilter('aceitos')}
+                  className={`px-3 py-2 rounded-xl transition-all whitespace-nowrap shrink-0 ${requestFilter === 'aceitos' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
+                >
+                  👍 Aceites
                 </button>
                 <button
                   onClick={() => setRequestFilter('concluidos')}
-                  className={`flex-1 py-2 rounded-xl transition-all ${requestFilter === 'concluidos' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  className={`px-3 py-2 rounded-xl transition-all whitespace-nowrap shrink-0 ${requestFilter === 'concluidos' ? 'bg-emerald-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
                 >
-                  Concluídos
+                  ✅ Concluídos
+                </button>
+                <button
+                  onClick={() => setRequestFilter('cancelados')}
+                  className={`px-3 py-2 rounded-xl transition-all whitespace-nowrap shrink-0 ${requestFilter === 'cancelados' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
+                >
+                  ❌ Cancelados
                 </button>
               </div>
 

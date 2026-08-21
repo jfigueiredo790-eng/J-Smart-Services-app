@@ -175,7 +175,7 @@ interface AppContextType {
 
   // Actions
   createServiceRequest: (newReq: Omit<ServiceRequest, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'clientName' | 'clientAvatar' | 'clientPhone'>) => void;
-  updateRequestStatus: (requestId: string, status: RequestStatus) => void;
+  updateRequestStatus: (requestId: string, status: RequestStatus, reason?: string) => void;
   sendChatMessage: (requestId: string, text: string, isQuote?: boolean, quotePriceKz?: number, imageUrl?: string, locationPin?: { label: string; lat?: number; lng?: number }) => void;
   retryChatMessage: (messageId: string) => void;
   submitReview: (reviewData: Omit<Review, 'id' | 'date'>) => void;
@@ -1401,12 +1401,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { allowed: false, reason: 'Nenhuma conversa activa ou pedido de serviço não encontrado.' };
     }
 
-    // 1. Participant check: User must be either client or professional of this request (or admin)
+    // 0. Administrador tem acesso irrestrito para auditoria, mediação e suporte
+    if (activeRole === 'admin' || currentUser.role === 'admin') {
+      return { allowed: true, reason: 'Acesso Administrativo Autorizado.' };
+    }
+
+    // 1. Participant check: User must be either client or professional of this request
     const isClientOfReq = req.clientId === userId;
     const isProOfReq = req.professionalId === userId;
 
-    if (!isClientOfReq && !isProOfReq && activeRole !== 'admin') {
-      return { allowed: false, reason: 'Acesso negado: Não é participante deste pedido de serviço.' };
+    if (!isClientOfReq && !isProOfReq) {
+      return { allowed: false, reason: 'Acesso negado: O chat é privado exclusivamente entre o cliente e o profissional que aceitou o pedido.' };
     }
 
     // 2. Prevent self-chat
@@ -1415,8 +1420,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // 3. Active Mode / Role validation & Professional Subscription Expiration check:
-    // If user is client of req, activeRole MUST be 'cliente' or 'admin'
-    // If user is pro of req, activeRole MUST be 'profissional' or 'admin'
     if (isClientOfReq && activeRole === 'profissional') {
       return { allowed: false, reason: 'Está a navegar no Modo Profissional. Mude para o Modo Cliente no seu perfil para conversar neste pedido.' };
     }
@@ -1437,16 +1440,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // 4. Request Status check
-    // 5. Expiration check: If request was created/scheduled long ago
-    const scheduledTimestamp = new Date(req.scheduledDate).getTime();
-    const now = Date.now();
-    const isExpired = req.status === 'pendente' && !isNaN(scheduledTimestamp) && (now - scheduledTimestamp > 7 * 24 * 60 * 60 * 1000);
-    if (isExpired) {
-      return { allowed: false, reason: 'Este pedido de serviço expirou o prazo limite e não permite abertura de chat ou mensagens.' };
-    }
-
-    if (req.status === 'pendente') {
-      return { allowed: false, reason: 'O chat de mensagens está bloqueado até o profissional aceitar o pedido de serviço.' };
+    if (req.status === 'pendente' || req.status === 'novamente_disponivel') {
+      return { allowed: false, reason: 'O chat de mensagens está bloqueado até um profissional aceitar o pedido de serviço.' };
     }
 
     if (req.status === 'cancelado') {
@@ -1464,15 +1459,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    // Run auto-matching
+    // Run auto-matching for notification purposes
     const matchedProIds = runAutoMatching(newReqData.categoryId, newReqData.province);
     
-    // Auto-select top pro if client didn't select one (excluding self if dual role)
-    let autoProId = newReqData.professionalId || matchedProIds.find(id => id !== currentUser.id) || undefined;
-    if (autoProId === currentUser.id) {
-      autoProId = undefined;
-    }
-    const autoPro = professionals.find(p => p.id === autoProId);
+    // If client pre-selected a specific pro, retain it; otherwise leave empty so all eligible pros can accept
+    const explicitProId = newReqData.professionalId && newReqData.professionalId !== currentUser.id ? newReqData.professionalId : undefined;
+    const explicitPro = explicitProId ? professionals.find(p => p.id === explicitProId) : undefined;
 
     const newReq: ServiceRequest = {
       ...newReqData,
@@ -1481,12 +1473,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       clientName: currentUser.name,
       clientAvatar: currentUser.avatar,
       clientPhone: currentUser.phone,
-      professionalId: autoProId,
-      professionalName: autoPro?.name,
-      professionalAvatar: autoPro?.avatar,
+      professionalId: explicitProId,
+      professionalName: explicitPro?.name,
+      professionalAvatar: explicitPro?.avatar,
       matchedProIds,
       autoMatchedCount: matchedProIds.length,
       status: 'pendente',
+      isReopened: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       hasReview: false
@@ -1503,39 +1496,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // ignore
     }
 
-    // Notify professional if assigned
-    if (autoProId) {
-      addNotification({
-        userId: autoProId,
-        targetRoleScope: 'profissional',
-        title: '🔔 Novo Pedido de Serviço Recebido',
-        message: `Recebeu uma nova solicitação: "${newReq.title}" em ${newReq.address}, ${newReq.province}.`,
-        type: 'pedido_novo',
-        requestId: newReq.id
-      });
-    }
-
-    // Initial chat message (attached for initial context on request record)
-    if (newReq.professionalId) {
-      const initialMsg: ChatMessage = {
-        id: `msg-${Date.now()}`,
-        requestId: newReq.id,
-        senderId: currentUser.id,
-        senderRole: currentUser.role,
-        senderName: currentUser.name,
-        senderAvatar: currentUser.avatar,
-        text: `Olá! Solicitei o serviço: "${newReq.title}". Local: ${newReq.address}, ${newReq.province}.`,
-        timestamp: new Date().toISOString(),
-        status: 'entregue'
-      };
-      setMessages(prev => [...prev, initialMsg]);
-      try {
-        setDoc(doc(db, 'chat_messages', initialMsg.id), initialMsg).catch(() => {});
-      } catch (e) {}
-    }
+    // Notify matching professionals
+    const targetProsToNotify = explicitProId ? [explicitProId] : matchedProIds;
+    targetProsToNotify.forEach(pId => {
+      if (pId !== currentUser.id) {
+        addNotification({
+          userId: pId,
+          targetRoleScope: 'profissional',
+          title: `🔔 Novo Pedido em ${newReq.province}`,
+          message: `Nova oportunidade disponível: "${newReq.title}" (${newReq.categoryName}). Clique para ver e aceitar.`,
+          type: 'pedido_novo',
+          requestId: newReq.id
+        });
+      }
+    });
   };
 
-  const updateRequestStatus = (requestId: string, status: RequestStatus) => {
+  const updateRequestStatus = (requestId: string, status: RequestStatus, reason?: string) => {
     const targetReq = requests.find(r => r.id === requestId);
     if (!targetReq) return;
 
@@ -1552,13 +1529,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // Assign active professional details if missing or if professional accepts request
-    const updatedProId = (currentUser.role === 'profissional' || status === 'aceito') ? currentUser.id : (targetReq.professionalId || currentUser.id);
-    const updatedProName = (currentUser.role === 'profissional' || status === 'aceito') ? currentUser.name : (targetReq.professionalName || currentUser.name);
-    const updatedProAvatar = (currentUser.role === 'profissional' || status === 'aceito') ? currentUser.avatar : (targetReq.professionalAvatar || currentUser.avatar);
+    // CASO 1: PROFISSIONAL DESISTE / CANCELA ATENDIMENTO -> RETORNA A "NOVAMENTE DISPONÍVEL"
+    if (status === 'novamente_disponivel') {
+      const updatedDocData: Partial<ServiceRequest> = {
+        status: 'novamente_disponivel',
+        isReopened: true,
+        reopenedAt: new Date().toISOString(),
+        previousProId: targetReq.professionalId,
+        previousProName: targetReq.professionalName,
+        cancellationReason: reason || 'O profissional cancelou o atendimento.',
+        professionalId: undefined,
+        professionalName: undefined,
+        professionalAvatar: undefined,
+        updatedAt: new Date().toISOString()
+      };
 
-    // Schedule conflict verification when professional attempts to accept a request
+      setRequests(prev => prev.map(req => {
+        if (req.id === requestId) {
+          return {
+            ...req,
+            ...updatedDocData
+          };
+        }
+        return req;
+      }));
+
+      // Notificar o cliente
+      addNotification({
+        userId: targetReq.clientId,
+        targetRoleScope: 'cliente',
+        title: '🟡 Pedido Novamente Disponível',
+        message: `O atendimento anterior para o pedido "${targetReq.title}" foi cancelado pelo profissional. O seu pedido voltou a ficar automaticamente disponível para outros profissionais qualificados aceitarem.`,
+        type: 'pedido_novo',
+        requestId: targetReq.id
+      });
+
+      // Notificar outros profissionais elegíveis da área
+      (targetReq.matchedProIds || []).forEach(pId => {
+        if (pId !== targetReq.professionalId && pId !== currentUser.id) {
+          addNotification({
+            userId: pId,
+            targetRoleScope: 'profissional',
+            title: '🟡 Pedido Novamente Disponível',
+            message: `O pedido "${targetReq.title}" em ${targetReq.province} voltou a ficar disponível para aceitação!`,
+            type: 'pedido_novo',
+            requestId: targetReq.id
+          });
+        }
+      });
+
+      try {
+        setDoc(doc(db, 'service_requests', requestId), updatedDocData, { merge: true }).catch(() => {});
+      } catch (e) {}
+      return;
+    }
+
+    // CASO 2: PROFISSIONAL ACEITA PEDIDO (DE PENDENTE OU NOVAMENTE DISPONÍVEL)
     if (status === 'aceito') {
+      // Bloqueio de concorrência: apenas um profissional pode aceitar de cada vez
+      if (targetReq.status === 'aceito' && targetReq.professionalId && targetReq.professionalId !== currentUser.id && currentUser.role !== 'admin') {
+        alert('Este pedido já foi aceite por outro profissional.');
+        return;
+      }
+
+      const updatedProId = currentUser.role === 'profissional' ? currentUser.id : (targetReq.professionalId || currentUser.id);
+      const updatedProName = currentUser.role === 'profissional' ? currentUser.name : (targetReq.professionalName || currentUser.name);
+      const updatedProAvatar = currentUser.role === 'profissional' ? currentUser.avatar : (targetReq.professionalAvatar || currentUser.avatar);
+
+      // Verificação de conflito de horário
       const proAcceptedReqs = requests.filter(r => 
         r.id !== requestId && 
         r.professionalId === updatedProId && 
@@ -1568,26 +1606,73 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const conflictCheck = checkScheduleConflict(targetReq, proAcceptedReqs);
       if (conflictCheck.hasConflict) {
         alert(`⚠️ ${conflictCheck.message}`);
-        return; // BLOCK ACCEPTANCE DUE TO TIME CONFLICT!
+        return; // BLOQUEAR ACEITAÇÃO POR CONFLITO DE AGENDA
       }
-    }
 
-    // Issue notifications (Capítulo 12)
-    if (status === 'aceito') {
+      const updatedDocData: Partial<ServiceRequest> = {
+        status: 'aceito',
+        isReopened: false,
+        acceptedAt: new Date().toISOString(),
+        professionalId: updatedProId,
+        professionalName: updatedProName,
+        professionalAvatar: updatedProAvatar,
+        commissionAmountKz: 0,
+        netProAmountKz: targetReq.budgetKz,
+        updatedAt: new Date().toISOString()
+      };
+
+      setRequests(prev => prev.map(req => {
+        if (req.id === requestId) {
+          return {
+            ...req,
+            ...updatedDocData
+          };
+        }
+        return req;
+      }));
+
+      // Notificar cliente
       addNotification({
         userId: targetReq.clientId,
         targetRoleScope: 'cliente',
         title: '✅ Pedido Aceite',
-        message: `O profissional ${updatedProName || ''} aceitou o pedido "${targetReq.title}". O chat de conversação está agora ativo!`,
+        message: `O profissional ${updatedProName || ''} aceitou o seu pedido "${targetReq.title}". O chat privado e dados de atendimento estão agora abertos!`,
         type: 'pedido_aceito',
         requestId: targetReq.id
       });
-    } else if (status === 'em_progresso') {
+
+      // Mensagem inicial de acolhimento no chat privado entre cliente e o profissional que aceitou
+      const initialChatMsg: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        requestId: targetReq.id,
+        senderId: updatedProId,
+        senderRole: 'profissional',
+        senderName: updatedProName || 'Profissional',
+        senderAvatar: updatedProAvatar || '',
+        text: `Olá ${targetReq.clientName}! Aceitei o seu pedido "${targetReq.title}". O nosso chat privado está ativo para combinarmos todos os detalhes do serviço.`,
+        timestamp: new Date().toISOString(),
+        status: 'entregue'
+      };
+      setMessages(prev => [...prev, initialChatMsg]);
+
+      try {
+        setDoc(doc(db, 'service_requests', requestId), updatedDocData, { merge: true }).catch(() => {});
+        setDoc(doc(db, 'chat_messages', initialChatMsg.id), initialChatMsg).catch(() => {});
+      } catch (e) {}
+      return;
+    }
+
+    // CASO 3: OUTROS ESTADOS (em_progresso, concluido, cancelado, pendente)
+    const updatedProId = targetReq.professionalId || (currentUser.role === 'profissional' ? currentUser.id : undefined);
+    const updatedProName = targetReq.professionalName || (currentUser.role === 'profissional' ? currentUser.name : undefined);
+    const updatedProAvatar = targetReq.professionalAvatar || (currentUser.role === 'profissional' ? currentUser.avatar : undefined);
+
+    if (status === 'em_progresso') {
       addNotification({
         userId: targetReq.clientId,
         targetRoleScope: 'cliente',
         title: '🛵 Profissional a Caminho',
-        message: `O profissional ${updatedProName || ''} está a caminho da sua localização em ${targetReq.province}.`,
+        message: `O profissional ${targetReq.professionalName || ''} está a caminho da sua localização em ${targetReq.province}.`,
         type: 'a_caminho',
         requestId: targetReq.id
       });
@@ -1600,19 +1685,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'avaliacao_pendente',
         requestId: targetReq.id
       });
-    }
 
-    // Incrementar trabalhos concluídos do profissional ao finalizar
-    if (status === 'concluido' && targetReq.status !== 'concluido' && updatedProId) {
-      setProfessionals(prev => prev.map(p => {
-        if (p.id === updatedProId) {
-          return {
-            ...p,
-            completedJobs: (p.completedJobs || 0) + 1
-          };
-        }
-        return p;
-      }));
+      if (targetReq.professionalId) {
+        setProfessionals(prev => prev.map(p => {
+          if (p.id === targetReq.professionalId) {
+            return {
+              ...p,
+              completedJobs: (p.completedJobs || 0) + 1
+            };
+          }
+          return p;
+        }));
+      }
+    } else if (status === 'cancelado') {
+      const notifyUserId = currentUser.id === targetReq.clientId ? targetReq.professionalId : targetReq.clientId;
+      if (notifyUserId) {
+        addNotification({
+          userId: notifyUserId,
+          title: '❌ Pedido Cancelado',
+          message: `O pedido "${targetReq.title}" foi cancelado.${reason ? ` Motivo: ${reason}` : ''}`,
+          type: 'comunicado_jsmart',
+          requestId: targetReq.id
+        });
+      }
     }
 
     const updatedDocData: Partial<ServiceRequest> = {
@@ -1620,8 +1715,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       professionalId: updatedProId,
       professionalName: updatedProName,
       professionalAvatar: updatedProAvatar,
-      commissionAmountKz: 0,
-      netProAmountKz: targetReq.budgetKz,
+      completedAt: status === 'concluido' ? new Date().toISOString() : targetReq.completedAt,
+      cancelledAt: status === 'cancelado' ? new Date().toISOString() : targetReq.cancelledAt,
+      cancelledBy: status === 'cancelado' ? (currentUser.role as any) : targetReq.cancelledBy,
+      cancellationReason: status === 'cancelado' ? reason : targetReq.cancellationReason,
       updatedAt: new Date().toISOString()
     };
 

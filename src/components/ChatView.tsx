@@ -788,13 +788,13 @@ export const ChatView: React.FC = () => {
                     </div>
                   </div>
 
-                  {currentUser.role === 'profissional' && activeReq?.status === 'pendente' && activeReq?.professionalId === currentUser.id && (
+                  {currentUser.role === 'profissional' && (activeReq?.status === 'pendente' || activeReq?.status === 'novamente_disponivel') && (
                     <button
                       onClick={() => updateRequestStatus(activeReq.id, 'aceito')}
                       className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-md shrink-0"
                     >
                       <Check className="w-4 h-4" />
-                      <span>Aceitar Pedido</span>
+                      <span>Aceitar Pedido Agora</span>
                     </button>
                   )}
                 </div>
