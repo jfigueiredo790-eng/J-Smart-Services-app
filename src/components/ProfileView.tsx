@@ -351,14 +351,14 @@ export const ProfileView: React.FC = () => {
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-900 text-sm">Estado de Verificação de Documentos</h3>
+              <h3 className="font-bold text-slate-900 text-sm">Estado do Registo Profissional</h3>
               <p className="text-xs text-slate-600 mt-0.5">
-                {currentUser.verified ? 'Documentação BI & Alvará de serviço aprovados em Angola.' : 'Pendente de aprovação pelo Administrador.'}
+                Conta profissional verificada e ativa na plataforma J Smart Services Angola.
               </p>
             </div>
           </div>
-          <span className={`text-xs font-bold px-3 py-1 rounded-full ${currentUser.verified ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-            {currentUser.verified ? 'Aprovado' : 'Em Análise'}
+          <span className="text-xs font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-800">
+            Aprovado & Ativo
           </span>
         </div>
       )}
@@ -498,56 +498,6 @@ export const ProfileView: React.FC = () => {
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
-          </div>
-
-          {/* 🔒 Nº do Bilhete de Identidade (BI) - Área Privada e Confidencial */}
-          <div className="p-4 bg-slate-50/80 border border-slate-200 rounded-2xl space-y-2.5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Nº do Bilhete de Identidade (BI)</span>
-                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full border border-emerald-200">
-                    🔒 Confidencial & Pessoal
-                  </span>
-                </label>
-                <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                  Visível <strong>apenas por si</strong> e pela <strong>Administração</strong> para validação e segurança em Angola. Nunca é exibido a outros utilizadores nem em áreas públicas.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowBIDigits(!showBIDigits)}
-                className="text-xs font-extrabold text-slate-700 hover:text-emerald-700 bg-white border border-slate-200 hover:border-emerald-300 px-3 py-1.5 rounded-xl transition-all shadow-sm shrink-0 flex items-center gap-1.5 self-start sm:self-center"
-                title={showBIDigits ? "Ocultar dígitos do BI" : "Revelar dígitos do BI"}
-              >
-                {showBIDigits ? (
-                  <>
-                    <EyeOff className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Ocultar</span>
-                  </>
-                ) : (
-                  <>
-                    <Eye className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Visualizar</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            <div className="relative">
-              <input 
-                type={showBIDigits ? "text" : "password"} 
-                value={documentNumber} 
-                onChange={(e) => setDocumentNumber(e.target.value)}
-                placeholder="Ex: 004821943LA041"
-                className="w-full text-xs font-mono font-bold tracking-wider p-3 rounded-xl border border-slate-200 text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white"
-              />
-            </div>
-            <p className="text-[10px] text-slate-400 flex items-center gap-1">
-              <span>🛡️ Documento protegido conforme a política de privacidade da J Smart Services.</span>
-            </p>
           </div>
 
           {currentUser.role !== 'admin' ? (

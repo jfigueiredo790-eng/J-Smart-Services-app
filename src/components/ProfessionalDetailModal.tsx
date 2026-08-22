@@ -271,9 +271,9 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
-              <h4 className="font-bold text-slate-900 text-xs">Documentação Verificada J Smart Services</h4>
+              <h4 className="font-bold text-slate-900 text-xs">Registo Profissional Verificado</h4>
               <p className="text-xs text-slate-600 mt-0.5">
-                {pro.documentType || 'Bilhete de Identidade & Certificado Profissional válidos em Angola.'}
+                Perfil e qualificações profissionais ativas e verificadas na J Smart Services Angola.
               </p>
             </div>
           </div>

@@ -97,52 +97,24 @@ export function getProPlanStatus(pro: Partial<ProfessionalProfile | User> | null
     }
   }
 
-  // 2. Otherwise calculate 14-day Free Trial
+  // 2. Otherwise calculate Free Trial (ensure at least 14 active days or courtesy active status for all verified professionals)
   const startDate = new Date(pro.trialStartDate || pro.createdAt || new Date());
   const trialEnd = new Date(startDate.getTime() + 14 * 24 * 60 * 60 * 1000);
   const diffTime = trialEnd.getTime() - now.getTime();
-  const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  const hoursRemaining = Math.ceil(diffTime / (1000 * 60 * 60));
+  const daysRemaining = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+  const hoursRemaining = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60)));
 
-  if (diffTime > 0) {
-    let alertStage: '7_days' | '3_days' | '24_hours' | 'normal' = 'normal';
-    let alertMsg = `Faltam ${Math.max(1, daysRemaining)} dias do seu período gratuito.`;
-
-    if (hoursRemaining <= 24) {
-      alertStage = '24_hours';
-      alertMsg = `⚠️ Lembrete urgente: Faltam menos de 24 horas do seu período gratuito!`;
-    } else if (daysRemaining <= 3) {
-      alertStage = '3_days';
-      alertMsg = `⚠️ Atenção: Faltam apenas ${daysRemaining} dias do seu período gratuito!`;
-    } else if (daysRemaining <= 7) {
-      alertStage = '7_days';
-      alertMsg = `🔔 Lembrete: Faltam ${daysRemaining} dias do seu período gratuito.`;
-    }
-
-    return {
-      isTrial: true,
-      isActive: true,
-      isExpired: false,
-      daysRemaining: Math.max(1, daysRemaining),
-      hoursRemaining: Math.max(1, hoursRemaining),
-      alertStage,
-      planType: 'free_trial',
-      expiresAtIso: trialEnd.toISOString(),
-      message: alertMsg
-    };
-  } else {
-    return {
-      isTrial: true,
-      isActive: false,
-      isExpired: true,
-      daysRemaining: 0,
-      hoursRemaining: 0,
-      alertStage: 'expired',
-      planType: 'free_trial',
-      expiresAtIso: trialEnd.toISOString(),
-      message: 'O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.'
-    };
-  }
+  return {
+    isTrial: true,
+    isActive: true,
+    isExpired: false,
+    daysRemaining: diffTime > 0 ? daysRemaining : 14,
+    hoursRemaining: diffTime > 0 ? hoursRemaining : 336,
+    alertStage: 'normal',
+    planType: 'free_trial',
+    expiresAtIso: diffTime > 0 ? trialEnd.toISOString() : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    message: `Período gratuito ativo na plataforma J Smart Services Angola.`
+  };
 }
 
 /**

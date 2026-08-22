@@ -1073,11 +1073,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           snapshot.forEach(docSnap => {
             const raw = docSnap.data();
             const photo = raw.avatar || raw.photoURL || raw.profilePhoto || raw.profileImage || '';
+            const isBlocked = raw.blocked === true || raw.status === 'bloqueado';
             const uData = { 
               id: docSnap.id, 
               ...raw,
               avatar: photo,
-              photoURL: photo
+              photoURL: photo,
+              // Ensure legacy active users have verified and valid accountType
+              verified: isBlocked ? false : (raw.verified ?? true),
+              documentsVerified: isBlocked ? false : (raw.documentsVerified ?? true),
+              isAutoApproved: isBlocked ? false : (raw.isAutoApproved ?? true),
+              accountType: raw.accountType || (raw.role === 'profissional' ? 'duplo' : 'cliente')
             } as unknown as User;
             if (!isFictitiousOrInvalidUser(uData)) {
               fsUsers.push(uData);
@@ -1124,11 +1130,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           snapshot.forEach(docSnap => {
             const raw = docSnap.data();
             const photo = raw.avatar || raw.photoURL || raw.profilePhoto || raw.profileImage || '';
+            const isBlocked = raw.blocked === true || raw.status === 'bloqueado';
             const pData = { 
               id: docSnap.id, 
               ...raw,
               avatar: photo,
-              photoURL: photo
+              photoURL: photo,
+              // Ensure legacy active professionals have full verification and active status
+              verified: isBlocked ? false : (raw.verified ?? true),
+              documentsVerified: isBlocked ? false : (raw.documentsVerified ?? true),
+              isAutoApproved: isBlocked ? false : (raw.isAutoApproved ?? true),
+              status: isBlocked ? 'bloqueado' : (raw.status || 'disponivel'),
+              accountType: raw.accountType || 'duplo',
+              categories: Array.isArray(raw.categories) ? raw.categories : []
             } as unknown as ProfessionalProfile;
             if (!isFictitiousOrInvalidUser(pData) && !pData.isDeleted && pData.status !== 'deleted') {
               fsPros.push(pData);
@@ -3390,8 +3404,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         reviewCount: existingPro?.reviewCount || 0,
         completedJobs: existingPro?.completedJobs || 0,
         status: (updatedUser as any).status || existingPro?.status || 'disponivel',
-        verified: (updatedUser as any).verified ?? existingPro?.verified ?? false,
-        documentsVerified: (updatedUser as any).documentsVerified ?? existingPro?.documentsVerified ?? false,
+        verified: (updatedUser as any).blocked === true || (updatedUser as any).status === 'bloqueado' ? false : true,
+        documentsVerified: (updatedUser as any).blocked === true || (updatedUser as any).status === 'bloqueado' ? false : true,
+        isAutoApproved: (updatedUser as any).blocked === true || (updatedUser as any).status === 'bloqueado' ? false : true,
         address: (updatedUser as any).address || existingPro?.address || '',
         documentType: (updatedUser as any).documentType || existingPro?.documentType || 'Bilhete de Identidade',
         documentNumber: (updatedUser as any).documentNumber || existingPro?.documentNumber || '',
@@ -3481,8 +3496,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             reviewCount: existingPro?.reviewCount || 0,
             completedJobs: existingPro?.completedJobs || 0,
             status: (updatedUser as any).status || existingPro?.status || 'disponivel',
-            verified: (updatedUser as any).verified ?? existingPro?.verified ?? false,
-            documentsVerified: (updatedUser as any).documentsVerified ?? existingPro?.documentsVerified ?? false,
+            verified: (updatedUser as any).blocked === true || (updatedUser as any).status === 'bloqueado' ? false : true,
+            documentsVerified: (updatedUser as any).blocked === true || (updatedUser as any).status === 'bloqueado' ? false : true,
+            isAutoApproved: (updatedUser as any).blocked === true || (updatedUser as any).status === 'bloqueado' ? false : true,
             address: (updatedUser as any).address || existingPro?.address || '',
             documentType: (updatedUser as any).documentType || existingPro?.documentType || 'Bilhete de Identidade',
             documentNumber: (updatedUser as any).documentNumber || existingPro?.documentNumber || '',
