@@ -1,5 +1,5 @@
 import { User, ProfessionalProfile, ServiceRequest, Review, ServiceCategory, UserRole, RequestStatus, ChatMessage, AppNotification, WorkFeedPost } from '../types';
-import { getProPlanStatus, PLAN_PRICES } from './planUtils';
+import { getProPlanStatus, validateProAction, PLAN_PRICES, GLOBAL_SUBSCRIPTIONS_ACTIVE } from './planUtils';
 import { isNotificationForUser } from './notificationUtils';
 import { rankWorkFeedPosts, formatPostDateFriendly } from './feedAlgorithm';
 
@@ -364,13 +364,13 @@ export function runFullSystemTestSuite(): TestSuiteReport {
     };
 
     // 1. Teste Plano Ativo
-    const statusActive = getProPlanStatus(activePro);
+    const statusActive = getProPlanStatus(activePro, true);
     const activeAppearsInSearch = statusActive.isActive;
     const activeCanReceiveRequests = statusActive.isActive;
     const activeCanStartChat = statusActive.isActive;
 
     // 2. Teste Plano Expirado
-    const statusExpired = getProPlanStatus(expiredPro);
+    const statusExpired = getProPlanStatus(expiredPro, true);
     const expiredHiddenFromSearch = !statusExpired.isActive;
     const expiredBlockedFromRequests = !statusExpired.isActive;
     const expiredBlockedFromChat = !statusExpired.isActive;
@@ -381,7 +381,7 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       subscriptionPlan: 'plan_14d',
       planExpiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
     };
-    const statusRenewed = getProPlanStatus(renewedPro);
+    const statusRenewed = getProPlanStatus(renewedPro, true);
     const renewedReactivatedAutomatically = statusRenewed.isActive && !statusRenewed.isExpired;
 
     const allPassed = 
@@ -414,12 +414,12 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       planExpiresAt: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString(),
     };
 
-    const statusExpired = getProPlanStatus(expiredPro);
-    const statusActive = getProPlanStatus(activePro);
+    const statusExpired = getProPlanStatus(expiredPro, true);
+    const statusActive = getProPlanStatus(activePro, true);
 
     // Simulação do filtro de pesquisa da app
     const proList = [expiredPro, activePro];
-    const visiblePros = proList.filter(p => getProPlanStatus(p).isActive);
+    const visiblePros = proList.filter(p => getProPlanStatus(p, true).isActive);
 
     const isExpiredHidden = !visiblePros.some(p => p.id === 'p-expired');
     const isActiveVisible = visiblePros.some(p => p.id === 'p-active');
@@ -1082,8 +1082,8 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       planExpiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString() // +15 dias
     };
 
-    const expiredStatus = getProPlanStatus(expiredProUser);
-    const activeStatus = getProPlanStatus(activeProUser);
+    const expiredStatus = getProPlanStatus(expiredProUser, true);
+    const activeStatus = getProPlanStatus(activeProUser, true);
 
     const passed = expiredStatus.isExpired && !expiredStatus.isActive && activeStatus.isActive && !activeStatus.isExpired;
 
@@ -1122,7 +1122,7 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       createdAt: new Date().toISOString()
     };
 
-    const statusAfterExpiration = getProPlanStatus(mockProDatabaseRecord);
+    const statusAfterExpiration = getProPlanStatus(mockProDatabaseRecord, true);
 
     // Verify all original profile properties remain unmodified despite statusAfterExpiration.isExpired being true
     const dataIntact = 
@@ -1801,7 +1801,7 @@ export function runFullSystemTestSuite(): TestSuiteReport {
 
     // Publicação continua 100% visível e preservada no Feed
     const postPreserved = ranked.length === 1 && ranked[0].id === 'feed-post-expired-pro';
-    const proPlanStatus = getProPlanStatus(expiredPro);
+    const proPlanStatus = getProPlanStatus(expiredPro, true);
 
     const passed = postPreserved && proPlanStatus.isExpired && !proPlanStatus.isActive;
 
@@ -1812,6 +1812,39 @@ export function runFullSystemTestSuite(): TestSuiteReport {
         `1. Estado do profissional: isExpired = ${proPlanStatus.isExpired} (${proPlanStatus.message})`,
         `2. Publicação permanece no Feed: ${postPreserved ? '✅ 100% Preservada' : '❌ Eliminada indevidamente'}`,
         '3. Regra de ouro respeitada: Nenhum dado, foto ou histórico é apagado por término de subscrição.'
+      ]
+    };
+  });
+
+  // 26. CONTROLO GLOBAL DE SUBSCRIÇÕES (MODO DE CRESCIMENTO & ISENÇÃO DE COBRANÇAS)
+  runTest('T26.1', 'Modo de Crescimento da Plataforma', 'Garantir acesso livre e 100% gratuito enquanto as subscrições estiverem inativas', () => {
+    const regularPro: Partial<ProfessionalProfile> = {
+      id: 'pro-crescimento-1',
+      name: 'Manuel Pintor',
+      role: 'profissional',
+      subscriptionPlan: 'free_trial',
+      trialStartDate: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(), // Registado há 2 meses
+      blocked: false,
+      status: 'disponivel'
+    };
+
+    // No modo de crescimento padrão da aplicação:
+    const currentStatus = getProPlanStatus(regularPro);
+    const actionValidation = validateProAction(regularPro);
+
+    const isGrowthActive = !GLOBAL_SUBSCRIPTIONS_ACTIVE;
+    const isFreeAccessGranted = currentStatus.isActive && !currentStatus.isExpired && actionValidation.allowed;
+
+    const passed = isGrowthActive && isFreeAccessGranted && currentStatus.isPromotionalPhase === true;
+
+    return {
+      passed,
+      message: 'Modo de Crescimento validado: profissionais operam livremente sem bloqueios ou cobranças.',
+      details: [
+        `1. Subscrições Globalmente Ativas: ${GLOBAL_SUBSCRIPTIONS_ACTIVE ? 'SIM' : 'NÃO (Fase de Crescimento)'}`,
+        `2. Estado do profissional registado há 60 dias: ${currentStatus.isActive ? '✅ Ativo & Ilimitado' : '❌ Bloqueado'}`,
+        `3. Ação profissional autorizada: ${actionValidation.allowed ? '✅ Autorizado' : '❌ Recusado'}`,
+        `4. Mensagem amigável: "${currentStatus.message}"`
       ]
     };
   });

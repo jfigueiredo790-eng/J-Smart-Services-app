@@ -1,5 +1,26 @@
 import { ProfessionalProfile, User, ProSubscriptionPlan } from '../types';
 
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 👑 CONTROLO GLOBAL DE ATIVAÇÃO DAS SUBSCRIÇÕES DOS PROFISSIONAIS
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * 🔴 false = FASE DE CRESCIMENTO & ANGARIAÇÃO (ATUAL / DESATIVADO):
+ *            - Todas as subscrições e cobranças permanecem DESATIVADAS.
+ *            - Todos os profissionais utilizam a plataforma 100% livremente.
+ *            - Nenhum profissional é bloqueado por falta de pagamento.
+ *            - Nenhum aviso de expiração ou bloqueio de funcionalidades é exibido.
+ *            - Podem receber pedidos, conversar no chat, divulgar trabalhos e aceitar serviços.
+ *            - Todos os dados, perfis, fotos e publicações permanecem 100% preservados.
+ *            - Toda a arquitetura de planos, carteira e pagamentos continua pronta internamente.
+ *
+ * 🟢 true = ATIVAÇÃO TOTAL DAS SUBSCRIÇÕES (QUANDO O PROPRIETÁRIO ORDENAR:
+ *           "ACTIVAR SUBSCRIÇÕES PARA OS PROFISSIONAIS"):
+ *           - Inicia o ciclo de subscrições: 14 dias de período gratuito para todos os
+ *             profissionais a partir da ativação, e posterior seleção de planos pagos.
+ */
+export const GLOBAL_SUBSCRIPTIONS_ACTIVE: boolean = false;
+
 export const PLAN_PRICES = {
   plan_7d: { days: 7, priceKz: 1500, label: 'Plano Semanal', badgeColor: 'emerald', description: 'Plano Semanal (7 Dias — 1.500 Kz)' },
   plan_14d: { days: 14, priceKz: 3000, label: 'Plano Quinzenal', badgeColor: 'blue', description: 'Plano Quinzenal (14 Dias — 3.000 Kz)' },
@@ -11,6 +32,7 @@ export interface PlanStatusResult {
   isActive: boolean;
   isExpired: boolean;
   isBlocked?: boolean;
+  isPromotionalPhase?: boolean;
   daysRemaining: number;
   hoursRemaining?: number;
   alertStage?: '7_days' | '3_days' | '24_hours' | 'expired' | 'normal';
@@ -19,7 +41,10 @@ export interface PlanStatusResult {
   message: string;
 }
 
-export function getProPlanStatus(pro: Partial<ProfessionalProfile | User> | null | undefined): PlanStatusResult {
+export function getProPlanStatus(
+  pro: Partial<ProfessionalProfile | User> | null | undefined,
+  enforceSubscriptions: boolean = GLOBAL_SUBSCRIPTIONS_ACTIVE
+): PlanStatusResult {
   if (!pro) {
     return {
       isTrial: true,
@@ -28,7 +53,7 @@ export function getProPlanStatus(pro: Partial<ProfessionalProfile | User> | null
       daysRemaining: 0,
       alertStage: 'expired',
       planType: 'free_trial',
-      message: 'O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.'
+      message: 'Inicie sessão com uma conta profissional para aceder.'
     };
   }
 
@@ -45,7 +70,7 @@ export function getProPlanStatus(pro: Partial<ProfessionalProfile | User> | null
     };
   }
 
-  // 0.1 Check if account is blocked by Admin
+  // 0.1 Check if account is blocked by Admin (Segurança e moderação continuam sempre ativas)
   if (pro.blocked === true || pro.status === 'bloqueado' || (pro as any).accountStatus === 'BLOCKED') {
     return {
       isTrial: false,
@@ -55,6 +80,20 @@ export function getProPlanStatus(pro: Partial<ProfessionalProfile | User> | null
       daysRemaining: 0,
       planType: pro.subscriptionPlan || 'free_trial',
       message: 'Conta bloqueada. O acesso à J Smart Services foi bloqueado pelo Administrador. Entre em contacto com o suporte para obter mais informações.'
+    };
+  }
+
+  // 0.2 FASE DE CRESCIMENTO (Subscrições Globalmente Inativas por ordem da Administração)
+  if (!enforceSubscriptions) {
+    return {
+      isTrial: false,
+      isActive: true,
+      isExpired: false,
+      isPromotionalPhase: true,
+      daysRemaining: 9999,
+      alertStage: 'normal',
+      planType: pro.subscriptionPlan || 'free_trial',
+      message: 'Acesso Profissional Ilimitado & Gratuito — Fase de Crescimento J Smart Services Angola'
     };
   }
 
@@ -92,7 +131,7 @@ export function getProPlanStatus(pro: Partial<ProfessionalProfile | User> | null
         alertStage: 'expired',
         planType: pro.subscriptionPlan,
         expiresAtIso: pro.planExpiresAt,
-        message: 'O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.'
+        message: 'O seu período de plano terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.'
       };
     }
   }
@@ -202,7 +241,7 @@ export function validateProAction(pro: Partial<ProfessionalProfile | User> | nul
     };
   }
 
-  // 3 & 4. Verificar se existe uma subscrição válida e se a data de expiração não foi ultrapassada
+  // 3 & 4. Verificar subscrição (se o controlo global estiver desativado, o acesso é 100% liberado)
   const planStatus = getProPlanStatus(pro);
   if (!planStatus.isActive || planStatus.isExpired) {
     return {

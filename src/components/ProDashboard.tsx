@@ -137,7 +137,44 @@ export const ProDashboard: React.FC = () => {
       </div>
 
       {/* Trial Counter & Automatic Reminder Alerts Banner */}
-      {planStatus.isTrial && planStatus.isActive && (
+      {/* Promotional Growth Phase Banner (Global Subscriptions Inactive) */}
+      {planStatus.isPromotionalPhase && (
+        <div className="bg-gradient-to-r from-emerald-700 via-teal-800 to-slate-900 text-white p-6 rounded-3xl shadow-xl border border-emerald-400/40 space-y-3">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-amber-300 shrink-0 shadow-inner">
+                <Sparkles className="w-6 h-6 animate-pulse text-amber-300" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                    ★ Fase de Crescimento Angola
+                  </span>
+                  <span className="bg-emerald-400/20 text-emerald-200 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-400/30">
+                    100% Gratuito & Sem Mensalidades
+                  </span>
+                </div>
+                <h3 className="text-lg font-black text-white mt-1.5">
+                  Acesso Profissional Ilimitado & Totalmente Gratuito
+                </h3>
+                <p className="text-xs text-emerald-100/90 mt-1 max-w-2xl leading-relaxed">
+                  A J Smart Services está focada em crescer e gerar oportunidades para todos os profissionais. Pode receber pedidos de clientes em Angola, conversar no chat, aceitar trabalhos e publicar no Feed sem qualquer cobrança ou bloqueio.
+                </p>
+              </div>
+            </div>
+            <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/20 text-center shrink-0 self-start md:self-auto">
+              <span className="text-[10px] uppercase font-black text-emerald-300 block tracking-wider">Estado da Conta</span>
+              <span className="text-xs font-black text-white flex items-center gap-1.5 justify-center mt-0.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                Ativo & Ilimitado
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trial Countdown Alert Banner (When Subscriptions Active) */}
+      {!planStatus.isPromotionalPhase && planStatus.isTrial && planStatus.isActive && (
         <div className={`p-5 rounded-3xl shadow-lg border text-white transition-all ${
           planStatus.alertStage === '24_hours'
             ? 'bg-gradient-to-r from-amber-600 via-rose-700 to-slate-900 border-amber-400/50'
@@ -308,9 +345,17 @@ export const ProDashboard: React.FC = () => {
             <div className="flex items-center gap-2">
               <Crown className="w-5 h-5 text-amber-500" />
               <h3 className="font-extrabold text-slate-900 text-base">Planos de Subscrição</h3>
+              {planStatus.isPromotionalPhase && (
+                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  🎉 Gratuito por Tempo Ilimitado
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Registo gratuito + 14 dias de teste. Escolha o seu plano para continuar a trabalhar na plataforma J Smart.
+              {planStatus.isPromotionalPhase 
+                ? 'Fase de crescimento da J Smart Services Angola: Todos os profissionais têm acesso 100% livre e gratuito sem necessidade de pagamento.'
+                : 'Registo gratuito + 14 dias de teste. Escolha o seu plano para continuar a trabalhar na plataforma J Smart.'
+              }
             </p>
           </div>
 

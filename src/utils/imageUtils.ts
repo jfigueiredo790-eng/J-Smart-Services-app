@@ -40,72 +40,117 @@ export const getUserInitials = (name?: string): string => {
 
 /**
  * Utility to compress and resize images from camera or device gallery.
- * Converts large Megapixel photos into optimized JPEG Data URLs (~30KB-60KB).
+ * Handles mobile formats (JPEG, PNG, WEBP, HEIC/HEIF converted by browser).
+ * Guaranteed to NEVER hang with an internal timeout fallback.
+ * Converts large Megapixel photos into optimized JPEG Data URLs (~15KB-35KB for avatars).
  */
 export const compressImageFile = (
   file: File, 
-  maxDimension = 600, 
-  quality = 0.85
+  maxDimension = 500, 
+  quality = 0.80
 ): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    // Check file type
-    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
-    if (file.type && !validTypes.includes(file.type.toLowerCase())) {
-      console.warn('Tipo de imagem não padrão, prosseguindo com conversão canvas:', file.type);
-    }
+  return new Promise((resolve) => {
+    // Safety fail-safe timeout: never let the app hang on slow or non-responsive mobile decoders
+    const safetyTimeout = setTimeout(() => {
+      console.warn('compressImageFile timeout de segurança atingido, tentando conversão directa');
+      // If canvas took too long or stalled, read raw file as fallback
+      const fallbackReader = new FileReader();
+      fallbackReader.onload = () => resolve((fallbackReader.result as string) || '');
+      fallbackReader.onerror = () => resolve('');
+      fallbackReader.readAsDataURL(file);
+    }, 4000);
 
-    const reader = new FileReader();
-    reader.onerror = (err) => reject(new Error('Falha ao ler o ficheiro da galeria.'));
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('Formato de imagem inválido ou corrompido.'));
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
+    const cleanupAndResolve = (result: string) => {
+      clearTimeout(safetyTimeout);
+      resolve(result);
+    };
 
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
-          }
-        }
+    try {
+      const reader = new FileReader();
+      
+      reader.onerror = () => {
+        console.warn('Erro no FileReader ao ler ficheiro de imagem');
+        cleanupAndResolve('');
+      };
 
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, width);
-        canvas.height = Math.max(1, height);
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(event.target?.result as string);
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string;
+        if (!dataUrl) {
+          cleanupAndResolve('');
           return;
         }
 
-        // Draw with smooth interpolation
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, 0, 0, width, height);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
 
-        try {
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-          resolve(compressedDataUrl);
-        } catch (e) {
-          resolve(event.target?.result as string);
-        }
+        img.onerror = () => {
+          console.warn('Formato de imagem não decodificado pelo Image(), usando fallback direto');
+          // If Image() fails to decode (e.g. rare format), return the original dataUrl
+          cleanupAndResolve(dataUrl);
+        };
+
+        img.onload = () => {
+          try {
+            let width = img.naturalWidth || img.width || maxDimension;
+            let height = img.naturalHeight || img.height || maxDimension;
+
+            if (width <= 0 || height <= 0) {
+              cleanupAndResolve(dataUrl);
+              return;
+            }
+
+            if (width > maxDimension || height > maxDimension) {
+              if (width > height) {
+                height = Math.max(1, Math.round((height * maxDimension) / width));
+                width = maxDimension;
+              } else {
+                width = Math.max(1, Math.round((width * maxDimension) / height));
+                height = maxDimension;
+              }
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, width);
+            canvas.height = Math.max(1, height);
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              cleanupAndResolve(dataUrl);
+              return;
+            }
+
+            // High quality downsampling
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, width, height);
+
+            const compressed = canvas.toDataURL('image/jpeg', quality);
+            cleanupAndResolve(compressed || dataUrl);
+          } catch (canvasErr) {
+            console.warn('Erro no canvas durante a compressão, usando DataURL original:', canvasErr);
+            cleanupAndResolve(dataUrl);
+          }
+        };
+
+        img.src = dataUrl;
       };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Exceção ao ler imagem:', err);
+      cleanupAndResolve('');
+    }
   });
 };
 
 /**
- * Uploads a profile photo to Firebase Storage under profile_photos/{userId}_{timestamp}.jpg
- * and retrieves the permanent public download URL.
- * Falls back gracefully to the optimized compressed Data URL if Storage permissions/CORS fail,
- * guaranteeing the photo is NEVER lost and is saved in Firestore.
+ * Uploads a profile photo to storage and returns a valid photo URL.
+ * Guarantees zero-hang execution:
+ * 1. Rapidly compresses image into a lightweight ~15KB-30KB high-clarity JPEG.
+ * 2. Attempts Firebase Storage upload with a strict 2.0-second race.
+ * 3. If Firebase Storage succeeds, returns public download URL.
+ * 4. If Firebase Storage fails, times out, or has permission/CORS restrictions,
+ *    returns the compressed Data URL directly for immediate Firestore persistence.
  */
 export const uploadProfilePhotoToStorage = async (
   fileOrDataUrl: File | string,
@@ -119,45 +164,63 @@ export const uploadProfilePhotoToStorage = async (
 
   try {
     if (typeof fileOrDataUrl === 'string') {
+      if (fileOrDataUrl.startsWith('http://') || fileOrDataUrl.startsWith('https://')) {
+        return { success: true, url: fileOrDataUrl };
+      }
       compressedDataUrl = fileOrDataUrl;
     } else {
-      compressedDataUrl = await compressImageFile(fileOrDataUrl, 600, 0.85);
+      compressedDataUrl = await compressImageFile(fileOrDataUrl, 450, 0.80);
     }
 
     if (!compressedDataUrl || !compressedDataUrl.startsWith('data:image/')) {
-      // If it's already an external HTTP URL, return as is
-      if (typeof fileOrDataUrl === 'string' && fileOrDataUrl.startsWith('http')) {
-        return { success: true, url: fileOrDataUrl };
-      }
-      return { success: false, url: '', error: 'Formato de imagem inválido.' };
+      return { success: false, url: '', error: 'Não foi possível ler esta imagem. Tente outra foto da sua galeria.' };
     }
 
     const timestamp = Date.now();
-    const storagePath = `profile_photos/${userId}_${timestamp}.jpg`;
-    const storageRef = ref(storage, storagePath);
+    const cleanUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const storagePath = `profile_photos/${cleanUserId}_${timestamp}.jpg`;
 
-    try {
-      // Attempt upload to Firebase Storage
-      const uploadResult = await uploadString(storageRef, compressedDataUrl, 'data_url', {
-        contentType: 'image/jpeg'
-      });
-      const downloadUrl = await getDownloadURL(uploadResult.ref);
+    // Attempt Firebase Storage with a strict 1.8-second timeout race
+    const storagePromise = (async () => {
+      try {
+        const storageRef = ref(storage, storagePath);
+        const uploadResult = await uploadString(storageRef, compressedDataUrl, 'data_url', {
+          contentType: 'image/jpeg'
+        });
+        const downloadUrl = await getDownloadURL(uploadResult.ref);
+        return { success: true, url: downloadUrl, storagePath };
+      } catch (err: any) {
+        return { success: false, url: '', error: err?.message || 'Storage error' };
+      }
+    })();
+
+    const timeoutPromise = new Promise<{ success: false; url: ''; error: string }>((res) => {
+      setTimeout(() => res({ success: false, url: '', error: 'Storage timeout' }), 1800);
+    });
+
+    const storageOutcome = await Promise.race([storagePromise, timeoutPromise]);
+
+    if (storageOutcome.success && storageOutcome.url) {
       return {
         success: true,
-        url: downloadUrl,
-        storagePath
-      };
-    } catch (storageError: any) {
-      console.warn('Firebase Storage upload notice (usando fallback persistente no Firestore):', storageError.message || storageError);
-      // Fallback: Return the high-quality compressed DataURL (~30KB) which is saved directly to Firestore
-      return {
-        success: true,
-        url: compressedDataUrl,
-        error: storageError.message
+        url: storageOutcome.url,
+        storagePath: storageOutcome.storagePath
       };
     }
+
+    // High-performance fallback: Data URL is persisted directly into Firestore & localStorage
+    return {
+      success: true,
+      url: compressedDataUrl
+    };
   } catch (err: any) {
-    console.error('Erro ao processar e fazer upload da imagem:', err);
+    console.error('Erro no processamento da imagem de perfil:', err);
+    if (compressedDataUrl && compressedDataUrl.startsWith('data:image/')) {
+      return {
+        success: true,
+        url: compressedDataUrl
+      };
+    }
     return {
       success: false,
       url: '',
@@ -167,10 +230,7 @@ export const uploadProfilePhotoToStorage = async (
 };
 
 /**
- * Uploads a work feed post photo to Firebase Storage under work_photos/{userId}_{timestamp}.jpg
- * and retrieves the permanent public download URL.
- * Falls back gracefully to the optimized compressed Data URL if Storage permissions/CORS fail,
- * guaranteeing the work photo is NEVER lost and is saved in Firestore.
+ * Uploads a work feed post photo with fail-safe fallback.
  */
 export const uploadWorkPostImageToStorage = async (
   fileOrDataUrl: File | string,
@@ -184,42 +244,62 @@ export const uploadWorkPostImageToStorage = async (
 
   try {
     if (typeof fileOrDataUrl === 'string') {
+      if (fileOrDataUrl.startsWith('http://') || fileOrDataUrl.startsWith('https://')) {
+        return { success: true, url: fileOrDataUrl };
+      }
       compressedDataUrl = fileOrDataUrl;
     } else {
-      compressedDataUrl = await compressImageFile(fileOrDataUrl, 1200, 0.85);
+      compressedDataUrl = await compressImageFile(fileOrDataUrl, 1000, 0.82);
     }
 
     if (!compressedDataUrl || !compressedDataUrl.startsWith('data:image/')) {
-      if (typeof fileOrDataUrl === 'string' && fileOrDataUrl.startsWith('http')) {
-        return { success: true, url: fileOrDataUrl };
-      }
       return { success: false, url: '', error: 'Formato de imagem inválido.' };
     }
 
     const timestamp = Date.now();
-    const storagePath = `work_photos/${userId}_${timestamp}.jpg`;
-    const storageRef = ref(storage, storagePath);
+    const cleanUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const storagePath = `work_photos/${cleanUserId}_${timestamp}.jpg`;
 
-    try {
-      const uploadResult = await uploadString(storageRef, compressedDataUrl, 'data_url', {
-        contentType: 'image/jpeg'
-      });
-      const downloadUrl = await getDownloadURL(uploadResult.ref);
+    // Attempt Firebase Storage with a strict 2.0-second race
+    const storagePromise = (async () => {
+      try {
+        const storageRef = ref(storage, storagePath);
+        const uploadResult = await uploadString(storageRef, compressedDataUrl, 'data_url', {
+          contentType: 'image/jpeg'
+        });
+        const downloadUrl = await getDownloadURL(uploadResult.ref);
+        return { success: true, url: downloadUrl, storagePath };
+      } catch (err: any) {
+        return { success: false, url: '', error: err?.message || 'Storage error' };
+      }
+    })();
+
+    const timeoutPromise = new Promise<{ success: false; url: ''; error: string }>((res) => {
+      setTimeout(() => res({ success: false, url: '', error: 'Storage timeout' }), 2000);
+    });
+
+    const storageOutcome = await Promise.race([storagePromise, timeoutPromise]);
+
+    if (storageOutcome.success && storageOutcome.url) {
       return {
         success: true,
-        url: downloadUrl,
-        storagePath
-      };
-    } catch (storageError: any) {
-      console.warn('Firebase Storage work photo upload notice (fallback persistente no Firestore):', storageError.message || storageError);
-      return {
-        success: true,
-        url: compressedDataUrl,
-        error: storageError.message
+        url: storageOutcome.url,
+        storagePath: storageOutcome.storagePath
       };
     }
+
+    return {
+      success: true,
+      url: compressedDataUrl
+    };
   } catch (err: any) {
-    console.error('Erro ao processar e fazer upload da imagem de trabalho:', err);
+    console.error('Erro no processamento da imagem de trabalho:', err);
+    if (compressedDataUrl && compressedDataUrl.startsWith('data:image/')) {
+      return {
+        success: true,
+        url: compressedDataUrl
+      };
+    }
     return {
       success: false,
       url: '',

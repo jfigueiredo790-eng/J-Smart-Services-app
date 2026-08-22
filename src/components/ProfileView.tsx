@@ -12,6 +12,8 @@ import {
   Phone, 
   Mail, 
   CheckCircle2, 
+  CheckCircle,
+  AlertCircle,
   Briefcase, 
   FileText, 
   Award, 
@@ -60,6 +62,7 @@ export const ProfileView: React.FC = () => {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoFeedback, setPhotoFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const [avatar, setAvatar] = useState(currentUser.avatar || '');
 
@@ -79,25 +82,53 @@ export const ProfileView: React.FC = () => {
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setIsUploadingPhoto(true);
-      try {
-        const uploadRes = await uploadProfilePhotoToStorage(file, currentUser.id || `user-${Date.now()}`);
-        if (uploadRes.success && uploadRes.url) {
-          setAvatar(uploadRes.url);
-          updateUserProfile({ avatar: uploadRes.url, photoURL: uploadRes.url });
-          setSavedSuccess(true);
-          setTimeout(() => setSavedSuccess(false), 3500);
-        } else {
-          throw new Error(uploadRes.error || 'Falha ao processar a imagem');
-        }
-      } catch (err) {
-        console.error('Erro ao processar imagem da galeria:', err);
-        alert('Não foi possível carregar esta fotografia da galeria. Tente outra imagem.');
-      } finally {
-        setIsUploadingPhoto(false);
-        if (e.target) e.target.value = '';
+    if (!file) return;
+
+    setIsUploadingPhoto(true);
+    setPhotoFeedback(null);
+
+    // Hard emergency timer: guarantees button is NEVER stuck on "A processar..."
+    const emergencyTimer = setTimeout(() => {
+      setIsUploadingPhoto(false);
+    }, 4500);
+
+    try {
+      const uploadRes = await uploadProfilePhotoToStorage(file, currentUser.id || `user-${Date.now()}`);
+      clearTimeout(emergencyTimer);
+
+      if (uploadRes.success && uploadRes.url) {
+        const finalUrl = uploadRes.url;
+        setAvatar(finalUrl);
+        updateUserProfile({ 
+          avatar: finalUrl, 
+          photoURL: finalUrl 
+        });
+        
+        setPhotoFeedback({
+          type: 'success',
+          message: '✓ Fotografia de perfil alterada e guardada com sucesso!'
+        });
+        setSavedSuccess(true);
+        setTimeout(() => {
+          setPhotoFeedback(null);
+          setSavedSuccess(false);
+        }, 4000);
+      } else {
+        setPhotoFeedback({
+          type: 'error',
+          message: uploadRes.error || 'Não foi possível carregar esta fotografia. Tente outra imagem.'
+        });
       }
+    } catch (err: any) {
+      clearTimeout(emergencyTimer);
+      console.error('Erro ao processar imagem da galeria:', err);
+      setPhotoFeedback({
+        type: 'error',
+        message: 'Erro ao processar a fotografia selecionada. Tente outra imagem.'
+      });
+    } finally {
+      setIsUploadingPhoto(false);
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -402,43 +433,60 @@ export const ProfileView: React.FC = () => {
         <form onSubmit={handleSave} className="space-y-4">
           
           {/* Foto de Perfil (Abrir Galeria) */}
-          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <UserAvatar 
-                src={avatar || currentUser.avatar} 
-                name={currentUser.name} 
-                sizeClassName="w-14 h-14" 
-                roundedClassName="rounded-2xl" 
-                role={currentUser.role} 
-                isVerified={currentUser.verified}
-                className="shrink-0"
-              />
-              <div>
-                <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                  <Camera className="w-4 h-4 text-emerald-600" />
-                  <span>Foto de Perfil</span>
-                </h4>
-                <p className="text-[10px] text-slate-500 mt-0.5">Selecione uma fotografia real da galeria do seu telemóvel ou computador.</p>
+          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col space-y-2">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <UserAvatar 
+                  src={avatar || currentUser.avatar} 
+                  name={currentUser.name} 
+                  sizeClassName="w-14 h-14" 
+                  roundedClassName="rounded-2xl" 
+                  role={currentUser.role} 
+                  isVerified={currentUser.verified}
+                  className="shrink-0"
+                />
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <Camera className="w-4 h-4 text-emerald-600" />
+                    <span>Foto de Perfil</span>
+                  </h4>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Selecione uma fotografia real da galeria do seu telemóvel ou computador.</p>
+                </div>
               </div>
+              <button
+                type="button"
+                disabled={isUploadingPhoto}
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
+              >
+                {isUploadingPhoto ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>A processar foto...</span>
+                  </>
+                ) : (
+                  <>
+                    <Image className="w-4 h-4" />
+                    <span>{avatar || currentUser.avatar ? 'Alterar Foto' : 'Abrir Galeria'}</span>
+                  </>
+                )}
+              </button>
             </div>
-            <button
-              type="button"
-              disabled={isUploadingPhoto}
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
-            >
-              {isUploadingPhoto ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>A processar foto...</span>
-                </>
-              ) : (
-                <>
-                  <Image className="w-4 h-4" />
-                  <span>{avatar || currentUser.avatar ? 'Alterar Foto' : 'Abrir Galeria'}</span>
-                </>
-              )}
-            </button>
+
+            {photoFeedback && (
+              <div className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+                photoFeedback.type === 'success' 
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                  : 'bg-rose-100 text-rose-800 border border-rose-300'
+              }`}>
+                {photoFeedback.type === 'success' ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span>{photoFeedback.message}</span>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
