@@ -86,24 +86,27 @@ export const isFictitiousOrInvalidUser = (user: Partial<User & ProfessionalProfi
   const id = user.id.toLowerCase();
   
   // Real Super Admin should NEVER be filtered
-  if (id === 'user-admin-1' || user.email === 'jfigueiredo790@gmail.com' || (user.phone && user.phone.replace(/\D/g, '') === '956011985')) {
+  if (
+    id === 'user-admin-1' || 
+    user.email === 'jfigueiredo790@gmail.com' || 
+    (user.phone && user.phone.replace(/\D/g, '').endsWith('956011985')) ||
+    (user.phone && user.phone.replace(/\D/g, '').endsWith('924835279'))
+  ) {
     return false;
   }
 
+  // Fictitious mock list check
   if (FICTITIOUS_MOCK_IDS.has(id)) return true;
   if (id.startsWith('mock-') || id.startsWith('dummy-') || id.startsWith('test-user-')) return true;
 
-  // Deleted or soft deleted
+  // Deleted or soft deleted accounts
   if (user.isDeleted === true || user.status === 'deleted') return true;
 
-  // Dummy placeholder names or guest placeholder
+  // Only filter true empty guest placeholder
   const name = (user.name || '').trim().toLowerCase();
-  if (!name || name === 'novo cliente' || name === 'cliente teste' || name === 'guest client' || name === 'novo profissional') {
+  if (name === 'guest client' || id === 'guest-client') {
     return true;
   }
-
-  // Fictitious client without contact info
-  if (!user.phone && !user.email) return true;
 
   return false;
 };
@@ -642,13 +645,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `feed-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       likesCount: 0,
       likedBy: [],
+      reactions: {},
       createdAt: new Date().toISOString()
     };
 
-    setWorkFeedPosts(prev => [newPost, ...prev]);
+    setWorkFeedPosts(prev => {
+      const updated = [newPost, ...prev];
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
 
     try {
-      setDoc(doc(db, 'work_feed_posts', newPost.id), newPost).catch(() => {});
+      setDoc(doc(db, 'work_feed_posts', newPost.id), newPost).catch((err) => {
+        console.warn('Firestore setDoc work_feed_posts notice:', err);
+      });
     } catch (e) {}
 
     return { success: true };
@@ -692,7 +704,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       reactions: updatedReactions
     };
 
-    setWorkFeedPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+    setWorkFeedPosts(prev => {
+      const updated = prev.map(p => p.id === postId ? updatedPost : p);
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
 
     try {
       setDoc(doc(db, 'work_feed_posts', postId), updatedPost, { merge: true }).catch(() => {});
@@ -722,7 +740,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteWorkFeedPost = (postId: string) => {
-    setWorkFeedPosts(prev => prev.filter(p => p.id !== postId));
+    setWorkFeedPosts(prev => {
+      const updated = prev.filter(p => p.id !== postId);
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
     try {
       deleteDoc(doc(db, 'work_feed_posts', postId)).catch(() => {});
     } catch (e) {}
@@ -738,7 +762,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Regra de Segurança: utilizador autenticado == post.professionalId/ownerId ou Administrador
-    const isAuthor = currentUser.id === existingPost.professionalId || (existingPost.ownerId && currentUser.id === existingPost.ownerId);
+    const isAuthor = currentUser.id === existingPost.professionalId || (existingPost.ownerId && currentUser.id === existingPost.ownerId) || (currentUser.email && existingPost.ownerId === currentUser.email);
     const isAdmin = currentUser.role === 'admin';
 
     if (!isAuthor && !isAdmin) {
@@ -781,7 +805,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updatedAt: modificationTimestamp
     };
 
-    setWorkFeedPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+    setWorkFeedPosts(prev => {
+      const updated = prev.map(p => p.id === postId ? updatedPost : p);
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
 
     try {
       await setDoc(doc(db, 'work_feed_posts', postId), updatedPost, { merge: true });
@@ -1062,6 +1092,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
             return combined;
           });
+
+          // Sync current logged-in user profile with real-time Firestore data
+          setCurrentUser(prevUser => {
+            if (!prevUser || prevUser.id === 'guest-client') return prevUser;
+            const updatedMatchingUser = fsUsers.find(u => u.id === prevUser.id || (u.email && prevUser.email && u.email === prevUser.email));
+            if (updatedMatchingUser) {
+              const merged = { 
+                ...prevUser, 
+                ...updatedMatchingUser, 
+                avatar: updatedMatchingUser.avatar || prevUser.avatar || '', 
+                photoURL: updatedMatchingUser.photoURL || updatedMatchingUser.avatar || prevUser.photoURL || prevUser.avatar || '' 
+              };
+              try {
+                localStorage.setItem(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(merged));
+              } catch {}
+              return merged;
+            }
+            return prevUser;
+          });
         }
       }, (err) => {
         console.warn('Firestore users snapshot notice:', err.message);
@@ -1089,6 +1138,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const fsIds = new Set(fsPros.map(p => p.id));
             const existingNonFs = prev.filter(p => !fsIds.has(p.id) && !isFictitiousOrInvalidUser(p) && !p.isDeleted && p.status !== 'deleted');
             return [...fsPros, ...existingNonFs];
+          });
+
+          // Sync current logged-in professional profile
+          setCurrentUser(prevUser => {
+            if (!prevUser || prevUser.id === 'guest-client') return prevUser;
+            const updatedMatchingPro = fsPros.find(p => p.id === prevUser.id || (p.email && prevUser.email && p.email === prevUser.email));
+            if (updatedMatchingPro && (prevUser.role === 'profissional' || prevUser.accountType === 'duplo' || prevUser.accountType === 'profissional')) {
+              const merged = { 
+                ...prevUser, 
+                ...updatedMatchingPro, 
+                avatar: updatedMatchingPro.avatar || prevUser.avatar || '', 
+                photoURL: updatedMatchingPro.photoURL || updatedMatchingPro.avatar || prevUser.photoURL || prevUser.avatar || '' 
+              };
+              try {
+                localStorage.setItem(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(merged));
+              } catch {}
+              return merged;
+            }
+            return prevUser;
           });
         }
       }, (err) => {

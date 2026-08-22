@@ -32,7 +32,20 @@ export function getProPlanStatus(pro: Partial<ProfessionalProfile | User> | null
     };
   }
 
-  // 0. Check if account is blocked by Admin
+  // 0. Super Admin or Administrator check - Always active
+  if (pro.role === 'admin' || (pro as any).adminSubRole || pro.email === 'jfigueiredo790@gmail.com' || pro.id === 'user-admin-1') {
+    return {
+      isTrial: false,
+      isActive: true,
+      isExpired: false,
+      daysRemaining: 9999,
+      alertStage: 'normal',
+      planType: 'plan_30d',
+      message: 'Administrador Oficial J Smart Services'
+    };
+  }
+
+  // 0.1 Check if account is blocked by Admin
   if (pro.blocked === true || pro.status === 'bloqueado' || (pro as any).accountStatus === 'BLOCKED') {
     return {
       isTrial: false,
@@ -150,6 +163,23 @@ export function validateProAction(pro: Partial<ProfessionalProfile | User> | nul
       allowed: false,
       reason: 'unauthorized',
       message: 'Inicie sessão com uma conta profissional para realizar esta ação.'
+    };
+  }
+
+  // 0. Super Admin or Administrator check - Always permitted
+  if (pro.role === 'admin' || (pro as any).adminSubRole || pro.email === 'jfigueiredo790@gmail.com' || pro.id === 'user-admin-1') {
+    return {
+      allowed: true,
+      message: 'Administrador autorizado.',
+      planStatus: {
+        isTrial: false,
+        isActive: true,
+        isExpired: false,
+        daysRemaining: 9999,
+        alertStage: 'normal',
+        planType: 'plan_30d',
+        message: 'Administrador Oficial J Smart Services'
+      }
     };
   }
 
