@@ -55,7 +55,8 @@ import {
   onSnapshot, 
   query, 
   where, 
-  orderBy 
+  orderBy,
+  runTransaction
 } from 'firebase/firestore';
 
 export type ActiveTab = 'home' | 'feed' | 'categories' | 'search' | 'requests' | 'chat' | 'profile' | 'admin' | 'pro_dashboard' | 'wallet';
@@ -281,6 +282,11 @@ interface AppContextType {
 
   // Auto Approval Helper
   checkProAutoApproval: (pro: Partial<ProfessionalProfile>) => { isApproved: boolean; missingFields: string[] };
+
+  // Request Exclusivity, State Machine & Control Validators (Regra de Exclusividade J Smart Services)
+  canPerformRequestAction: (action: 'aceitar' | 'em_negociacao' | 'em_progresso' | 'concluir' | 'novamente_disponivel' | 'cancelar', req: ServiceRequest | undefined, user?: User, activeRole?: UserRole) => { allowed: boolean; reason: string };
+  acceptServiceRequest: (requestId: string) => Promise<{ success: boolean; message: string }>;
+  releaseServiceRequestWithoutAgreement: (requestId: string, reason?: string) => Promise<{ success: boolean; message: string }>;
 
   // Communication & Permissions Validator
   canChatInRequest: (req: ServiceRequest | undefined, userId?: string, activeRole?: UserRole) => { allowed: boolean; reason: string };
@@ -1391,6 +1397,125 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { hasConflict: false, message: 'Sem conflito de horário.' };
   };
 
+  // Request Exclusivity, State Machine & Control Validators (Regra de Exclusividade J Smart Services)
+  const canPerformRequestAction = (
+    action: 'aceitar' | 'em_negociacao' | 'em_progresso' | 'concluir' | 'novamente_disponivel' | 'cancelar',
+    req: ServiceRequest | undefined,
+    user = currentUser,
+    activeRole = currentUser.role
+  ): { allowed: boolean; reason: string } => {
+    if (!req) {
+      return { allowed: false, reason: 'Pedido de serviço não encontrado.' };
+    }
+
+    // 0. Administrador tem controle e acesso total para auditoria, mediação e suporte
+    if (activeRole === 'admin' || user.role === 'admin') {
+      return { allowed: true, reason: 'Ação administrativa autorizada.' };
+    }
+
+    const isClientOwner = req.clientId === user.id;
+    const isAssignedPro = !!req.professionalId && req.professionalId === user.id;
+    const isOtherPro = !!req.professionalId && req.professionalId !== user.id;
+
+    // 1. REGRA: ACEITAR PEDIDO
+    if (action === 'aceitar') {
+      if (activeRole !== 'profissional' && user.role !== 'profissional') {
+        return { allowed: false, reason: 'Apenas profissionais podem aceitar pedidos de serviços.' };
+      }
+      if (isClientOwner) {
+        return { allowed: false, reason: 'Não é possível aceitar o seu próprio pedido de serviço.' };
+      }
+      if (req.status !== 'pendente' && req.status !== 'novamente_disponivel') {
+        if (req.status === 'cancelado') {
+          return { allowed: false, reason: 'Este pedido foi cancelado e não pode ser aceite.' };
+        }
+        if (req.status === 'concluido') {
+          return { allowed: false, reason: 'Este pedido já foi concluído.' };
+        }
+        return { allowed: false, reason: 'Este pedido já foi aceite por outro profissional.' };
+      }
+      if (isOtherPro) {
+        return { allowed: false, reason: 'Este pedido já foi aceite por outro profissional.' };
+      }
+      return { allowed: true, reason: 'Pedido disponível para aceitação.' };
+    }
+
+    // 2. REGRA: EM NEGOCIAÇÃO
+    if (action === 'em_negociacao') {
+      if (req.status === 'pendente' || req.status === 'novamente_disponivel') {
+        return { allowed: false, reason: 'O pedido precisa primeiro ser aceite por um profissional antes de iniciar a negociação.' };
+      }
+      if (req.status === 'concluido' || req.status === 'cancelado') {
+        return { allowed: false, reason: `Não é possível negociar um pedido com estado "${req.status}".` };
+      }
+      if (!isAssignedPro && !isClientOwner) {
+        return { allowed: false, reason: 'Apenas o cliente e o profissional atribuído podem negociar os detalhes do pedido.' };
+      }
+      return { allowed: true, reason: 'Negociação autorizada.' };
+    }
+
+    // 3. REGRA: INICIAR TRABALHO (EM PROGRESSO)
+    if (action === 'em_progresso') {
+      if (req.status === 'pendente' || req.status === 'novamente_disponivel') {
+        return { allowed: false, reason: 'O pedido precisa primeiro ser aceite por um profissional antes de iniciar o trabalho.' };
+      }
+      if (req.status === 'concluido' || req.status === 'cancelado') {
+        return { allowed: false, reason: `Não é possível iniciar o trabalho de um pedido com estado "${req.status}".` };
+      }
+      if (!isAssignedPro) {
+        return { allowed: false, reason: 'Apenas o profissional que aceitou o pedido pode iniciar o trabalho.' };
+      }
+      return { allowed: true, reason: 'Início de trabalho autorizado.' };
+    }
+
+    // 4. REGRA: CONCLUIR PEDIDO
+    if (action === 'concluir') {
+      if (req.status === 'pendente' || req.status === 'novamente_disponivel') {
+        return { allowed: false, reason: 'Um pedido pendente ou sem profissional atribuído não pode ser concluído. É necessário primeiro aceitar o pedido.' };
+      }
+      if (req.status === 'cancelado') {
+        return { allowed: false, reason: 'Não é possível concluir um pedido que foi cancelado.' };
+      }
+      if (req.status === 'concluido') {
+        return { allowed: false, reason: 'Este pedido já se encontra concluído.' };
+      }
+      if (!isAssignedPro && !isClientOwner) {
+        return { allowed: false, reason: 'Ninguém pode marcar como concluído um pedido que não lhe pertence. Apenas o profissional atribuído ou o cliente criador podem fazê-lo.' };
+      }
+      return { allowed: true, reason: 'Conclusão autorizada.' };
+    }
+
+    // 5. REGRA: ENCERRAR ATENDIMENTO SEM ACORDO / LIBERAR PEDIDO (NOVAMENTE DISPONÍVEL)
+    if (action === 'novamente_disponivel') {
+      if (req.status === 'pendente' || req.status === 'novamente_disponivel') {
+        return { allowed: false, reason: 'O pedido já se encontra disponível para os profissionais.' };
+      }
+      if (req.status === 'concluido' || req.status === 'cancelado') {
+        return { allowed: false, reason: 'Não é possível reabrir um pedido que já foi concluído ou cancelado.' };
+      }
+      if (!isAssignedPro && !isClientOwner) {
+        return { allowed: false, reason: 'Apenas o cliente e o profissional em atendimento podem encerrar o atendimento sem acordo.' };
+      }
+      return { allowed: true, reason: 'Reabertura do pedido autorizada.' };
+    }
+
+    // 6. REGRA: CANCELAR PEDIDO
+    if (action === 'cancelar') {
+      if (req.status === 'concluido') {
+        return { allowed: false, reason: 'Não é possível cancelar um pedido que já foi concluído.' };
+      }
+      if (req.status === 'cancelado') {
+        return { allowed: false, reason: 'Este pedido já se encontra cancelado.' };
+      }
+      if (!isClientOwner && !isAssignedPro) {
+        return { allowed: false, reason: 'Apenas o cliente proprietário do pedido pode cancelar o pedido.' };
+      }
+      return { allowed: true, reason: 'Cancelamento autorizado.' };
+    }
+
+    return { allowed: false, reason: 'Ação não permitida para o estado atual do pedido.' };
+  };
+
   // Communication & Permission Validator
   const canChatInRequest = (
     req: ServiceRequest | undefined, 
@@ -1449,6 +1574,210 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     return { allowed: true, reason: 'Comunicação autorizada.' };
+  };
+
+  // Aceitar Pedido com Controle de Exclusividade e Proteção Atômica de Concorrência
+  const acceptServiceRequest = async (requestId: string): Promise<{ success: boolean; message: string }> => {
+    const targetReq = requests.find(r => r.id === requestId);
+    if (!targetReq) {
+      return { success: false, message: 'Pedido de serviço não encontrado.' };
+    }
+
+    // 1. Validação de permissões de aceitação
+    const actionCheck = canPerformRequestAction('aceitar', targetReq, currentUser, currentUser.role);
+    if (!actionCheck.allowed && currentUser.role !== 'admin') {
+      alert(actionCheck.reason);
+      return { success: false, message: actionCheck.reason };
+    }
+
+    // 2. Validação de plano profissional ativo
+    if (currentUser.role === 'profissional') {
+      const validation = validateProAction(currentUser);
+      if (!validation.allowed) {
+        if (validation.reason === 'blocked') {
+          alert('Conta bloqueada. O acesso à J Smart Services foi bloqueado pelo Administrador. Entre em contacto com o suporte.');
+          return { success: false, message: 'Conta bloqueada.' };
+        }
+        triggerBlockedActionPrompt('O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano.');
+        return { success: false, message: 'Plano profissional expirado.' };
+      }
+    }
+
+    const updatedProId = currentUser.role === 'profissional' ? currentUser.id : (targetReq.professionalId || currentUser.id);
+    const updatedProName = currentUser.role === 'profissional' ? currentUser.name : (targetReq.professionalName || currentUser.name);
+    const updatedProAvatar = currentUser.role === 'profissional' ? currentUser.avatar : (targetReq.professionalAvatar || currentUser.avatar);
+
+    // 3. Verificação de conflito de horário
+    const proAcceptedReqs = requests.filter(r => 
+      r.id !== requestId && 
+      r.professionalId === updatedProId && 
+      (r.status === 'aceito' || r.status === 'em_negociacao' || r.status === 'em_progresso')
+    );
+
+    const conflictCheck = checkScheduleConflict(targetReq, proAcceptedReqs);
+    if (conflictCheck.hasConflict) {
+      alert(`⚠️ ${conflictCheck.message}`);
+      return { success: false, message: conflictCheck.message };
+    }
+
+    // 4. Proteção contra Race Conditions no Servidor (Firestore Transaction)
+    const updatedDocData: Partial<ServiceRequest> = {
+      status: 'aceito',
+      isReopened: false,
+      acceptedAt: new Date().toISOString(),
+      professionalId: updatedProId,
+      professionalName: updatedProName,
+      professionalAvatar: updatedProAvatar,
+      commissionAmountKz: 0,
+      netProAmountKz: targetReq.budgetKz,
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      const reqDocRef = doc(db, 'service_requests', requestId);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(reqDocRef);
+        if (snap.exists()) {
+          const fresh = snap.data() as ServiceRequest;
+          // Regra de Exclusividade: Se outro profissional já aceitou, abortar com erro
+          if (fresh.status !== 'pendente' && fresh.status !== 'novamente_disponivel' && currentUser.role !== 'admin') {
+            throw new Error('ALREADY_ACCEPTED');
+          }
+          if (fresh.professionalId && fresh.professionalId !== updatedProId && currentUser.role !== 'admin') {
+            throw new Error('ALREADY_ACCEPTED');
+          }
+          transaction.update(reqDocRef, updatedDocData);
+        } else {
+          transaction.set(reqDocRef, updatedDocData, { merge: true });
+        }
+      });
+    } catch (err: any) {
+      const errMsg = err?.message || err?.toString() || '';
+      if (errMsg.includes('ALREADY_ACCEPTED')) {
+        alert('Este pedido já foi aceite por outro profissional.');
+        return { success: false, message: 'Este pedido já foi aceite por outro profissional.' };
+      }
+    }
+
+    // 5. Atualizar estado local
+    setRequests(prev => prev.map(req => {
+      if (req.id === requestId) {
+        return {
+          ...req,
+          ...updatedDocData
+        };
+      }
+      return req;
+    }));
+
+    // 6. Notificar cliente
+    addNotification({
+      userId: targetReq.clientId,
+      targetRoleScope: 'cliente',
+      title: '✅ Pedido Aceite',
+      message: `O profissional ${updatedProName || ''} aceitou o seu pedido "${targetReq.title}". O chat privado e dados de atendimento estão agora abertos!`,
+      type: 'pedido_aceito',
+      requestId: targetReq.id
+    });
+
+    // 7. Mensagem inicial de acolhimento no chat privado entre cliente e o profissional que aceitou
+    const initialChatMsg: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      requestId: targetReq.id,
+      senderId: updatedProId,
+      senderRole: 'profissional',
+      senderName: updatedProName || 'Profissional',
+      senderAvatar: updatedProAvatar || '',
+      text: `Olá ${targetReq.clientName}! Aceitei o seu pedido "${targetReq.title}". O nosso chat privado está ativo para combinarmos todos os detalhes do serviço.`,
+      timestamp: new Date().toISOString(),
+      status: 'entregue'
+    };
+    setMessages(prev => [...prev, initialChatMsg]);
+
+    try {
+      setDoc(doc(db, 'service_requests', requestId), updatedDocData, { merge: true }).catch(() => {});
+      setDoc(doc(db, 'chat_messages', initialChatMsg.id), initialChatMsg).catch(() => {});
+    } catch (e) {}
+
+    return { success: true, message: 'Pedido aceite com sucesso!' };
+  };
+
+  // Encerrar Atendimento Sem Acordo -> Pedido Retorna Automaticamente a "Novamente Disponível"
+  const releaseServiceRequestWithoutAgreement = async (requestId: string, reason?: string): Promise<{ success: boolean; message: string }> => {
+    const targetReq = requests.find(r => r.id === requestId);
+    if (!targetReq) {
+      return { success: false, message: 'Pedido não encontrado.' };
+    }
+
+    const check = canPerformRequestAction('novamente_disponivel', targetReq, currentUser, currentUser.role);
+    if (!check.allowed && currentUser.role !== 'admin') {
+      alert(check.reason);
+      return { success: false, message: check.reason };
+    }
+
+    const updatedDocData: Partial<ServiceRequest> = {
+      status: 'novamente_disponivel',
+      isReopened: true,
+      reopenedAt: new Date().toISOString(),
+      previousProId: targetReq.professionalId,
+      previousProName: targetReq.professionalName,
+      cancellationReason: reason || 'Atendimento encerrado sem acordo entre cliente e profissional.',
+      professionalId: undefined,
+      professionalName: undefined,
+      professionalAvatar: undefined,
+      updatedAt: new Date().toISOString()
+    };
+
+    setRequests(prev => prev.map(req => {
+      if (req.id === requestId) {
+        return {
+          ...req,
+          ...updatedDocData
+        };
+      }
+      return req;
+    }));
+
+    // Notificar cliente ou profissional de acordo com quem encerrou
+    if (currentUser.id === targetReq.clientId && targetReq.professionalId) {
+      addNotification({
+        userId: targetReq.professionalId,
+        targetRoleScope: 'profissional',
+        title: '🟡 Atendimento Encerrado pelo Cliente',
+        message: `O cliente encerrou o atendimento do pedido "${targetReq.title}" sem acordo.${reason ? ` Motivo: ${reason}` : ''}`,
+        type: 'comunicado_jsmart',
+        requestId: targetReq.id
+      });
+    } else {
+      addNotification({
+        userId: targetReq.clientId,
+        targetRoleScope: 'cliente',
+        title: '🟡 Pedido Novamente Disponível',
+        message: `O atendimento anterior para o pedido "${targetReq.title}" foi encerrado sem acordo. O seu pedido voltou a ficar automaticamente disponível para outros profissionais qualificados aceitarem.`,
+        type: 'pedido_novo',
+        requestId: targetReq.id
+      });
+    }
+
+    // Notificar profissionais qualificados elegíveis
+    (targetReq.matchedProIds || []).forEach(pId => {
+      if (pId !== targetReq.professionalId && pId !== currentUser.id) {
+        addNotification({
+          userId: pId,
+          targetRoleScope: 'profissional',
+          title: '🟡 Pedido Novamente Disponível',
+          message: `O pedido "${targetReq.title}" em ${targetReq.province} voltou a ficar disponível para aceitação!`,
+          type: 'pedido_novo',
+          requestId: targetReq.id
+        });
+      }
+    });
+
+    try {
+      setDoc(doc(db, 'service_requests', requestId), updatedDocData, { merge: true }).catch(() => {});
+    } catch (e) {}
+
+    return { success: true, message: 'Pedido libertado com sucesso e novamente disponível para profissionais.' };
   };
 
   // Actions
@@ -1516,163 +1845,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetReq = requests.find(r => r.id === requestId);
     if (!targetReq) return;
 
+    // Roteamento para Aceitar Pedido
+    if (status === 'aceito') {
+      acceptServiceRequest(requestId);
+      return;
+    }
+
+    // Roteamento para Reabertura / Encerrar Sem Acordo (Novamente Disponível)
+    if (status === 'novamente_disponivel') {
+      releaseServiceRequestWithoutAgreement(requestId, reason);
+      return;
+    }
+
+    // Validação estrita de autorização para as outras transições
+    let actionType: 'em_negociacao' | 'em_progresso' | 'concluir' | 'cancelar' | null = null;
+    if (status === 'em_negociacao') actionType = 'em_negociacao';
+    else if (status === 'em_progresso') actionType = 'em_progresso';
+    else if (status === 'concluido') actionType = 'concluir';
+    else if (status === 'cancelado') actionType = 'cancelar';
+
+    if (actionType) {
+      const authCheck = canPerformRequestAction(actionType, targetReq, currentUser, currentUser.role);
+      if (!authCheck.allowed && currentUser.role !== 'admin') {
+        alert(authCheck.reason);
+        return;
+      }
+    }
+
     // Block status update if current user is acting as professional and their subscription plan is expired or account blocked
-    if (currentUser.role === 'profissional' && (status === 'aceito' || status === 'em_progresso')) {
+    if (currentUser.role === 'profissional' && (status === 'em_progresso' || status === 'concluido')) {
       const validation = validateProAction(currentUser);
       if (!validation.allowed) {
         if (validation.reason === 'blocked') {
-          alert('Conta bloqueada. O acesso à J Smart Services foi bloqueado pelo Administrador. Entre em contacto com o suporte para obter mais informações.');
+          alert('Conta bloqueada. O acesso à J Smart Services foi bloqueado pelo Administrador. Entre em contacto com o suporte.');
           return;
         }
-        triggerBlockedActionPrompt('O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.');
+        triggerBlockedActionPrompt('O seu período gratuito terminou. Para continuar a prestar serviços e utilizar todas as funcionalidades profissionais, escolha um plano.');
         return;
       }
     }
 
-    // CASO 1: PROFISSIONAL DESISTE / CANCELA ATENDIMENTO -> RETORNA A "NOVAMENTE DISPONÍVEL"
-    if (status === 'novamente_disponivel') {
-      const updatedDocData: Partial<ServiceRequest> = {
-        status: 'novamente_disponivel',
-        isReopened: true,
-        reopenedAt: new Date().toISOString(),
-        previousProId: targetReq.professionalId,
-        previousProName: targetReq.professionalName,
-        cancellationReason: reason || 'O profissional cancelou o atendimento.',
-        professionalId: undefined,
-        professionalName: undefined,
-        professionalAvatar: undefined,
-        updatedAt: new Date().toISOString()
-      };
-
-      setRequests(prev => prev.map(req => {
-        if (req.id === requestId) {
-          return {
-            ...req,
-            ...updatedDocData
-          };
-        }
-        return req;
-      }));
-
-      // Notificar o cliente
-      addNotification({
-        userId: targetReq.clientId,
-        targetRoleScope: 'cliente',
-        title: '🟡 Pedido Novamente Disponível',
-        message: `O atendimento anterior para o pedido "${targetReq.title}" foi cancelado pelo profissional. O seu pedido voltou a ficar automaticamente disponível para outros profissionais qualificados aceitarem.`,
-        type: 'pedido_novo',
-        requestId: targetReq.id
-      });
-
-      // Notificar outros profissionais elegíveis da área
-      (targetReq.matchedProIds || []).forEach(pId => {
-        if (pId !== targetReq.professionalId && pId !== currentUser.id) {
-          addNotification({
-            userId: pId,
-            targetRoleScope: 'profissional',
-            title: '🟡 Pedido Novamente Disponível',
-            message: `O pedido "${targetReq.title}" em ${targetReq.province} voltou a ficar disponível para aceitação!`,
-            type: 'pedido_novo',
-            requestId: targetReq.id
-          });
-        }
-      });
-
-      try {
-        setDoc(doc(db, 'service_requests', requestId), updatedDocData, { merge: true }).catch(() => {});
-      } catch (e) {}
-      return;
-    }
-
-    // CASO 2: PROFISSIONAL ACEITA PEDIDO (DE PENDENTE OU NOVAMENTE DISPONÍVEL)
-    if (status === 'aceito') {
-      // Bloqueio de concorrência: apenas um profissional pode aceitar de cada vez
-      if (targetReq.status === 'aceito' && targetReq.professionalId && targetReq.professionalId !== currentUser.id && currentUser.role !== 'admin') {
-        alert('Este pedido já foi aceite por outro profissional.');
-        return;
-      }
-
-      const updatedProId = currentUser.role === 'profissional' ? currentUser.id : (targetReq.professionalId || currentUser.id);
-      const updatedProName = currentUser.role === 'profissional' ? currentUser.name : (targetReq.professionalName || currentUser.name);
-      const updatedProAvatar = currentUser.role === 'profissional' ? currentUser.avatar : (targetReq.professionalAvatar || currentUser.avatar);
-
-      // Verificação de conflito de horário
-      const proAcceptedReqs = requests.filter(r => 
-        r.id !== requestId && 
-        r.professionalId === updatedProId && 
-        (r.status === 'aceito' || r.status === 'em_progresso')
-      );
-
-      const conflictCheck = checkScheduleConflict(targetReq, proAcceptedReqs);
-      if (conflictCheck.hasConflict) {
-        alert(`⚠️ ${conflictCheck.message}`);
-        return; // BLOQUEAR ACEITAÇÃO POR CONFLITO DE AGENDA
-      }
-
-      const updatedDocData: Partial<ServiceRequest> = {
-        status: 'aceito',
-        isReopened: false,
-        acceptedAt: new Date().toISOString(),
-        professionalId: updatedProId,
-        professionalName: updatedProName,
-        professionalAvatar: updatedProAvatar,
-        commissionAmountKz: 0,
-        netProAmountKz: targetReq.budgetKz,
-        updatedAt: new Date().toISOString()
-      };
-
-      setRequests(prev => prev.map(req => {
-        if (req.id === requestId) {
-          return {
-            ...req,
-            ...updatedDocData
-          };
-        }
-        return req;
-      }));
-
-      // Notificar cliente
-      addNotification({
-        userId: targetReq.clientId,
-        targetRoleScope: 'cliente',
-        title: '✅ Pedido Aceite',
-        message: `O profissional ${updatedProName || ''} aceitou o seu pedido "${targetReq.title}". O chat privado e dados de atendimento estão agora abertos!`,
-        type: 'pedido_aceito',
-        requestId: targetReq.id
-      });
-
-      // Mensagem inicial de acolhimento no chat privado entre cliente e o profissional que aceitou
-      const initialChatMsg: ChatMessage = {
-        id: `msg-${Date.now()}`,
-        requestId: targetReq.id,
-        senderId: updatedProId,
-        senderRole: 'profissional',
-        senderName: updatedProName || 'Profissional',
-        senderAvatar: updatedProAvatar || '',
-        text: `Olá ${targetReq.clientName}! Aceitei o seu pedido "${targetReq.title}". O nosso chat privado está ativo para combinarmos todos os detalhes do serviço.`,
-        timestamp: new Date().toISOString(),
-        status: 'entregue'
-      };
-      setMessages(prev => [...prev, initialChatMsg]);
-
-      try {
-        setDoc(doc(db, 'service_requests', requestId), updatedDocData, { merge: true }).catch(() => {});
-        setDoc(doc(db, 'chat_messages', initialChatMsg.id), initialChatMsg).catch(() => {});
-      } catch (e) {}
-      return;
-    }
-
-    // CASO 3: OUTROS ESTADOS (em_progresso, concluido, cancelado, pendente)
     const updatedProId = targetReq.professionalId || (currentUser.role === 'profissional' ? currentUser.id : undefined);
     const updatedProName = targetReq.professionalName || (currentUser.role === 'profissional' ? currentUser.name : undefined);
     const updatedProAvatar = targetReq.professionalAvatar || (currentUser.role === 'profissional' ? currentUser.avatar : undefined);
 
-    if (status === 'em_progresso') {
+    if (status === 'em_negociacao') {
+      const otherUserId = currentUser.id === targetReq.clientId ? targetReq.professionalId : targetReq.clientId;
+      if (otherUserId) {
+        addNotification({
+          userId: otherUserId,
+          title: '🟠 Pedido em Negociação',
+          message: `O pedido "${targetReq.title}" está em fase de negociação de detalhes no chat privado.`,
+          type: 'comunicado_jsmart',
+          requestId: targetReq.id
+        });
+      }
+    } else if (status === 'em_progresso') {
       addNotification({
         userId: targetReq.clientId,
         targetRoleScope: 'cliente',
-        title: '🛵 Profissional a Caminho',
-        message: `O profissional ${targetReq.professionalName || ''} está a caminho da sua localização em ${targetReq.province}.`,
+        title: '🛵 Profissional a Caminho / Em Execução',
+        message: `O profissional ${targetReq.professionalName || ''} iniciou o trabalho para o pedido "${targetReq.title}".`,
         type: 'a_caminho',
         requestId: targetReq.id
       });
@@ -4251,6 +4484,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       logAdminAction,
       runAutoTestSuite,
       checkProAutoApproval,
+      canPerformRequestAction,
+      acceptServiceRequest,
+      releaseServiceRequestWithoutAgreement,
       canChatInRequest,
       isMobileFrame,
       setIsMobileFrame,

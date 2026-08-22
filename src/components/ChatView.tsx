@@ -605,9 +605,19 @@ export const ChatView: React.FC = () => {
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
                       : activeConversation.status === 'em_progresso'
                         ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                        : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : activeConversation.status === 'em_negociacao'
+                          ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                   }`}>
-                    {activeConversation.status === 'concluido' ? '✅ Concluído' : activeConversation.status === 'em_progresso' ? '⚡ Em Progresso' : '⏳ Em Conversa'}
+                    {activeConversation.status === 'concluido' 
+                      ? '✅ Concluído' 
+                      : activeConversation.status === 'em_progresso' 
+                        ? '⚡ Em Progresso' 
+                        : activeConversation.status === 'em_negociacao'
+                          ? '🟠 Em Negociação'
+                          : activeConversation.status === 'aceito'
+                            ? '👍 Aceite'
+                            : '⏳ Em Conversa'}
                   </span>
                   <span className="text-slate-300 font-medium truncate text-[11px]">
                     {activeConversation.serviceTitle} {activeConversation.budgetKz ? `(${activeConversation.budgetKz.toLocaleString('pt-AO')} Kz)` : ''}

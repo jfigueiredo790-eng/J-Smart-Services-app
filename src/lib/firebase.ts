@@ -10,12 +10,12 @@ const app = initializeApp(firebaseConfig);
 // Initialize Firebase Auth
 export const auth = getAuth(app);
 
-// Initialize Firestore with autoDetectLongPolling to handle container/iframe network constraints reliably
+// Initialize Firestore with experimentalForceLongPolling to handle container/iframe network constraints without WebSocket drops
 const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
 
 export const db = dbId 
-  ? initializeFirestore(app, { experimentalAutoDetectLongPolling: true, ignoreUndefinedProperties: true }, dbId)
-  : initializeFirestore(app, { experimentalAutoDetectLongPolling: true, ignoreUndefinedProperties: true });
+  ? initializeFirestore(app, { experimentalForceLongPolling: true, ignoreUndefinedProperties: true }, dbId)
+  : initializeFirestore(app, { experimentalForceLongPolling: true, ignoreUndefinedProperties: true });
 
 // Initialize Firebase Storage
 export const storage = getStorage(app);

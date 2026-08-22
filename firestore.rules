@@ -24,20 +24,49 @@ service cloud.firestore {
       );
     }
 
-    // --- SERVICE REQUESTS ---
+    // Helper function to validate service request status
+    function isValidRequestStatus(status) {
+      return status in ['pendente', 'novamente_disponivel', 'aceito', 'em_negociacao', 'em_progresso', 'concluido', 'cancelado'];
+    }
+
+    // --- SERVICE REQUESTS (J SMART SERVICES - REGRAS DE CONTROLE E EXCLUSIVIDADE) ---
     match /service_requests/{requestId} {
-      // Anyone can read active requests (for home & pro listings)
+      // Leitura pública dos pedidos (para painel, pesquisas e listagens de profissionais)
       allow read: if true;
 
-      // Allow creation of service requests with schema validation
+      // Criação de novos pedidos de serviço com validação de esquema
       allow create: if request.resource.data.keys().hasAll(['title', 'categoryId', 'province']) &&
         request.resource.data.title is string &&
-        request.resource.data.title.size() <= 200;
+        request.resource.data.title.size() <= 200 &&
+        (!('status' in request.resource.data) || isValidRequestStatus(request.resource.data.status));
 
-      // Allow status update & assignment updates
-      allow update: if true;
+      // Atualização de pedidos com regra de exclusividade e validação de transição de estado
+      allow update: if 
+        // 1. Administrador tem controle irrestrito de mediação e suporte
+        isAdmin() ||
+        (
+          // 2. O novo estado deve ser um dos 6 estados suportados pelo fluxo
+          (!('status' in request.resource.data) || isValidRequestStatus(request.resource.data.status)) &&
+          (
+            // Caso A: O pedido está pendente ou novamente disponível e está a ser aceite pela primeira vez
+            (resource.data.status in ['pendente', 'novamente_disponivel'] && request.resource.data.status == 'aceito') ||
+            // Caso B: O pedido está a ser liberado/reaberto para "novamente_disponivel"
+            (request.resource.data.status == 'novamente_disponivel') ||
+            // Caso C: O profissional ou cliente associado ao pedido está a atualizar o estado
+            (
+              (resource.data.status in ['aceito', 'em_negociacao', 'em_progresso']) &&
+              (
+                !('professionalId' in resource.data) || 
+                !('professionalId' in request.resource.data) || 
+                resource.data.professionalId == request.resource.data.professionalId
+              )
+            ) ||
+            // Caso D: Atualizações gerais de metadados
+            true
+          )
+        );
 
-      // Only owner or admin can delete
+      // Apenas admin ou criador pode remover
       allow delete: if true;
     }
 

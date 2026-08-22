@@ -82,6 +82,13 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
             <span>Aceite</span>
           </span>
         );
+      case 'em_negociacao':
+        return (
+          <span className="inline-flex items-center gap-1 bg-orange-100 text-orange-950 text-[11px] font-black px-2.5 py-1 rounded-full border border-orange-300 shadow-xs">
+            <MessageSquare className="w-3 h-3 text-orange-600" />
+            <span>Em Negociação</span>
+          </span>
+        );
       case 'em_progresso':
         return (
           <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-900 text-[11px] font-extrabold px-2.5 py-1 rounded-full border border-emerald-300 shadow-xs animate-pulse">
@@ -404,8 +411,20 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
             </button>
           )}
 
+          {/* Professional / Client Action: Pass to Em Negociação */}
+          {(isAssignedPro || (isClient && isClientOwner)) && request.status === 'aceito' && (
+            <button
+              id={`negotiate-btn-${request.id}`}
+              onClick={() => updateRequestStatus(request.id, 'em_negociacao')}
+              className="flex items-center gap-1.5 bg-orange-50 hover:bg-orange-100 text-orange-950 border border-orange-300 font-extrabold text-xs px-3.5 py-2 rounded-xl transition-all shadow-xs"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-orange-600" />
+              <span>Em Negociação</span>
+            </button>
+          )}
+
           {/* Professional Action: Start Progress */}
-          {isAssignedPro && request.status === 'aceito' && (
+          {isAssignedPro && (request.status === 'aceito' || request.status === 'em_negociacao') && (
             <button
               id={`start-btn-${request.id}`}
               onClick={() => updateRequestStatus(request.id, 'em_progresso')}
@@ -416,21 +435,21 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
             </button>
           )}
 
-          {/* Professional Action: Desistir / Cancelar Atendimento (Passa a Novamente Disponível) */}
-          {isAssignedPro && (request.status === 'aceito' || request.status === 'em_progresso') && !isConfirmingRelease && (
+          {/* Professional / Client Action: Desistir / Encerrar sem Acordo (Passa a Novamente Disponível) */}
+          {(isAssignedPro || (isClient && isClientOwner)) && (request.status === 'aceito' || request.status === 'em_negociacao' || request.status === 'em_progresso') && !isConfirmingRelease && (
             <button
               id={`release-btn-${request.id}`}
               onClick={() => setIsConfirmingRelease(true)}
-              className="flex items-center gap-1 text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 font-bold text-xs px-3 py-2 rounded-xl transition-colors"
-              title="Desistir deste pedido para que outro profissional possa atender"
+              className="flex items-center gap-1 text-amber-800 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 font-extrabold text-xs px-3 py-2 rounded-xl transition-colors"
+              title="Encerrar atendimento para que o pedido volte a ficar livre para outros profissionais"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Desistir</span>
+              <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+              <span>{isAssignedPro ? 'Desistir' : 'Liberar Pedido'}</span>
             </button>
           )}
 
           {/* Complete Job Action: Client or Assigned Pro in Progress */}
-          {(isAssignedPro || (isClient && isClientOwner) || isAdmin) && (request.status === 'em_progresso' || request.status === 'aceito') && (
+          {(isAssignedPro || (isClient && isClientOwner) || isAdmin) && (request.status === 'em_progresso' || request.status === 'aceito' || request.status === 'em_negociacao') && (
             <button
               id={`complete-btn-${request.id}`}
               onClick={() => updateRequestStatus(request.id, 'concluido')}
@@ -442,7 +461,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
           )}
 
           {/* Client Action: Cancel Own Request */}
-          {isClient && isClientOwner && (request.status === 'pendente' || request.status === 'novamente_disponivel' || request.status === 'aceito') && !isConfirmingCancel && (
+          {isClient && isClientOwner && (request.status === 'pendente' || request.status === 'novamente_disponivel' || request.status === 'aceito' || request.status === 'em_negociacao') && !isConfirmingCancel && (
             <button
               id={`cancel-btn-${request.id}`}
               onClick={() => setIsConfirmingCancel(true)}
@@ -485,6 +504,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
                 <option value="pendente">⏳ Pendente</option>
                 <option value="novamente_disponivel">🟡 Novamente Disponível</option>
                 <option value="aceito">👍 Aceito</option>
+                <option value="em_negociacao">🟠 Em Negociação</option>
                 <option value="em_progresso">⚡ Em Progresso</option>
                 <option value="concluido">✅ Concluído</option>
                 <option value="cancelado">❌ Cancelado</option>

@@ -3,7 +3,7 @@ export type AccountType = 'cliente' | 'profissional' | 'duplo';
 
 export type AdminSubRole = 'super_admin' | 'atendimento' | 'gestao_profissionais' | 'financeiro';
 
-export type RequestStatus = 'pendente' | 'novamente_disponivel' | 'aceito' | 'em_progresso' | 'concluido' | 'cancelado';
+export type RequestStatus = 'pendente' | 'novamente_disponivel' | 'aceito' | 'em_negociacao' | 'em_progresso' | 'concluido' | 'cancelado';
 
 export type UrgencyLevel = 'Normal' | 'Urgente' | 'Agendado';
 
