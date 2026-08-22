@@ -1842,7 +1842,7 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       message: 'Modo de Crescimento validado: profissionais operam livremente sem bloqueios ou cobranças.',
       details: [
         `1. Subscrições Globalmente Ativas: ${GLOBAL_SUBSCRIPTIONS_ACTIVE ? 'SIM' : 'NÃO (Fase de Crescimento)'}`,
-        `2. Estado do profissional registado há 60 dias: ${currentStatus.isActive ? '✅ Ativo & Ilimitado' : '❌ Bloqueado'}`,
+        `2. Estado do profissional registado há 60 dias: ${currentStatus.isActive ? '✅ Ativo & Gratuito (Fase de Crescimento)' : '❌ Bloqueado'}`,
         `3. Ação profissional autorizada: ${actionValidation.allowed ? '✅ Autorizado' : '❌ Recusado'}`,
         `4. Mensagem amigável: "${currentStatus.message}"`
       ]

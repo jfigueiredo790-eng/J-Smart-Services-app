@@ -151,22 +151,22 @@ export const ProDashboard: React.FC = () => {
                     ★ Fase de Crescimento Angola
                   </span>
                   <span className="bg-emerald-400/20 text-emerald-200 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-400/30">
-                    100% Gratuito & Sem Mensalidades
+                    100% Gratuito
                   </span>
                 </div>
                 <h3 className="text-lg font-black text-white mt-1.5">
-                  Acesso Profissional Ilimitado & Totalmente Gratuito
+                  Acesso Profissional Gratuito
                 </h3>
                 <p className="text-xs text-emerald-100/90 mt-1 max-w-2xl leading-relaxed">
-                  A J Smart Services está focada em crescer e gerar oportunidades para todos os profissionais. Pode receber pedidos de clientes em Angola, conversar no chat, aceitar trabalhos e publicar no Feed sem qualquer cobrança ou bloqueio.
+                  100% gratuito durante a fase de crescimento. A J Smart Services está actualmente numa fase de crescimento e, neste período, os profissionais podem utilizar gratuitamente as funcionalidades profissionais, sem necessidade de pagamento. A activação das subscrições será anunciada posteriormente.
                 </p>
               </div>
             </div>
             <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/20 text-center shrink-0 self-start md:self-auto">
-              <span className="text-[10px] uppercase font-black text-emerald-300 block tracking-wider">Estado da Conta</span>
+              <span className="text-[10px] uppercase font-black text-emerald-300 block tracking-wider">Fase Atual</span>
               <span className="text-xs font-black text-white flex items-center gap-1.5 justify-center mt-0.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-                Ativo & Ilimitado
+                Acesso Gratuito
               </span>
             </div>
           </div>
@@ -347,13 +347,13 @@ export const ProDashboard: React.FC = () => {
               <h3 className="font-extrabold text-slate-900 text-base">Planos de Subscrição</h3>
               {planStatus.isPromotionalPhase && (
                 <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-emerald-200">
-                  🎉 Gratuito por Tempo Ilimitado
+                  ★ Fase de Crescimento (100% Gratuito)
                 </span>
               )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
               {planStatus.isPromotionalPhase 
-                ? 'Fase de crescimento da J Smart Services Angola: Todos os profissionais têm acesso 100% livre e gratuito sem necessidade de pagamento.'
+                ? '100% gratuito durante a fase de crescimento. A activação das subscrições será anunciada posteriormente.'
                 : 'Registo gratuito + 14 dias de teste. Escolha o seu plano para continuar a trabalhar na plataforma J Smart.'
               }
             </p>

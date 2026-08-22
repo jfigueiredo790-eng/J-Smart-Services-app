@@ -93,7 +93,7 @@ export function getProPlanStatus(
       daysRemaining: 9999,
       alertStage: 'normal',
       planType: pro.subscriptionPlan || 'free_trial',
-      message: 'Acesso Profissional Ilimitado & Gratuito — Fase de Crescimento J Smart Services Angola'
+      message: '100% gratuito durante a fase de crescimento — J Smart Services Angola'
     };
   }
 
