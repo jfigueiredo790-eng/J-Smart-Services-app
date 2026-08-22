@@ -120,9 +120,13 @@ export function rankWorkFeedPosts(
 ): WorkFeedPost[] {
   if (!posts || posts.length === 0) return [];
 
-  // Filtragem por categoria se selecionada
+  // Filtragem por categoria ou Minhas Publicações
   const filtered = posts.filter(post => {
-    if (selectedCategoryFilter === 'Todas') return true;
+    if (selectedCategoryFilter === 'Todas' || !selectedCategoryFilter) return true;
+    if (selectedCategoryFilter === 'Minhas') {
+      if (!currentUser?.id) return false;
+      return post.professionalId === currentUser.id || (post.ownerId && post.ownerId === currentUser.id);
+    }
     return post.categoryName?.toLowerCase() === selectedCategoryFilter.toLowerCase();
   });
 

@@ -462,10 +462,10 @@ export const WorkFeedView: React.FC = () => {
           )}
         </div>
 
-        {/* Pílulas de Filtro por Categoria */}
+        {/* Pílulas de Filtro por Categoria e Minhas Publicações */}
         <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
           <span className="text-xs font-bold text-slate-400 flex items-center gap-1 shrink-0">
-            <Filter className="w-3.5 h-3.5 text-emerald-600" /> Categoria:
+            <Filter className="w-3.5 h-3.5 text-emerald-600" /> Filtro:
           </span>
           <button
             onClick={() => setSelectedCatFilter('Todas')}
@@ -475,8 +475,28 @@ export const WorkFeedView: React.FC = () => {
                 : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
             }`}
           >
-            Todas as Categorias
+            Todas as Publicações
           </button>
+          
+          {(isPro || currentUser.accountType === 'duplo' || currentUser.role === 'admin' || workFeedPosts.some(p => p.professionalId === currentUser.id || p.ownerId === currentUser.id)) && (
+            <button
+              id="btn-filter-my-posts"
+              onClick={() => setSelectedCatFilter('Minhas')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
+                selectedCatFilter === 'Minhas'
+                  ? 'bg-emerald-700 text-white shadow-md shadow-emerald-700/20 ring-2 ring-emerald-400'
+                  : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-300'
+              }`}
+            >
+              <span>⭐ Minhas Publicações</span>
+              {workFeedPosts.filter(p => p.professionalId === currentUser.id || p.ownerId === currentUser.id).length > 0 && (
+                <span className="bg-emerald-800 text-white text-[10px] px-1.5 py-0.2 rounded-full font-black">
+                  {workFeedPosts.filter(p => p.professionalId === currentUser.id || p.ownerId === currentUser.id).length}
+                </span>
+              )}
+            </button>
+          )}
+
           {categories.map(cat => (
             <button
               key={cat.id}
@@ -503,10 +523,14 @@ export const WorkFeedView: React.FC = () => {
             
             <div className="space-y-2 max-w-md mx-auto">
               <h3 className="font-black text-slate-900 text-base sm:text-lg">
-                Ainda não existem publicações no Feed
+                {selectedCatFilter === 'Minhas' 
+                  ? 'Ainda não tem publicações criadas na sua conta' 
+                  : 'Ainda não existem publicações correspondentes'}
               </h3>
               <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
-                O Feed apresenta exclusivamente publicações reais criadas por profissionais registados após a realização de serviços.
+                {selectedCatFilter === 'Minhas'
+                  ? 'Crie publicações reais dos seus trabalhos e serviços para divulgar a sua atividade e atrair mais clientes na J Smart Services.'
+                  : 'O Feed apresenta exclusivamente publicações reais criadas por profissionais registados após a realização de serviços.'}
               </p>
             </div>
 
@@ -517,7 +541,7 @@ export const WorkFeedView: React.FC = () => {
                   className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md shadow-emerald-600/20 transition-all inline-flex items-center gap-2"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Publicar o Primeiro Trabalho</span>
+                  <span>Publicar Novo Trabalho</span>
                 </button>
               </div>
             )}

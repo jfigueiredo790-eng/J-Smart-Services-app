@@ -3291,34 +3291,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setCurrentUser(updatedUser);
 
-    if (targetRole === 'profissional') {
+    const isProOrDual = targetRole === 'profissional' || 
+      updatedUser.accountType === 'duplo' || 
+      updatedUser.accountType === 'profissional' ||
+      professionals.some(p => p.id === newUserId || (p.email && updatedUser.email && p.email === updatedUser.email));
+
+    if (isProOrDual) {
+      const existingPro = professionals.find(p => p.id === newUserId || (p.email && updatedUser.email && p.email === updatedUser.email));
       const proProfile: ProfessionalProfile = {
         id: newUserId,
-        name: updatedUser.name || 'Novo Profissional',
-        email: updatedUser.email || '',
-        phone: updatedUser.phone || '',
-        province: updatedUser.province || 'Luanda',
-        city: updatedUser.city || 'Luanda',
+        name: updatedUser.name || existingPro?.name || 'Profissional',
+        email: updatedUser.email || existingPro?.email || '',
+        phone: updatedUser.phone || existingPro?.phone || '',
+        province: updatedUser.province || existingPro?.province || 'Luanda',
+        city: updatedUser.city || existingPro?.city || 'Luanda',
         role: 'profissional',
-        avatar: updatedUser.avatar || '',
-        categories: Array.isArray((updatedUser as any).categories) ? (updatedUser as any).categories : [],
-        bio: (updatedUser as any).bio || 'Profissional prestador de serviços.',
+        accountType: updatedUser.accountType || existingPro?.accountType || 'duplo',
+        avatar: updatedUser.avatar || existingPro?.avatar || '',
+        photoURL: updatedUser.avatar || existingPro?.photoURL || '',
+        categories: Array.isArray((updatedUser as any).categories) && (updatedUser as any).categories.length > 0 
+          ? (updatedUser as any).categories 
+          : (existingPro?.categories || []),
+        bio: (updatedUser as any).bio || existingPro?.bio || 'Profissional prestador de serviços.',
         experienceYears: typeof (updatedUser as any).experienceYears === 'number'
           ? Math.max(0, (updatedUser as any).experienceYears)
-          : (Number((updatedUser as any).experienceYears) >= 0 ? Number((updatedUser as any).experienceYears) : 0),
-        experienceVerified: (updatedUser as any).experienceVerified ?? false,
-        hourlyRateKz: (updatedUser as any).hourlyRateKz || 15000,
-        rating: 5.0,
-        reviewCount: 0,
-        completedJobs: 0,
-        status: 'disponivel',
-        verified: (updatedUser as any).verified || false,
-        documentsVerified: (updatedUser as any).documentsVerified || false,
-        address: (updatedUser as any).address || '',
-        documentType: (updatedUser as any).documentType || 'Bilhete de Identidade',
-        documentNumber: (updatedUser as any).documentNumber || '',
-        portfolioImages: (updatedUser as any).portfolioImages || [],
-        createdAt: updatedUser.createdAt || new Date().toISOString()
+          : (Number((updatedUser as any).experienceYears) >= 0 ? Number((updatedUser as any).experienceYears) : (existingPro?.experienceYears || 0)),
+        experienceVerified: (updatedUser as any).experienceVerified ?? existingPro?.experienceVerified ?? false,
+        hourlyRateKz: (updatedUser as any).hourlyRateKz || existingPro?.hourlyRateKz || 15000,
+        rating: existingPro?.rating || 5.0,
+        reviewCount: existingPro?.reviewCount || 0,
+        completedJobs: existingPro?.completedJobs || 0,
+        status: (updatedUser as any).status || existingPro?.status || 'disponivel',
+        verified: (updatedUser as any).verified ?? existingPro?.verified ?? false,
+        documentsVerified: (updatedUser as any).documentsVerified ?? existingPro?.documentsVerified ?? false,
+        address: (updatedUser as any).address || existingPro?.address || '',
+        documentType: (updatedUser as any).documentType || existingPro?.documentType || 'Bilhete de Identidade',
+        documentNumber: (updatedUser as any).documentNumber || existingPro?.documentNumber || '',
+        portfolioImages: (updatedUser as any).portfolioImages || existingPro?.portfolioImages || [],
+        createdAt: updatedUser.createdAt || existingPro?.createdAt || new Date().toISOString()
       };
 
       if (!isFictitiousOrInvalidUser(proProfile)) {
@@ -3347,7 +3357,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const newName = updated.name !== undefined ? updated.name : updatedUser.name;
         
         setWorkFeedPosts(prev => prev.map(post => {
-          if (post.professionalId === newUserId) {
+          if (post.professionalId === newUserId || post.ownerId === newUserId) {
             const syncedPost = {
               ...post,
               professionalAvatar: newAvatar || '',
@@ -3365,6 +3375,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }));
       }
 
+      // Persist in localStorage immediately
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(updatedUser));
+      } catch {}
+
       // Write to Firestore for persistent storage & cross-device sync
       try {
         const userDocPayload = {
@@ -3375,32 +3390,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           console.warn('Firestore user save notice:', err);
         });
 
-        if (targetRole === 'profissional') {
+        if (isProOrDual) {
+          const existingPro = professionals.find(p => p.id === newUserId || (p.email && updatedUser.email && p.email === updatedUser.email));
           const proProfileToSave = {
             id: newUserId,
-            name: updatedUser.name || '',
-            email: updatedUser.email || '',
-            phone: updatedUser.phone || '',
-            province: updatedUser.province || 'Luanda',
-            city: updatedUser.city || 'Luanda',
+            name: updatedUser.name || existingPro?.name || '',
+            email: updatedUser.email || existingPro?.email || '',
+            phone: updatedUser.phone || existingPro?.phone || '',
+            province: updatedUser.province || existingPro?.province || 'Luanda',
+            city: updatedUser.city || existingPro?.city || 'Luanda',
             role: 'profissional',
-            avatar: updatedUser.avatar || '',
-            photoURL: updatedUser.avatar || '',
-            categories: Array.isArray((updatedUser as any).categories) ? (updatedUser as any).categories : [],
-            bio: (updatedUser as any).bio || 'Profissional prestador de serviços.',
-            experienceYears: (updatedUser as any).experienceYears || 1,
-            hourlyRateKz: (updatedUser as any).hourlyRateKz || 15000,
-            rating: 5.0,
-            reviewCount: 0,
-            completedJobs: 0,
-            status: 'disponivel',
-            verified: (updatedUser as any).verified || false,
-            documentsVerified: (updatedUser as any).documentsVerified || false,
-            address: (updatedUser as any).address || '',
-            documentType: (updatedUser as any).documentType || 'Bilhete de Identidade',
-            documentNumber: (updatedUser as any).documentNumber || '',
-            portfolioImages: (updatedUser as any).portfolioImages || [],
-            createdAt: updatedUser.createdAt || new Date().toISOString()
+            accountType: updatedUser.accountType || existingPro?.accountType || 'duplo',
+            avatar: updatedUser.avatar || existingPro?.avatar || '',
+            photoURL: updatedUser.avatar || existingPro?.photoURL || '',
+            categories: Array.isArray((updatedUser as any).categories) && (updatedUser as any).categories.length > 0
+              ? (updatedUser as any).categories 
+              : (existingPro?.categories || []),
+            bio: (updatedUser as any).bio || existingPro?.bio || 'Profissional prestador de serviços.',
+            experienceYears: (updatedUser as any).experienceYears || existingPro?.experienceYears || 1,
+            hourlyRateKz: (updatedUser as any).hourlyRateKz || existingPro?.hourlyRateKz || 15000,
+            rating: existingPro?.rating || 5.0,
+            reviewCount: existingPro?.reviewCount || 0,
+            completedJobs: existingPro?.completedJobs || 0,
+            status: (updatedUser as any).status || existingPro?.status || 'disponivel',
+            verified: (updatedUser as any).verified ?? existingPro?.verified ?? false,
+            documentsVerified: (updatedUser as any).documentsVerified ?? existingPro?.documentsVerified ?? false,
+            address: (updatedUser as any).address || existingPro?.address || '',
+            documentType: (updatedUser as any).documentType || existingPro?.documentType || 'Bilhete de Identidade',
+            documentNumber: (updatedUser as any).documentNumber || existingPro?.documentNumber || '',
+            portfolioImages: (updatedUser as any).portfolioImages || existingPro?.portfolioImages || [],
+            createdAt: updatedUser.createdAt || existingPro?.createdAt || new Date().toISOString()
           };
           setDoc(doc(db, 'professionals', newUserId), proProfileToSave, { merge: true }).catch(err => {
             console.warn('Firestore pro save notice:', err);

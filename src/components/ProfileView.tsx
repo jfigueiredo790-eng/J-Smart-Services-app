@@ -404,26 +404,40 @@ export const ProfileView: React.FC = () => {
           {/* Foto de Perfil (Abrir Galeria) */}
           <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <img 
-                src={currentUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'} 
-                alt={currentUser.name} 
-                className="w-12 h-12 rounded-xl object-cover border border-slate-300 shrink-0"
+              <UserAvatar 
+                src={avatar || currentUser.avatar} 
+                name={currentUser.name} 
+                sizeClassName="w-14 h-14" 
+                roundedClassName="rounded-2xl" 
+                role={currentUser.role} 
+                isVerified={currentUser.verified}
+                className="shrink-0"
               />
               <div>
                 <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                   <Camera className="w-4 h-4 text-emerald-600" />
                   <span>Foto de Perfil</span>
                 </h4>
-                <p className="text-[10px] text-slate-500 mt-0.5">Selecione uma imagem da galeria do seu telemóvel ou computador.</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">Selecione uma fotografia real da galeria do seu telemóvel ou computador.</p>
               </div>
             </div>
             <button
               type="button"
+              disabled={isUploadingPhoto}
               onClick={() => fileInputRef.current?.click()}
-              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 shrink-0"
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
             >
-              <Image className="w-4 h-4" />
-              <span>Abrir Galeria</span>
+              {isUploadingPhoto ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>A processar foto...</span>
+                </>
+              ) : (
+                <>
+                  <Image className="w-4 h-4" />
+                  <span>{avatar || currentUser.avatar ? 'Alterar Foto' : 'Abrir Galeria'}</span>
+                </>
+              )}
             </button>
           </div>
 

@@ -47,6 +47,7 @@ export interface User {
   adminSubRole?: AdminSubRole; // Sub-papeis de administracao
   accountType?: AccountType;
   avatar: string;
+  photoURL?: string;
   province: string;
   city?: string;
   address?: string;
