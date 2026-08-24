@@ -37,6 +37,7 @@ import {
   MAX_OTP_ATTEMPTS 
 } from '../utils/recoveryUtils';
 import { CATEGORIES, DEFAULT_ADMIN_USER, MOCK_USERS, MOCK_PROFESSIONALS, MOCK_REQUESTS, MOCK_MESSAGES, MOCK_REVIEWS, MOCK_WORK_FEED_POSTS } from '../mockData';
+import { safeStorageGet, safeStorageSet, safeStorageRemove, sanitizeFeedPostsForStorage } from '../utils/storageUtils';
 import { db, auth } from '../lib/firebase';
 import { 
   createUserWithEmailAndPassword, 
@@ -369,7 +370,7 @@ export const checkProAutoApproval = (pro: Partial<ProfessionalProfile>): { isApp
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Load state from local storage or fallback to mock
   const [professionals, setProfessionals] = useState<ProfessionalProfile[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_pros`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_pros`);
     if (saved) {
       try {
         const parsed: ProfessionalProfile[] = JSON.parse(saved);
@@ -383,7 +384,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [allUsers, setAllUsers] = useState<User[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_users`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_users`);
     if (saved) {
       try {
         const parsed: User[] = JSON.parse(saved);
@@ -400,7 +401,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    const savedUser = localStorage.getItem(`${LOCAL_STORAGE_KEY}_user`);
+    const savedUser = safeStorageGet(`${LOCAL_STORAGE_KEY}_user`);
     if (savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
@@ -409,13 +410,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       } catch {}
     }
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_is_logged_in`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_is_logged_in`);
     return saved ? JSON.parse(saved) : false;
   });
 
   const [currentUser, setCurrentUser] = useState<User>(() => {
-    const savedUser = localStorage.getItem(`${LOCAL_STORAGE_KEY}_user`);
-    const savedLoggedIn = localStorage.getItem(`${LOCAL_STORAGE_KEY}_is_logged_in`);
+    const savedUser = safeStorageGet(`${LOCAL_STORAGE_KEY}_user`);
+    const savedLoggedIn = safeStorageGet(`${LOCAL_STORAGE_KEY}_is_logged_in`);
     const loggedIn = savedLoggedIn ? JSON.parse(savedLoggedIn) : false;
     if (loggedIn && savedUser) {
       try {
@@ -447,7 +448,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const [categories, setCategories] = useState<ServiceCategory[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_cats`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_cats`);
     if (!saved) return CATEGORIES;
     try {
       const parsed: ServiceCategory[] = JSON.parse(saved);
@@ -460,28 +461,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_cats`, JSON.stringify(categories));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_cats`, JSON.stringify(categories));
   }, [categories]);
 
   const [requests, setRequests] = useState<ServiceRequest[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_reqs`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_reqs`);
     return saved ? JSON.parse(saved) : [];
   });
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_msgs`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_msgs`);
     return saved ? JSON.parse(saved) : [];
   });
 
   const [reviews, setReviews] = useState<Review[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_revs`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_revs`);
     return saved ? JSON.parse(saved) : [];
   });
 
   const DEFAULT_INITIAL_TXS: WalletTransaction[] = [];
 
   const [allWalletTransactions, setAllWalletTransactions] = useState<WalletTransaction[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_txs`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_txs`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -494,17 +495,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [reports, setReports] = useState<UserReport[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_reports`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_reports`);
     return saved ? JSON.parse(saved) : [];
   });
 
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_audit_logs`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_audit_logs`);
     return saved ? JSON.parse(saved) : [];
   });
 
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_settings`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_settings`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -524,7 +525,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [codeOfConductRules, setCodeOfConductRules] = useState<CodeOfConductSection[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_code_of_conduct`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_code_of_conduct`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -551,7 +552,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Notifications state (Segmentada por tipo/papel de utilizador)
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_notifications`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_notifications`);
     if (saved) {
       try { return JSON.parse(saved); } catch (e) {}
     }
@@ -590,12 +591,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_notifications`, JSON.stringify(notifications));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_notifications`, JSON.stringify(notifications));
   }, [notifications]);
 
   // Work Feed State & Sub Expired Prompt
   const [workFeedPosts, setWorkFeedPosts] = useState<WorkFeedPost[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_feed_posts`);
+    const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_feed_posts`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -608,7 +609,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(workFeedPosts));
+    const sanitized = sanitizeFeedPostsForStorage(workFeedPosts);
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(sanitized));
   }, [workFeedPosts]);
 
   const [isSubExpiredModalOpen, setIsSubExpiredModalOpen] = useState(false);
@@ -651,9 +653,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setWorkFeedPosts(prev => {
       const updated = [newPost, ...prev];
-      try {
-        localStorage.setItem(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(updated));
-      } catch {}
+      const sanitized = sanitizeFeedPostsForStorage(updated);
+      safeStorageSet(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(sanitized));
       return updated;
     });
 
@@ -706,9 +707,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setWorkFeedPosts(prev => {
       const updated = prev.map(p => p.id === postId ? updatedPost : p);
-      try {
-        localStorage.setItem(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(updated));
-      } catch {}
+      const sanitized = sanitizeFeedPostsForStorage(updated);
+      safeStorageSet(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(sanitized));
       return updated;
     });
 
@@ -742,9 +742,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteWorkFeedPost = (postId: string) => {
     setWorkFeedPosts(prev => {
       const updated = prev.filter(p => p.id !== postId);
-      try {
-        localStorage.setItem(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(updated));
-      } catch {}
+      const sanitized = sanitizeFeedPostsForStorage(updated);
+      safeStorageSet(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(sanitized));
       return updated;
     });
     try {
@@ -807,9 +806,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setWorkFeedPosts(prev => {
       const updated = prev.map(p => p.id === postId ? updatedPost : p);
-      try {
-        localStorage.setItem(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(updated));
-      } catch {}
+      const sanitized = sanitizeFeedPostsForStorage(updated);
+      safeStorageSet(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(sanitized));
       return updated;
     });
 
@@ -871,51 +869,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return isNotificationForUser(n, currentUser);
   }).length;
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(currentUser));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(currentUser));
   }, [currentUser]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_cats`, JSON.stringify(categories));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_cats`, JSON.stringify(categories));
   }, [categories]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_pros`, JSON.stringify(professionals));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_pros`, JSON.stringify(professionals));
   }, [professionals]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_reqs`, JSON.stringify(requests));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_reqs`, JSON.stringify(requests));
   }, [requests]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_msgs`, JSON.stringify(messages));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_msgs`, JSON.stringify(messages));
   }, [messages]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_revs`, JSON.stringify(reviews));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_revs`, JSON.stringify(reviews));
   }, [reviews]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_txs`, JSON.stringify(allWalletTransactions));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_txs`, JSON.stringify(allWalletTransactions));
   }, [allWalletTransactions]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_reports`, JSON.stringify(reports));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_reports`, JSON.stringify(reports));
   }, [reports]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_audit_logs`, JSON.stringify(auditLogs));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_audit_logs`, JSON.stringify(auditLogs));
   }, [auditLogs]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_settings`, JSON.stringify(platformSettings));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_settings`, JSON.stringify(platformSettings));
   }, [platformSettings]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_is_logged_in`, JSON.stringify(isLoggedIn));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_is_logged_in`, JSON.stringify(isLoggedIn));
   }, [isLoggedIn]);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_users`, JSON.stringify(allUsers));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_users`, JSON.stringify(allUsers));
   }, [allUsers]);
 
   const loginUser = (user: User, role?: UserRole) => {
@@ -1110,9 +1108,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 avatar: updatedMatchingUser.avatar || prevUser.avatar || '', 
                 photoURL: updatedMatchingUser.photoURL || updatedMatchingUser.avatar || prevUser.photoURL || prevUser.avatar || '' 
               };
-              try {
-                localStorage.setItem(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(merged));
-              } catch {}
+              safeStorageSet(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(merged));
               return merged;
             }
             return prevUser;
@@ -1165,9 +1161,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 avatar: updatedMatchingPro.avatar || prevUser.avatar || '', 
                 photoURL: updatedMatchingPro.photoURL || updatedMatchingPro.avatar || prevUser.photoURL || prevUser.avatar || '' 
               };
-              try {
-                localStorage.setItem(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(merged));
-              } catch {}
+              safeStorageSet(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(merged));
               return merged;
             }
             return prevUser;
@@ -2776,7 +2770,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // ==================== ACCOUNT ACCESS RECOVERY METHODS ====================
   const [recoverySessions, setRecoverySessions] = useState<AccountRecoverySession[]>(() => {
     try {
-      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_recovery_sessions`);
+      const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_recovery_sessions`);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -2784,9 +2778,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   useEffect(() => {
-    try {
-      localStorage.setItem(`${LOCAL_STORAGE_KEY}_recovery_sessions`, JSON.stringify(recoverySessions));
-    } catch {}
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_recovery_sessions`, JSON.stringify(recoverySessions));
   }, [recoverySessions]);
 
   const requestPasswordRecoveryOtpAsync = async (
@@ -3459,9 +3451,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       // Persist in localStorage immediately
-      try {
-        localStorage.setItem(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(updatedUser));
-      } catch {}
+      safeStorageSet(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(updatedUser));
 
       // Write to Firestore for persistent storage & cross-device sync
       try {
@@ -4217,7 +4207,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateCodeOfConductRules = (newRules: CodeOfConductSection[]) => {
     setCodeOfConductRules(newRules);
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_code_of_conduct`, JSON.stringify(newRules));
+    safeStorageSet(`${LOCAL_STORAGE_KEY}_code_of_conduct`, JSON.stringify(newRules));
     logAdminAction('Atualização do Código de Conduta', 'all', 'Novas regras salvas pelo Administrador');
   };
 
@@ -4453,16 +4443,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const resetDemoData = () => {
-    localStorage.removeItem(`${LOCAL_STORAGE_KEY}_user`);
-    localStorage.removeItem(`${LOCAL_STORAGE_KEY}_cats`);
-    localStorage.removeItem(`${LOCAL_STORAGE_KEY}_pros`);
-    localStorage.removeItem(`${LOCAL_STORAGE_KEY}_users`);
-    localStorage.removeItem(`${LOCAL_STORAGE_KEY}_reqs`);
-    localStorage.removeItem(`${LOCAL_STORAGE_KEY}_msgs`);
-    localStorage.removeItem(`${LOCAL_STORAGE_KEY}_revs`);
-    localStorage.removeItem(`${LOCAL_STORAGE_KEY}_txs`);
-    localStorage.removeItem(`${LOCAL_STORAGE_KEY}_reports`);
-    localStorage.removeItem(`${LOCAL_STORAGE_KEY}_settings`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_user`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_cats`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_pros`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_users`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_reqs`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_msgs`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_revs`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_txs`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_reports`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_settings`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_feed_posts`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_notifications`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_audit_logs`);
+    safeStorageRemove(`${LOCAL_STORAGE_KEY}_code_of_conduct`);
 
     setAllUsers(MOCK_USERS);
     setProfessionals(MOCK_PROFESSIONALS);
