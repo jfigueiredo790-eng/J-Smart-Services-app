@@ -39,11 +39,18 @@ const AVAILABLE_ICONS = [
   { name: 'Sofa', label: 'Estofador / Móveis' },
   { name: 'Monitor', label: 'Informática / TI' },
   { name: 'HardHat', label: 'Construção / Obras' },
-  { name: 'Car', label: 'Mecânica Automóvel' },
+  { name: 'Car', label: 'Mecânica Automóvel / Motorista' },
   { name: 'Truck', label: 'Transporte / Fretes' },
-  { name: 'Scissors', label: 'Beleza / Cabelo' },
+  { name: 'Navigation', label: 'Navegação / Deslocação' },
+  { name: 'Scissors', label: 'Beleza / Alfaiate' },
+  { name: 'Shirt', label: 'Vestuário / Costura' },
   { name: 'Utensils', label: 'Cozinha / Eventos' },
-  { name: 'Music', label: 'Música / DJ' },
+  { name: 'Music', label: 'Música / Aulas' },
+  { name: 'Radio', label: 'Instrumentos / Som' },
+  { name: 'GraduationCap', label: 'Educação / Aulas' },
+  { name: 'BookOpen', label: 'Explicações / Ensino' },
+  { name: 'Calculator', label: 'Contabilidade / Gestão' },
+  { name: 'Megaphone', label: 'Marketing / Publicidade' },
   { name: 'Camera', label: 'Fotografia / Vídeo' },
   { name: 'Lightbulb', label: 'Design / Criativo' },
   { name: 'Home', label: 'Limpeza / Lar' },
@@ -51,7 +58,8 @@ const AVAILABLE_ICONS = [
   { name: 'Layers', label: 'Estuque / Pladur' },
   { name: 'Package', label: 'Logística / Entregas' },
   { name: 'Gem', label: 'Joalharia / Estética' },
-  { name: 'Briefcase', label: 'Geral / Outros' }
+  { name: 'TrendingUp', label: 'Negócios / Consultoria' },
+  { name: 'Briefcase', label: 'Gestão / Geral' }
 ];
 
 const COLOR_PALETTES = [
@@ -67,12 +75,19 @@ const COLOR_PALETTES = [
 
 const DEFAULT_GROUPS = [
   'Casa & Manutenção',
-  'Construção & Obras',
-  'Tecnologia & Informática',
-  'Eventos, Beleza & Estética',
-  'Automóvel & Transporte',
-  'Serviços Domésticos & Limpeza',
-  'Aulas, Consultoria & Outros'
+  'Beleza',
+  'Eventos',
+  'Limpeza & Casa',
+  'Cuidados',
+  'Automóvel',
+  'Alimentação & Entregas',
+  'Transporte & Motorista',
+  'Gestão & Negócios',
+  'Marketing & Digital',
+  'Educação & Aulas',
+  'Música & Instrumentos',
+  'Moda & Costura',
+  'Pedido Personalizado'
 ];
 
 export const AdminCategoryManager: React.FC = () => {

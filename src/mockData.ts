@@ -690,6 +690,152 @@ export const CATEGORIES: ServiceCategory[] = [
     ]
   },
 
+  // --- Transporte & Motorista ---
+  {
+    id: 'motorista',
+    name: 'Motorista Particular & Deslocações',
+    iconName: 'Car',
+    description: 'Serviço de motorista particular, transporte executivo, transferes e deslocações em Angola',
+    popularCount: 2450,
+    color: 'emerald',
+    group: 'Transporte & Motorista',
+    items: [
+      'Motorista Particular / Diária Completa',
+      'Transporte Executivo / VIP & Reuniões',
+      'Transfer Aeroporto & Deslocações',
+      'Motorista para Família & Apoio Escolar',
+      'Motorista para Viagens Interprovinciais',
+      'Motorista de Ocasião / Eventos & Noite Segura'
+    ]
+  },
+
+  // --- Gestão, Contabilidade & Negócios ---
+  {
+    id: 'gestor',
+    name: 'Gestor & Apoio Empresarial',
+    iconName: 'Briefcase',
+    description: 'Serviços de gestão, apoio administrativo, planeamento empresarial e consultoria',
+    popularCount: 1350,
+    color: 'teal',
+    group: 'Gestão & Negócios',
+    items: [
+      'Consultoria de Gestão & Apoio Empresarial',
+      'Apoio Administrativo & Secretariado Remoto/Presencial',
+      'Elaboração de Planos de Negócios & Viabilidade',
+      'Gestão de Projetos & Operações',
+      'Gestão de Recursos Humanos & Processamento',
+      'Organização de Arquivos & Documentação Comercial'
+    ]
+  },
+  {
+    id: 'contabilista',
+    name: 'Contabilista & Fiscalidade',
+    iconName: 'Calculator',
+    description: 'Serviços de contabilidade, declarações fiscais AGT, relatórios financeiros e fiscalidade',
+    popularCount: 1580,
+    color: 'emerald',
+    group: 'Gestão & Negócios',
+    items: [
+      'Contabilidade Geral & Organizada para PMEs',
+      'Declarações Fiscais & Conformidade AGT (IVA, IRT, II)',
+      'Processamento de Salários, Folhas & INSS',
+      'Balanços, DRE e Demonstrações Financeiras',
+      'Abertura, Legalização & Enquadramento de Empresas',
+      'Consultoria Fiscal & Planeamento Tributário'
+    ]
+  },
+  {
+    id: 'marketing-digital',
+    name: 'Marketing Digital',
+    iconName: 'Megaphone',
+    description: 'Gestão de redes sociais, publicidade online, tráfego pago, criação de conteúdo e estratégia digital',
+    popularCount: 2150,
+    color: 'blue',
+    group: 'Marketing & Digital',
+    items: [
+      'Gestão de Redes Sociais (Instagram, Facebook, TikTok)',
+      'Publicidade Online & Tráfego Pago (Meta Ads & Google Ads)',
+      'Criação de Conteúdo, Copywriting & Design Gráfico',
+      'Estratégias de Vendas Online & Lançamentos',
+      'Branding, Logótipos & Identidade Visual',
+      'Criação de Páginas Web & Lojas Virtuais'
+    ]
+  },
+
+  // --- Educação & Aulas ---
+  {
+    id: 'aulas-domicilio',
+    name: 'Aulas ao Domicílio',
+    iconName: 'GraduationCap',
+    description: 'Professores e explicadores particulares na residência do cliente, apoio escolar e línguas',
+    popularCount: 1780,
+    color: 'emerald',
+    group: 'Educação & Aulas',
+    items: [
+      'Apoio Escolar & TPC (Ensino Primário e Secundário)',
+      'Explicações de Matemática, Física & Química',
+      'Aulas de Língua Portuguesa, Redação & Literatura',
+      'Aulas de Inglês & Francês ao Domicílio',
+      'Preparação para Exames Nacionais e de Acesso à Universidade',
+      'Alfabetização de Adultos & Apoio ao Estudo'
+    ]
+  },
+
+  // --- Música & Instrumentos ---
+  {
+    id: 'aulas-musica',
+    name: 'Aulas de Música',
+    iconName: 'Music',
+    description: 'Professores de música, canto, técnica vocal e instrumentos musicais ao domicílio ou estúdio',
+    popularCount: 1420,
+    color: 'purple',
+    group: 'Música & Instrumentos',
+    items: [
+      'Aulas de Piano & Teclado Eletrónico',
+      'Aulas de Guitarra / Violão Acústico & Elétrico',
+      'Aulas de Canto, Técnica Vocal & Respiração',
+      'Aulas de Bateria & Percussão',
+      'Aulas de Baixo Elétrico & Viola',
+      'Teoria Musical, Solfejo & Leitura de Partituras'
+    ]
+  },
+  {
+    id: 'instrumentos-musicais',
+    name: 'Instrumentos Musicais',
+    iconName: 'Radio',
+    description: 'Venda, aluguer, afinação, manutenção e reparação de instrumentos musicais e equipamentos de som',
+    popularCount: 1210,
+    color: 'teal',
+    group: 'Música & Instrumentos',
+    items: [
+      'Afinação Profissional de Pianos & Instrumentos',
+      'Manutenção, Ajuste e Reparação de Guitarras & Baixos',
+      'Aluguer de Instrumentos Musicais para Shows & Eventos',
+      'Venda de Instrumentos, Cabos e Acessórios',
+      'Reparação de Teclados, Mesas de Mistura e Áudio',
+      'Montagem & Afinação de Baterias e Percussão'
+    ]
+  },
+
+  // --- Moda & Costura ---
+  {
+    id: 'alfaiate',
+    name: 'Alfaiate',
+    iconName: 'Scissors',
+    description: 'Costura sob medida, confecção de fatos, vestidos, fardamentos, ajustes e arranjos de roupas',
+    popularCount: 1890,
+    color: 'emerald',
+    group: 'Moda & Costura',
+    items: [
+      'Confecção de Fatos Masculinos por Medida',
+      'Confecção de Vestidos de Festa, Galas & Noivas',
+      'Ajustes, Bainhas, Apertos e Reformas de Roupas',
+      'Costura Tradicional Africana (Samakaka, Tecidos Africanos)',
+      'Substituição de Fechos, Botões e Forros',
+      'Confecção de Fardas Escolares & Fardamentos Profissionais'
+    ]
+  },
+
   // --- Pedido Personalizado / Outro Serviço ---
   {
     id: 'pedido-personalizado',

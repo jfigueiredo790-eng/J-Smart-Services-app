@@ -40,7 +40,19 @@ import {
   Edit3,
   PlusCircle,
   Radio,
-  Package
+  Package,
+  GraduationCap,
+  BookOpen,
+  Calculator,
+  Megaphone,
+  Share2,
+  TrendingUp,
+  Building2,
+  Disc,
+  Volume2,
+  Shirt,
+  Navigation,
+  Compass
 } from 'lucide-react';
 
 interface CategoryIconProps {
@@ -127,6 +139,30 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({ name, className = "w
       return <Radio className={className} />;
     case 'Package':
       return <Package className={className} />;
+    case 'GraduationCap':
+      return <GraduationCap className={className} />;
+    case 'BookOpen':
+      return <BookOpen className={className} />;
+    case 'Calculator':
+      return <Calculator className={className} />;
+    case 'Megaphone':
+      return <Megaphone className={className} />;
+    case 'Share2':
+      return <Share2 className={className} />;
+    case 'TrendingUp':
+      return <TrendingUp className={className} />;
+    case 'Building2':
+      return <Building2 className={className} />;
+    case 'Disc':
+      return <Disc className={className} />;
+    case 'Volume2':
+      return <Volume2 className={className} />;
+    case 'Shirt':
+      return <Shirt className={className} />;
+    case 'Navigation':
+      return <Navigation className={className} />;
+    case 'Compass':
+      return <Compass className={className} />;
     default:
       return <Briefcase className={className} />;
   }
