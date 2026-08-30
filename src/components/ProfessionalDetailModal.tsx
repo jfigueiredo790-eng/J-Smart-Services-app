@@ -286,9 +286,15 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
                 {pro.portfolioImages.map((img, i) => (
                   <img 
                     key={i} 
-                    src={img || 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=500&auto=format&fit=crop&q=80'} 
-                    alt="Portfólio" 
+                    src={img} 
+                    alt={`Trabalho ${i + 1}`} 
+                    onError={(e) => {
+                      // Hide or show subtle placeholder if image cannot be loaded
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
                     className="w-full h-32 object-cover rounded-xl border border-slate-200"
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
                   />
                 ))}
               </div>

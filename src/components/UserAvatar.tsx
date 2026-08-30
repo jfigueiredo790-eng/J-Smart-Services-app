@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User as UserIcon, CheckCircle2, ShieldCheck, Crown } from 'lucide-react';
 import { isStockOrFictitiousAvatar, getUserInitials } from '../utils/imageUtils';
 
@@ -28,14 +28,52 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
   roundedClassName = 'rounded-2xl'
 }) => {
   const [imageError, setImageError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     setImageError(false);
+    setRetryCount(0);
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+    }
   }, [src]);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleImageError = () => {
+    // Auto-retry up to 2 times for transient network dropouts
+    if (retryCount < 2 && src && !src.startsWith('data:')) {
+      const nextAttempt = retryCount + 1;
+      setRetryCount(nextAttempt);
+      if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = setTimeout(() => {
+        setImageError(false);
+      }, 1500 * nextAttempt);
+    } else {
+      setImageError(true);
+    }
+  };
 
   const isInvalidOrFake = isStockOrFictitiousAvatar(src);
   const shouldShowImage = Boolean(src && !isInvalidOrFake && !imageError);
   const initials = getUserInitials(name);
+
+  // Compute final image source with cache buster on retry if needed
+  const getComputedSrc = () => {
+    if (!src) return '';
+    if (retryCount > 0 && !src.startsWith('data:')) {
+      const sep = src.includes('?') ? '&' : '?';
+      return `${src}${sep}_retry=${retryCount}`;
+    }
+    return src;
+  };
 
   // Neutral, elegant color gradient for avatar fallback based on user role or name hash
   const getFallbackColor = () => {
@@ -51,9 +89,9 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
     >
       {shouldShowImage ? (
         <img
-          src={src!}
+          src={getComputedSrc()}
           alt={alt || name}
-          onError={() => setImageError(true)}
+          onError={handleImageError}
           className={`${sizeClassName} ${roundedClassName} object-cover border border-slate-200/80 shadow-sm`}
           referrerPolicy="no-referrer"
           loading="lazy"

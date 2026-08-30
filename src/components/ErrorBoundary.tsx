@@ -28,8 +28,21 @@ export class ErrorBoundary extends Component<Props, State> {
     window.location.reload();
   };
 
-  private handleReset = () => {
-    localStorage.clear();
+  private handleSoftReset = () => {
+    // Preserve authentication and crucial accounts while cleaning corrupted UI temporary state
+    try {
+      const userKey = 'j_smart_services_data_v6_user';
+      const loggedKey = 'j_smart_services_data_v6_is_logged_in';
+      const savedUser = localStorage.getItem(userKey);
+      const savedLogged = localStorage.getItem(loggedKey);
+
+      localStorage.removeItem('j_smart_services_data_v6_audit_logs');
+      localStorage.removeItem('j_smart_services_data_v6_reports');
+      localStorage.removeItem('j_smart_services_data_v6_recovery_sessions');
+
+      if (savedUser) localStorage.setItem(userKey, savedUser);
+      if (savedLogged) localStorage.setItem(loggedKey, savedLogged);
+    } catch {}
     window.location.href = '/';
   };
 
@@ -43,30 +56,30 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             <div>
-              <h2 className="text-xl font-black text-white">J Smart Services</h2>
+              <h2 className="text-xl font-black text-white">J Smart Services Angola 🇦🇴</h2>
               <p className="text-sm font-bold text-slate-300 mt-1">
-                Ocorreu um imprevisto temporário
+                Recuperação de Estabilidade do Sistema
               </p>
               <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                A aplicação encontrou um problema inesperado. Por favor, tente recarregar a página para continuar a navegar.
+                Os seus dados e conta permanecem guardados em segurança. Clique abaixo para recarregar e restabelecer a ligação.
               </p>
             </div>
 
             <div className="pt-2 space-y-3">
               <button
                 onClick={this.handleReload}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-xs"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-xs cursor-pointer"
               >
                 <RefreshCw className="w-4 h-4" />
-                <span>Recarregar Página</span>
+                <span>Recarregar e Restabelecer Ligação</span>
               </button>
 
               <button
-                onClick={this.handleReset}
-                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 text-xs"
+                onClick={this.handleSoftReset}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 text-xs cursor-pointer"
               >
                 <Home className="w-4 h-4" />
-                <span>Limpar Dados Locais e Voltar ao Início</span>
+                <span>Atualizar Sessão e Voltar ao Início</span>
               </button>
             </div>
           </div>

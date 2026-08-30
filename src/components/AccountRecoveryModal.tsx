@@ -128,57 +128,67 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
     setIsSubmitting(true);
+    const emergencyTimer = setTimeout(() => setIsSubmitting(false), 7000);
 
-    if (activeTab === 'password') {
-      if (!passwordIdentifier.trim()) {
-        setErrorMsg('Por favor introduza o número de telefone, e-mail ou BI associado à conta.');
-        setIsSubmitting(false);
-        return;
-      }
+    try {
+      if (activeTab === 'password') {
+        if (!passwordIdentifier.trim()) {
+          clearTimeout(emergencyTimer);
+          setErrorMsg('Por favor introduza o número de telefone, e-mail ou BI associado à conta.');
+          setIsSubmitting(false);
+          return;
+        }
 
-      const res = await requestPasswordRecoveryOtpAsync(passwordIdentifier.trim());
-      setIsSubmitting(false);
+        const res = await requestPasswordRecoveryOtpAsync(passwordIdentifier.trim());
+        clearTimeout(emergencyTimer);
 
-      if (res.success && res.sessionId) {
-        setSessionId(res.sessionId);
-        setMaskedContact(res.maskedContact || 'seu contacto registado');
-        setDevCode(res.devCode);
-        setIsAccountBlocked(!!res.isBlocked);
-        setAttemptsRemaining(3);
-        setTimerSeconds(600);
-        setStep('otp');
-        setSuccessMsg(res.message);
+        if (res.success && res.sessionId) {
+          setSessionId(res.sessionId);
+          setMaskedContact(res.maskedContact || 'seu contacto registado');
+          setDevCode(res.devCode);
+          setIsAccountBlocked(!!res.isBlocked);
+          setAttemptsRemaining(3);
+          setTimerSeconds(600);
+          setStep('otp');
+          setSuccessMsg(res.message);
+        } else {
+          setErrorMsg(res.message);
+        }
       } else {
-        setErrorMsg(res.message);
-      }
-    } else {
-      // Phone Recovery
-      if (!phoneRecoveryEmail.trim() || !phoneRecoveryDoc.trim()) {
-        setErrorMsg('Por favor preencha o seu E-mail e o Número de Bilhete de Identidade (BI).');
-        setIsSubmitting(false);
-        return;
-      }
+        // Phone Recovery
+        if (!phoneRecoveryEmail.trim() || !phoneRecoveryDoc.trim()) {
+          clearTimeout(emergencyTimer);
+          setErrorMsg('Por favor preencha o seu E-mail e o Número de Bilhete de Identidade (BI).');
+          setIsSubmitting(false);
+          return;
+        }
 
-      const res = await requestPhoneRecoveryVerificationAsync(
-        phoneRecoveryEmail.trim(),
-        phoneRecoveryDoc.trim(),
-        phoneRecoveryPassword ? phoneRecoveryPassword.trim() : undefined
-      );
+        const res = await requestPhoneRecoveryVerificationAsync(
+          phoneRecoveryEmail.trim(),
+          phoneRecoveryDoc.trim(),
+          phoneRecoveryPassword ? phoneRecoveryPassword.trim() : undefined
+        );
+        clearTimeout(emergencyTimer);
+
+        if (res.success && res.sessionId) {
+          setSessionId(res.sessionId);
+          setMaskedContact(res.maskedCurrentPhone || 'contacto associado');
+          setMaskedEmail(res.maskedEmail || maskEmailAddress(phoneRecoveryEmail));
+          setDevCode(res.devCode);
+          setIsAccountBlocked(!!res.isBlocked);
+          setAttemptsRemaining(3);
+          setTimerSeconds(600);
+          setStep('otp');
+          setSuccessMsg(res.message);
+        } else {
+          setErrorMsg(res.message);
+        }
+      }
+    } catch (err: any) {
+      clearTimeout(emergencyTimer);
+      setErrorMsg('Ocorreu um erro na solicitação. Por favor verifique a sua ligação e tente novamente.');
+    } finally {
       setIsSubmitting(false);
-
-      if (res.success && res.sessionId) {
-        setSessionId(res.sessionId);
-        setMaskedContact(res.maskedCurrentPhone || 'contacto associado');
-        setMaskedEmail(res.maskedEmail || maskEmailAddress(phoneRecoveryEmail));
-        setDevCode(res.devCode);
-        setIsAccountBlocked(!!res.isBlocked);
-        setAttemptsRemaining(3);
-        setTimerSeconds(600);
-        setStep('otp');
-        setSuccessMsg(res.message);
-      } else {
-        setErrorMsg(res.message);
-      }
     }
   };
 
@@ -194,15 +204,24 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
     }
 
     setIsSubmitting(true);
-    const res = await verifyRecoveryOtpAsync(sessionId, otpCode.trim());
-    setIsSubmitting(false);
+    const emergencyTimer = setTimeout(() => setIsSubmitting(false), 7000);
 
-    if (res.success) {
-      setStep('action');
-      setSuccessMsg(res.message);
-    } else {
-      setErrorMsg(res.message);
-      setAttemptsRemaining(prev => Math.max(0, prev - 1));
+    try {
+      const res = await verifyRecoveryOtpAsync(sessionId, otpCode.trim());
+      clearTimeout(emergencyTimer);
+
+      if (res.success) {
+        setStep('action');
+        setSuccessMsg(res.message);
+      } else {
+        setErrorMsg(res.message);
+        setAttemptsRemaining(prev => Math.max(0, prev - 1));
+      }
+    } catch (err: any) {
+      clearTimeout(emergencyTimer);
+      setErrorMsg('Ocorreu um erro ao validar o código. Tente novamente.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -211,35 +230,43 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
     setIsSubmitting(true);
+    const emergencyTimer = setTimeout(() => setIsSubmitting(false), 7000);
 
-    if (activeTab === 'password') {
-      const res = await requestPasswordRecoveryOtpAsync(passwordIdentifier.trim());
-      setIsSubmitting(false);
-      if (res.success && res.sessionId) {
-        setSessionId(res.sessionId);
-        setDevCode(res.devCode);
-        setAttemptsRemaining(3);
-        setTimerSeconds(600);
-        setSuccessMsg('Novo código enviado com sucesso!');
+    try {
+      if (activeTab === 'password') {
+        const res = await requestPasswordRecoveryOtpAsync(passwordIdentifier.trim());
+        clearTimeout(emergencyTimer);
+        if (res.success && res.sessionId) {
+          setSessionId(res.sessionId);
+          setDevCode(res.devCode);
+          setAttemptsRemaining(3);
+          setTimerSeconds(600);
+          setSuccessMsg('Novo código enviado com sucesso!');
+        } else {
+          setErrorMsg(res.message);
+        }
       } else {
-        setErrorMsg(res.message);
+        const res = await requestPhoneRecoveryVerificationAsync(
+          phoneRecoveryEmail.trim(),
+          phoneRecoveryDoc.trim(),
+          phoneRecoveryPassword ? phoneRecoveryPassword.trim() : undefined
+        );
+        clearTimeout(emergencyTimer);
+        if (res.success && res.sessionId) {
+          setSessionId(res.sessionId);
+          setDevCode(res.devCode);
+          setAttemptsRemaining(3);
+          setTimerSeconds(600);
+          setSuccessMsg('Novo código enviado com sucesso!');
+        } else {
+          setErrorMsg(res.message);
+        }
       }
-    } else {
-      const res = await requestPhoneRecoveryVerificationAsync(
-        phoneRecoveryEmail.trim(),
-        phoneRecoveryDoc.trim(),
-        phoneRecoveryPassword ? phoneRecoveryPassword.trim() : undefined
-      );
+    } catch (err: any) {
+      clearTimeout(emergencyTimer);
+      setErrorMsg('Erro ao reenviar código. Tente novamente.');
+    } finally {
       setIsSubmitting(false);
-      if (res.success && res.sessionId) {
-        setSessionId(res.sessionId);
-        setDevCode(res.devCode);
-        setAttemptsRemaining(3);
-        setTimerSeconds(600);
-        setSuccessMsg('Novo código enviado com sucesso!');
-      } else {
-        setErrorMsg(res.message);
-      }
     }
   };
 
@@ -260,15 +287,24 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
       }
 
       setIsSubmitting(true);
-      const res = await resetAccountPasswordAsync(sessionId, otpCode.trim(), newPassword);
-      setIsSubmitting(false);
+      const emergencyTimer = setTimeout(() => setIsSubmitting(false), 7000);
 
-      if (res.success) {
-        setIsAccountBlocked(!!res.isBlocked);
-        setStep('success');
-        setSuccessMsg(res.message);
-      } else {
-        setErrorMsg(res.message);
+      try {
+        const res = await resetAccountPasswordAsync(sessionId, otpCode.trim(), newPassword);
+        clearTimeout(emergencyTimer);
+
+        if (res.success) {
+          setIsAccountBlocked(!!res.isBlocked);
+          setStep('success');
+          setSuccessMsg(res.message);
+        } else {
+          setErrorMsg(res.message);
+        }
+      } catch (err: any) {
+        clearTimeout(emergencyTimer);
+        setErrorMsg('Erro ao redefinir a palavra-passe. Tente novamente.');
+      } finally {
+        setIsSubmitting(false);
       }
     } else {
       // Update phone
@@ -278,15 +314,24 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
       }
 
       setIsSubmitting(true);
-      const res = await updateRecoveredPhoneNumberAsync(sessionId, otpCode.trim(), newPhone);
-      setIsSubmitting(false);
+      const emergencyTimer = setTimeout(() => setIsSubmitting(false), 7000);
 
-      if (res.success) {
-        setIsAccountBlocked(!!res.isBlocked);
-        setStep('success');
-        setSuccessMsg(res.message);
-      } else {
-        setErrorMsg(res.message);
+      try {
+        const res = await updateRecoveredPhoneNumberAsync(sessionId, otpCode.trim(), newPhone.trim());
+        clearTimeout(emergencyTimer);
+
+        if (res.success) {
+          setIsAccountBlocked(!!res.isBlocked);
+          setStep('success');
+          setSuccessMsg(res.message);
+        } else {
+          setErrorMsg(res.message);
+        }
+      } catch (err: any) {
+        clearTimeout(emergencyTimer);
+        setErrorMsg('Erro ao atualizar o número de telefone. Tente novamente.');
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };

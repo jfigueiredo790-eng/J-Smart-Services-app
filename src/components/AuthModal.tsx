@@ -126,14 +126,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
       }
 
       setIsSubmitting(true);
-      // Validates credentials and automatically switches to role (Client -> Home, Pro -> ProDashboard, Admin -> AdminDashboard)
-      const res = await loginUserWithCredentialsAsync(phone, password, role);
-      setIsSubmitting(false);
+      const emergencyLoginTimer = setTimeout(() => setIsSubmitting(false), 7000);
 
-      if (res.success) {
-        onClose();
-      } else {
-        setAuthError(res.message);
+      try {
+        // Validates credentials and automatically switches to role (Client -> Home, Pro -> ProDashboard, Admin -> AdminDashboard)
+        const res = await loginUserWithCredentialsAsync(phone, password, role);
+        clearTimeout(emergencyLoginTimer);
+
+        if (res.success) {
+          onClose();
+        } else {
+          setAuthError(res.message);
+        }
+      } catch (err: any) {
+        clearTimeout(emergencyLoginTimer);
+        setAuthError('Ocorreu um erro ao iniciar sessão. Por favor verifique a sua ligação e tente novamente.');
+      } finally {
+        setIsSubmitting(false);
       }
     } else if (mode === 'register') {
       // Registration form validations
@@ -213,13 +222,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
       };
 
       setIsSubmitting(true);
-      const res = await registerUserAsync(newUser, password.trim());
-      setIsSubmitting(false);
+      const emergencyRegTimer = setTimeout(() => setIsSubmitting(false), 8000);
 
-      if (res.success) {
-        onClose();
-      } else {
-        setAuthError(res.message);
+      try {
+        const res = await registerUserAsync(newUser, password.trim());
+        clearTimeout(emergencyRegTimer);
+
+        if (res.success) {
+          onClose();
+        } else {
+          setAuthError(res.message);
+        }
+      } catch (err: any) {
+        clearTimeout(emergencyRegTimer);
+        setAuthError('Ocorreu um erro no registo. Por favor tente novamente.');
+      } finally {
+        setIsSubmitting(false);
       }
     } else if (mode === 'forgot_password') {
       if (!forgotIdentifier.trim()) {

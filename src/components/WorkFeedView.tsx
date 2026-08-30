@@ -41,6 +41,124 @@ const AVAILABLE_REACTIONS = [
   { emoji: '⭐', label: 'Excelente' },
 ];
 
+const FeedPostMediaItem: React.FC<{ post: WorkFeedPost }> = ({ post }) => {
+  const [imageError, setImageError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    setImageError(false);
+    setIsLoading(true);
+    setRetryAttempt(0);
+    setIsRetrying(false);
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+  }, [post.mediaUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    };
+  }, []);
+
+  const handleImageError = () => {
+    setIsLoading(false);
+    // Automatic retry for transient cellular/network interruptions (up to 3 times)
+    if (retryAttempt < 3 && post.mediaUrl && !post.mediaUrl.startsWith('data:')) {
+      const nextAttempt = retryAttempt + 1;
+      setRetryAttempt(nextAttempt);
+      setIsRetrying(true);
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = setTimeout(() => {
+        setIsRetrying(false);
+        setIsLoading(true);
+        setImageError(false);
+      }, 1200 * nextAttempt);
+    } else {
+      setIsRetrying(false);
+      setImageError(true);
+    }
+  };
+
+  const handleManualRetry = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setImageError(false);
+    setIsLoading(true);
+    setIsRetrying(false);
+    setRetryAttempt(prev => prev + 1);
+  };
+
+  if (post.mediaType === 'video') {
+    return (
+      <div className="relative bg-slate-950 max-h-[500px] flex items-center justify-center overflow-hidden">
+        <video
+          src={post.mediaUrl}
+          controls
+          className="w-full max-h-[500px] object-contain"
+        />
+      </div>
+    );
+  }
+
+  if (imageError || !post.mediaUrl) {
+    return (
+      <div className="w-full min-h-[220px] bg-slate-900 border-y border-slate-800 flex flex-col items-center justify-center text-slate-300 p-6 text-center select-none">
+        <div className="w-12 h-12 rounded-2xl bg-emerald-950/80 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-2 shadow-lg">
+          <ImageIcon className="w-6 h-6" />
+        </div>
+        <span className="text-xs font-bold text-white max-w-sm line-clamp-1">{post.title || post.categoryName || 'Serviço Realizado'}</span>
+        <span className="text-[11px] text-slate-400 mt-0.5">Registo de trabalho por {post.professionalName}</span>
+        
+        {post.mediaUrl && (
+          <button
+            onClick={handleManualRetry}
+            className="mt-3 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Tentar recarregar foto</span>
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // Generate URL with cache-busting query parameter during retry attempts
+  const computedMediaUrl = (() => {
+    if (!post.mediaUrl) return '';
+    if (retryAttempt > 0 && !post.mediaUrl.startsWith('data:')) {
+      const sep = post.mediaUrl.includes('?') ? '&' : '?';
+      return `${post.mediaUrl}${sep}_r=${retryAttempt}`;
+    }
+    return post.mediaUrl;
+  })();
+
+  return (
+    <div className="relative bg-slate-950 max-h-[500px] min-h-[220px] flex items-center justify-center overflow-hidden">
+      {(isLoading || isRetrying) && (
+        <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center gap-2 z-10">
+          <Loader2 className="w-6 h-6 text-emerald-500 animate-spin" />
+          {isRetrying && (
+            <span className="text-[10px] text-slate-400 font-medium">A restabelecer ligação à foto...</span>
+          )}
+        </div>
+      )}
+      <img
+        src={computedMediaUrl}
+        alt={post.title || post.description}
+        onError={handleImageError}
+        onLoad={() => {
+          setIsLoading(false);
+          setIsRetrying(false);
+        }}
+        className={`w-full max-h-[500px] object-cover transition-opacity duration-300 ${isLoading || isRetrying ? 'opacity-0' : 'opacity-100'}`}
+        referrerPolicy="no-referrer"
+        loading="lazy"
+      />
+    </div>
+  );
+};
+
 export const WorkFeedView: React.FC = () => {
   const { 
     currentUser, 
@@ -54,8 +172,19 @@ export const WorkFeedView: React.FC = () => {
     professionals, 
     setSelectedPro, 
     triggerBlockedActionPrompt,
-    switchRole
+    switchRole,
+    forceSyncWithFirestore,
+    isSyncing,
+    syncStatus
   } = useApp();
+
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
+  const handleManualSync = async () => {
+    const res = await forceSyncWithFirestore();
+    setSyncFeedback(res.message);
+    setTimeout(() => setSyncFeedback(null), 3000);
+  };
 
   const [selectedCatFilter, setSelectedCatFilter] = useState<string>('Todas');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -202,6 +331,11 @@ export const WorkFeedView: React.FC = () => {
 
     setIsUploading(true);
 
+    // Fail-safe emergency timer: guarantees publication button is never stuck in "A processar..."
+    const emergencyTimer = setTimeout(() => {
+      setIsUploading(false);
+    }, 5500);
+
     try {
       // Se for um Data URL de imagem, fazer upload seguro no Firebase Storage
       if (finalMedia.startsWith('data:image/')) {
@@ -210,6 +344,8 @@ export const WorkFeedView: React.FC = () => {
           finalMedia = uploadRes.url;
         }
       }
+
+      clearTimeout(emergencyTimer);
 
       const matchedPro = professionals.find(p => p.id === currentUser.id) || (currentUser as ProfessionalProfile);
 
@@ -241,6 +377,7 @@ export const WorkFeedView: React.FC = () => {
         triggerBlockedActionPrompt(res.error);
       }
     } catch (err) {
+      clearTimeout(emergencyTimer);
       console.error('Erro ao submeter publicação:', err);
     } finally {
       setIsUploading(false);
@@ -317,6 +454,11 @@ export const WorkFeedView: React.FC = () => {
     setIsEditUploading(true);
     setEditFeedback(null);
 
+    // Fail-safe emergency timer for editing
+    const emergencyEditTimer = setTimeout(() => {
+      setIsEditUploading(false);
+    }, 5500);
+
     try {
       // Se o utilizador substituiu ou adicionou nova imagem via Data URL, faz upload para o Storage
       if (finalMedia.startsWith('data:image/')) {
@@ -325,6 +467,8 @@ export const WorkFeedView: React.FC = () => {
           finalMedia = uploadRes.url;
         }
       }
+
+      clearTimeout(emergencyEditTimer);
 
       // Encontrar ID da categoria se aplicável
       const matchedCat = categories.find(c => c.name === editCategoryName);
@@ -350,6 +494,7 @@ export const WorkFeedView: React.FC = () => {
         setEditFeedback({ type: 'error', message: result.message || 'Erro ao atualizar publicação.' });
       }
     } catch (err: any) {
+      clearTimeout(emergencyEditTimer);
       console.error('Erro ao salvar alterações da publicação:', err);
       setEditFeedback({ type: 'error', message: `Erro ao salvar alterações: ${err.message || err}` });
     } finally {
@@ -398,44 +543,58 @@ export const WorkFeedView: React.FC = () => {
             </p>
           </div>
 
-          {/* Botão de Ação: Publicar Trabalho */}
-          {isPro ? (
+          {/* Botões de Ação: Sincronizar e Publicar Trabalho */}
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
             <button
-              id="btn-publish-work-post"
-              onClick={handleOpenPublishModal}
-              className={`px-5 py-3 rounded-2xl font-black text-xs transition-all flex items-center gap-2 shadow-lg shrink-0 ${
-                currentUserPlan.isActive
-                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30 active:scale-95'
-                  : 'bg-amber-500/90 hover:bg-amber-500 text-slate-950 shadow-amber-500/30'
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className={`p-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/15 transition-all flex items-center gap-1.5 shrink-0 ${
+                isSyncing ? 'opacity-70 cursor-wait' : 'active:scale-95'
               }`}
+              title="Sincronizar publicações com a base de dados em tempo real"
             >
-              {currentUserPlan.isActive ? (
-                <>
-                  <Plus className="w-4 h-4 stroke-[3]" />
-                  <span>Publicar Novo Trabalho</span>
-                </>
-              ) : (
-                <>
-                  <Lock className="w-4 h-4 stroke-[3]" />
-                  <span>Publicação Bloqueada (Escolher Plano)</span>
-                </>
-              )}
+              <RefreshCw className={`w-4 h-4 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{isSyncing ? 'A sincronizar...' : 'Atualizar'}</span>
             </button>
-          ) : currentUser.accountType === 'duplo' ? (
-            <button
-              onClick={() => switchRole('profissional')}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-4 py-2.5 rounded-2xl transition-all shadow-md flex items-center gap-1.5 shrink-0"
-              title="Mudar para Modo Profissional para criar publicações de serviços"
-            >
-              <ArrowRightLeft className="w-4 h-4 shrink-0" />
-              <span>Mudar p/ Modo Pro e Publicar</span>
-            </button>
-          ) : (
-            <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/15 text-xs text-emerald-200 flex items-center gap-2 shrink-0">
-              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>Garantia de Qualidade J Smart Services</span>
-            </div>
-          )}
+
+            {isPro ? (
+              <button
+                id="btn-publish-work-post"
+                onClick={handleOpenPublishModal}
+                className={`px-5 py-3 rounded-2xl font-black text-xs transition-all flex items-center gap-2 shadow-lg shrink-0 ${
+                  currentUserPlan.isActive
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30 active:scale-95'
+                    : 'bg-amber-500/90 hover:bg-amber-500 text-slate-950 shadow-amber-500/30'
+                }`}
+              >
+                {currentUserPlan.isActive ? (
+                  <>
+                    <Plus className="w-4 h-4 stroke-[3]" />
+                    <span>Publicar Novo Trabalho</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4 stroke-[3]" />
+                    <span>Publicação Bloqueada (Escolher Plano)</span>
+                  </>
+                )}
+              </button>
+            ) : currentUser.accountType === 'duplo' ? (
+              <button
+                onClick={() => switchRole('profissional')}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-4 py-2.5 rounded-2xl transition-all shadow-md flex items-center gap-1.5 shrink-0"
+                title="Mudar para Modo Profissional para criar publicações de serviços"
+              >
+                <ArrowRightLeft className="w-4 h-4 shrink-0" />
+                <span>Mudar p/ Modo Pro e Publicar</span>
+              </button>
+            ) : (
+              <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/15 text-xs text-emerald-200 flex items-center gap-2 shrink-0">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Garantia de Qualidade J Smart Services</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -671,23 +830,8 @@ export const WorkFeedView: React.FC = () => {
                   )}
                 </div>
 
-                {/* Secção de Mídia: Fotografia ou Vídeo Real */}
-                <div className="relative bg-slate-950 max-h-[500px] flex items-center justify-center overflow-hidden">
-                  {post.mediaType === 'video' ? (
-                    <video
-                      src={post.mediaUrl}
-                      controls
-                      className="w-full max-h-[500px] object-contain"
-                    />
-                  ) : (
-                    <img
-                      src={post.mediaUrl}
-                      alt={post.title || post.description}
-                      className="w-full max-h-[500px] object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  )}
-                </div>
+                {/* Secção de Mídia: Fotografia ou Vídeo Real com Fallback Resiliente */}
+                <FeedPostMediaItem post={post} />
 
                 {/* Descrição, Título, Preço e Barra de Ações */}
                 <div className="p-4 space-y-3">
