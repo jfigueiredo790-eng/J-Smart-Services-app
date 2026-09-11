@@ -135,7 +135,8 @@ interface AppContextType {
   workFeedPosts: WorkFeedPost[];
 
   // Work Feed & Subscription Prompt Actions
-  addWorkFeedPost: (post: Omit<WorkFeedPost, 'id' | 'createdAt' | 'likesCount' | 'likedBy'>) => { success: boolean; error?: string };
+  addWorkFeedPost: (post: Omit<WorkFeedPost, 'id' | 'createdAt' | 'likesCount' | 'likedBy'>) => { success: boolean; post?: WorkFeedPost; error?: string };
+  refreshWorkFeed: () => Promise<{ success: boolean; message: string }>;
   updateWorkFeedPost: (
     postId: string,
     updatedData: Partial<Pick<WorkFeedPost, 'title' | 'description' | 'categoryName' | 'categoryId' | 'mediaUrl' | 'mediaType' | 'mediaUrls' | 'location' | 'priceKz'>>
@@ -677,7 +678,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     } catch (e) {}
 
-    return { success: true };
+    return { success: true, post: newPost };
   };
 
   const likeWorkFeedPost = (postId: string, reactionEmoji: string = '❤️') => {
@@ -1356,152 +1357,174 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
 
       const syncTask = async () => {
-        // 1. Sync Categories
-        try {
-          const catSnap = await getDocs(collection(db, 'categories'));
-          if (!catSnap.empty) {
-            const fsCats: ServiceCategory[] = [];
-            catSnap.forEach(d => {
-              const data = d.data();
-              const items = data.items || data.subcategories || [];
-              fsCats.push({
-                id: d.id,
-                name: data.name || d.id,
-                iconName: data.iconName || 'Briefcase',
-                description: data.description || '',
-                popularCount: data.popularCount ?? 100,
-                color: data.color || 'emerald',
-                group: data.group || 'Casa & Manutenção',
-                items,
-                subcategories: items,
-                imageUrl: data.imageUrl || '',
-                isActive: data.isActive !== false,
-                ownerId: data.ownerId || '',
-                createdAt: data.createdAt || new Date().toISOString(),
-                updatedAt: data.updatedAt || new Date().toISOString()
+        // 1. Task: Sync Categories
+        const syncCategoriesTask = async () => {
+          try {
+            const catSnap = await getDocs(collection(db, 'categories'));
+            if (!catSnap.empty) {
+              const fsCats: ServiceCategory[] = [];
+              catSnap.forEach(d => {
+                const data = d.data();
+                const items = data.items || data.subcategories || [];
+                fsCats.push({
+                  id: d.id,
+                  name: data.name || d.id,
+                  iconName: data.iconName || 'Briefcase',
+                  description: data.description || '',
+                  popularCount: data.popularCount ?? 100,
+                  color: data.color || 'emerald',
+                  group: data.group || 'Casa & Manutenção',
+                  items,
+                  subcategories: items,
+                  imageUrl: data.imageUrl || '',
+                  isActive: data.isActive !== false,
+                  ownerId: data.ownerId || '',
+                  createdAt: data.createdAt || new Date().toISOString(),
+                  updatedAt: data.updatedAt || new Date().toISOString()
+                });
               });
-            });
-            setCategories(prev => {
-              const fsMap = new Map(fsCats.map(c => [c.id, c]));
-              const merged = [...fsCats];
-              CATEGORIES.forEach(defaultCat => {
-                if (!fsMap.has(defaultCat.id)) {
-                  merged.push({ ...defaultCat, isActive: defaultCat.isActive !== false, subcategories: defaultCat.items || [] });
+              setCategories(prev => {
+                const fsMap = new Map(fsCats.map(c => [c.id, c]));
+                const merged = [...fsCats];
+                CATEGORIES.forEach(defaultCat => {
+                  if (!fsMap.has(defaultCat.id)) {
+                    merged.push({ ...defaultCat, isActive: defaultCat.isActive !== false, subcategories: defaultCat.items || [] });
+                  }
+                });
+                return merged;
+              });
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar categorias:', e);
+          }
+        };
+
+        // 2. Task: Sync Users
+        const syncUsersTask = async () => {
+          try {
+            const usersSnap = await getDocs(collection(db, 'users'));
+            if (!usersSnap.empty) {
+              const fsUsers: User[] = [];
+              usersSnap.forEach(d => {
+                const raw = d.data();
+                const photo = raw.avatar || raw.photoURL || raw.profilePhoto || raw.profileImage || '';
+                const isBlocked = raw.blocked === true || raw.status === 'bloqueado';
+                const uData = {
+                  id: d.id,
+                  ...raw,
+                  avatar: photo,
+                  photoURL: photo,
+                  verified: isBlocked ? false : (raw.verified ?? true),
+                  documentsVerified: isBlocked ? false : (raw.documentsVerified ?? true),
+                  isAutoApproved: isBlocked ? false : (raw.isAutoApproved ?? true),
+                  accountType: raw.accountType || (raw.role === 'profissional' ? 'duplo' : 'cliente')
+                } as unknown as User;
+                if (!isFictitiousOrInvalidUser(uData)) {
+                  fsUsers.push(uData);
                 }
               });
-              return merged;
-            });
+              setAllUsers(prev => {
+                const fsIds = new Set(fsUsers.map(u => u.id));
+                const existingNonFs = prev.filter(u => !fsIds.has(u.id) && !isFictitiousOrInvalidUser(u));
+                const combined = [...fsUsers, ...existingNonFs];
+                if (!combined.some(u => u.id === 'user-admin-1' || u.email === 'jfigueiredo790@gmail.com')) {
+                  combined.unshift(DEFAULT_ADMIN_USER);
+                }
+                return combined;
+              });
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar utilizadores:', e);
           }
-        } catch (e) {
-          console.warn('Erro ao sincronizar categorias:', e);
-        }
+        };
 
-        // 2. Sync Users
-        try {
-          const usersSnap = await getDocs(collection(db, 'users'));
-          if (!usersSnap.empty) {
-            const fsUsers: User[] = [];
-            usersSnap.forEach(d => {
-              const raw = d.data();
-              const photo = raw.avatar || raw.photoURL || raw.profilePhoto || raw.profileImage || '';
-              const isBlocked = raw.blocked === true || raw.status === 'bloqueado';
-              const uData = {
-                id: d.id,
-                ...raw,
-                avatar: photo,
-                photoURL: photo,
-                verified: isBlocked ? false : (raw.verified ?? true),
-                documentsVerified: isBlocked ? false : (raw.documentsVerified ?? true),
-                isAutoApproved: isBlocked ? false : (raw.isAutoApproved ?? true),
-                accountType: raw.accountType || (raw.role === 'profissional' ? 'duplo' : 'cliente')
-              } as unknown as User;
-              if (!isFictitiousOrInvalidUser(uData)) {
-                fsUsers.push(uData);
-              }
-            });
-            setAllUsers(prev => {
-              const fsIds = new Set(fsUsers.map(u => u.id));
-              const existingNonFs = prev.filter(u => !fsIds.has(u.id) && !isFictitiousOrInvalidUser(u));
-              const combined = [...fsUsers, ...existingNonFs];
-              if (!combined.some(u => u.id === 'user-admin-1' || u.email === 'jfigueiredo790@gmail.com')) {
-                combined.unshift(DEFAULT_ADMIN_USER);
-              }
-              return combined;
-            });
+        // 3. Task: Sync Professionals
+        const syncProfessionalsTask = async () => {
+          try {
+            const prosSnap = await getDocs(collection(db, 'professionals'));
+            if (!prosSnap.empty) {
+              const fsPros: ProfessionalProfile[] = [];
+              prosSnap.forEach(d => {
+                const raw = d.data();
+                const photo = raw.avatar || raw.photoURL || raw.profilePhoto || raw.profileImage || '';
+                const isBlocked = raw.blocked === true || raw.status === 'bloqueado';
+                const pData = {
+                  id: d.id,
+                  ...raw,
+                  avatar: photo,
+                  photoURL: photo,
+                  verified: isBlocked ? false : (raw.verified ?? true),
+                  documentsVerified: isBlocked ? false : (raw.documentsVerified ?? true),
+                  isAutoApproved: isBlocked ? false : (raw.isAutoApproved ?? true),
+                  status: isBlocked ? 'bloqueado' : (raw.status || 'disponivel'),
+                  accountType: raw.accountType || 'duplo',
+                  categories: Array.isArray(raw.categories) ? raw.categories : []
+                } as unknown as ProfessionalProfile;
+                if (!isFictitiousOrInvalidUser(pData) && !pData.isDeleted && pData.status !== 'deleted') {
+                  fsPros.push(pData);
+                }
+              });
+              setProfessionals(prev => {
+                const fsIds = new Set(fsPros.map(p => p.id));
+                const existingNonFs = prev.filter(p => !fsIds.has(p.id) && !isFictitiousOrInvalidUser(p) && !p.isDeleted && p.status !== 'deleted');
+                return [...fsPros, ...existingNonFs];
+              });
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar profissionais:', e);
           }
-        } catch (e) {
-          console.warn('Erro ao sincronizar utilizadores:', e);
-        }
+        };
 
-        // 3. Sync Professionals
-        try {
-          const prosSnap = await getDocs(collection(db, 'professionals'));
-          if (!prosSnap.empty) {
-            const fsPros: ProfessionalProfile[] = [];
-            prosSnap.forEach(d => {
-              const raw = d.data();
-              const photo = raw.avatar || raw.photoURL || raw.profilePhoto || raw.profileImage || '';
-              const isBlocked = raw.blocked === true || raw.status === 'bloqueado';
-              const pData = {
-                id: d.id,
-                ...raw,
-                avatar: photo,
-                photoURL: photo,
-                verified: isBlocked ? false : (raw.verified ?? true),
-                documentsVerified: isBlocked ? false : (raw.documentsVerified ?? true),
-                isAutoApproved: isBlocked ? false : (raw.isAutoApproved ?? true),
-                status: isBlocked ? 'bloqueado' : (raw.status || 'disponivel'),
-                accountType: raw.accountType || 'duplo',
-                categories: Array.isArray(raw.categories) ? raw.categories : []
-              } as unknown as ProfessionalProfile;
-              if (!isFictitiousOrInvalidUser(pData) && !pData.isDeleted && pData.status !== 'deleted') {
-                fsPros.push(pData);
-              }
-            });
-            setProfessionals(prev => {
-              const fsIds = new Set(fsPros.map(p => p.id));
-              const existingNonFs = prev.filter(p => !fsIds.has(p.id) && !isFictitiousOrInvalidUser(p) && !p.isDeleted && p.status !== 'deleted');
-              return [...fsPros, ...existingNonFs];
-            });
+        // 4. Task: Sync Work Feed Posts
+        const syncFeedTask = async () => {
+          try {
+            const feedSnap = await getDocs(collection(db, 'work_feed_posts'));
+            if (!feedSnap.empty) {
+              const fsFeed: WorkFeedPost[] = [];
+              feedSnap.forEach(d => {
+                const pData = { id: d.id, ...d.data() } as WorkFeedPost;
+                if (!FICTITIOUS_MOCK_IDS.has(pData.id) && !FICTITIOUS_MOCK_IDS.has(pData.professionalId)) {
+                  fsFeed.push(pData);
+                }
+              });
+              setWorkFeedPosts(prev => {
+                const fsIds = new Set(fsFeed.map(f => f.id));
+                const existingNonFs = prev.filter(f => !fsIds.has(f.id) && !FICTITIOUS_MOCK_IDS.has(f.id));
+                const merged = [...fsFeed, ...existingNonFs];
+                const sanitized = sanitizeFeedPostsForStorage(merged);
+                safeStorageSet(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(sanitized));
+                return merged;
+              });
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar feed:', e);
           }
-        } catch (e) {
-          console.warn('Erro ao sincronizar profissionais:', e);
-        }
+        };
 
-        // 4. Sync Work Feed Posts
-        try {
-          const feedSnap = await getDocs(collection(db, 'work_feed_posts'));
-          if (!feedSnap.empty) {
-            const fsFeed: WorkFeedPost[] = [];
-            feedSnap.forEach(d => {
-              const pData = { id: d.id, ...d.data() } as WorkFeedPost;
-              if (!FICTITIOUS_MOCK_IDS.has(pData.id) && !FICTITIOUS_MOCK_IDS.has(pData.professionalId)) {
-                fsFeed.push(pData);
-              }
-            });
-            setWorkFeedPosts(prev => {
-              const fsIds = new Set(fsFeed.map(f => f.id));
-              const existingNonFs = prev.filter(f => !fsIds.has(f.id) && !FICTITIOUS_MOCK_IDS.has(f.id));
-              return [...fsFeed, ...existingNonFs];
-            });
+        // 5. Task: Sync Service Requests
+        const syncRequestsTask = async () => {
+          try {
+            const reqSnap = await getDocs(collection(db, 'service_requests'));
+            if (!reqSnap.empty) {
+              const fsReqs: ServiceRequest[] = [];
+              reqSnap.forEach(d => {
+                fsReqs.push({ id: d.id, ...d.data() } as ServiceRequest);
+              });
+              setRequests(fsReqs);
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar pedidos:', e);
           }
-        } catch (e) {
-          console.warn('Erro ao sincronizar feed:', e);
-        }
+        };
 
-        // 5. Sync Service Requests
-        try {
-          const reqSnap = await getDocs(collection(db, 'service_requests'));
-          if (!reqSnap.empty) {
-            const fsReqs: ServiceRequest[] = [];
-            reqSnap.forEach(d => {
-              fsReqs.push({ id: d.id, ...d.data() } as ServiceRequest);
-            });
-            setRequests(fsReqs);
-          }
-        } catch (e) {
-          console.warn('Erro ao sincronizar pedidos:', e);
-        }
+        // Run all queries concurrently in parallel instead of slow sequential waterfall
+        await Promise.allSettled([
+          syncCategoriesTask(),
+          syncUsersTask(),
+          syncProfessionalsTask(),
+          syncFeedTask(),
+          syncRequestsTask()
+        ]);
 
         return { timeout: false };
       };
@@ -1524,10 +1547,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Reconnect and sync automatically when tab gains focus or visibility returns
+  // Fast & dedicated Work Feed refresh: queries ONLY work_feed_posts with safety timeout
+  const refreshWorkFeed = async (): Promise<{ success: boolean; message: string }> => {
+    if (!navigator.onLine) {
+      return { success: false, message: 'Sem ligação à Internet. Publicações em cache local mantidas.' };
+    }
+
+    try {
+      const timeoutPromise = new Promise<{ timeout: true }>((resolve) => 
+        setTimeout(() => resolve({ timeout: true }), 3500)
+      );
+
+      const fetchTask = async () => {
+        const feedSnap = await getDocs(collection(db, 'work_feed_posts'));
+        if (!feedSnap.empty) {
+          const fsFeed: WorkFeedPost[] = [];
+          feedSnap.forEach(d => {
+            const pData = { id: d.id, ...d.data() } as WorkFeedPost;
+            if (!FICTITIOUS_MOCK_IDS.has(pData.id) && !FICTITIOUS_MOCK_IDS.has(pData.professionalId)) {
+              fsFeed.push(pData);
+            }
+          });
+          setWorkFeedPosts(prev => {
+            const fsIds = new Set(fsFeed.map(f => f.id));
+            const existingNonFs = prev.filter(f => !fsIds.has(f.id) && !FICTITIOUS_MOCK_IDS.has(f.id));
+            const merged = [...fsFeed, ...existingNonFs];
+            const sanitized = sanitizeFeedPostsForStorage(merged);
+            safeStorageSet(`${LOCAL_STORAGE_KEY}_feed_posts`, JSON.stringify(sanitized));
+            return merged;
+          });
+          return { timeout: false, count: fsFeed.length };
+        }
+        return { timeout: false, count: 0 };
+      };
+
+      const result = await Promise.race([fetchTask(), timeoutPromise]);
+      if ((result as any)?.timeout) {
+        return { success: true, message: 'Feed atualizado (resposta rápida da cache local).' };
+      }
+      return { success: true, message: 'Feed de trabalhos atualizado em tempo real!' };
+    } catch (err: any) {
+      console.warn('Aviso ao atualizar feed:', err);
+      return { success: false, message: 'Não foi possível ligar ao servidor. Publicações locais mantidas.' };
+    }
+  };
+
+  // Reconnect and sync automatically when tab gains focus or visibility returns (with 60s cooldown)
   useEffect(() => {
+    let lastFocusSync = 0;
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) {
+      const now = Date.now();
+      if (document.visibilityState === 'visible' && navigator.onLine && (now - lastFocusSync > 60000)) {
+        lastFocusSync = now;
         forceSyncWithFirestore();
       }
     };
@@ -4342,7 +4413,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'cabeleir', 'tranc', 'cabelo', 'unha', 'manicure', 'estetica', 'limpeza', 'faxina',
       'pedreir', 'obra', 'mecanic', 'mecanico', 'costur', 'alfaiat', 'fotograf', 'filmagem',
       'motorista', 'transporte', 'mudanca', 'cozinha', 'chef', 'doce', 'bolo', 'buffet',
-      'seguranca', 'vigilante', 'tatuad', 'barbeir', 'serralh', 'marceneir', 'moveis', 'estofad'
+      'seguranca', 'vigilante', 'tatuad', 'barbeir', 'serralh', 'marceneir', 'moveis', 'estofad',
+      'elevador', 'atendimento', 'recepcao'
     ];
 
     let fixedCount = 0;
@@ -4843,6 +4915,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isSyncing: syncStatus === 'syncing',
       lastSyncTimestamp,
       forceSyncWithFirestore,
+      refreshWorkFeed,
       isLoggedIn,
       setIsLoggedIn,
       loginUser,

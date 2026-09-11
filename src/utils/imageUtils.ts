@@ -44,11 +44,52 @@ export const getUserInitials = (name?: string): string => {
  * Guaranteed to NEVER hang with an internal timeout fallback.
  * Converts large Megapixel photos into optimized JPEG Data URLs (~15KB-35KB for avatars).
  */
-export const compressImageFile = (
+export const compressImageFile = async (
   file: File, 
   maxDimension = 500, 
   quality = 0.80
 ): Promise<string> => {
+  // Fast path: use native createImageBitmap if supported (skips intermediate FileReader base64 overhead)
+  if (typeof window !== 'undefined' && 'createImageBitmap' in window) {
+    try {
+      const bitmap = await createImageBitmap(file);
+      let width = bitmap.width;
+      let height = bitmap.height;
+
+      if (width > 0 && height > 0) {
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.max(1, Math.round((height * maxDimension) / width));
+            width = maxDimension;
+          } else {
+            width = Math.max(1, Math.round((width * maxDimension) / height));
+            height = maxDimension;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, width);
+        canvas.height = Math.max(1, height);
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(bitmap, 0, 0, width, height);
+          if (typeof bitmap.close === 'function') {
+            bitmap.close();
+          }
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          if (compressed && compressed.startsWith('data:image/jpeg')) {
+            return compressed;
+          }
+        }
+      }
+    } catch (bitmapErr) {
+      // Fall through to FileReader fallback if bitmap decoding fails on certain custom camera formats
+    }
+  }
+
+  // Robust fallback: FileReader + HTMLImageElement with safety timeout
   return new Promise((resolve) => {
     // Safety fail-safe timeout: never let the app hang on slow or non-responsive mobile decoders
     const safetyTimeout = setTimeout(() => {
@@ -58,7 +99,7 @@ export const compressImageFile = (
       fallbackReader.onload = () => resolve((fallbackReader.result as string) || '');
       fallbackReader.onerror = () => resolve('');
       fallbackReader.readAsDataURL(file);
-    }, 4000);
+    }, 3000);
 
     const cleanupAndResolve = (result: string) => {
       clearTimeout(safetyTimeout);
@@ -85,7 +126,6 @@ export const compressImageFile = (
 
         img.onerror = () => {
           console.warn('Formato de imagem não decodificado pelo Image(), usando fallback direto');
-          // If Image() fails to decode (e.g. rare format), return the original dataUrl
           cleanupAndResolve(dataUrl);
         };
 
@@ -169,7 +209,7 @@ export const uploadProfilePhotoToStorage = async (
       }
       compressedDataUrl = fileOrDataUrl;
     } else {
-      compressedDataUrl = await compressImageFile(fileOrDataUrl, 450, 0.80);
+      compressedDataUrl = await compressImageFile(fileOrDataUrl, 380, 0.76);
     }
 
     if (!compressedDataUrl || !compressedDataUrl.startsWith('data:image/')) {
@@ -249,7 +289,7 @@ export const uploadWorkPostImageToStorage = async (
       }
       compressedDataUrl = fileOrDataUrl;
     } else {
-      compressedDataUrl = await compressImageFile(fileOrDataUrl, 1000, 0.82);
+      compressedDataUrl = await compressImageFile(fileOrDataUrl, 900, 0.78);
     }
 
     if (!compressedDataUrl || !compressedDataUrl.startsWith('data:image/')) {

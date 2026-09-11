@@ -836,6 +836,80 @@ export const CATEGORIES: ServiceCategory[] = [
     ]
   },
 
+  // --- Elevadores & Manutenção Técnica ---
+  {
+    id: 'tecnico-elevador',
+    name: 'Técnico de Elevador',
+    iconName: 'ArrowUpDown',
+    description: 'Profissionais especializados em manutenção, diagnóstico e assistência técnica de elevadores',
+    popularCount: 1420,
+    color: 'emerald',
+    group: 'Casa & Manutenção',
+    items: [
+      'Manutenção Preventiva e Inspeção Periódica de Elevadores',
+      'Diagnóstico de Avarias e Falhas Mecânicas / Elétricas',
+      'Assistência Técnica Especializada e Conservação',
+      'Manutenção de Quadros de Comando, Sensores e Inversores',
+      'Lubrificação, Afinação e Ajuste de Cabos de Tração e Guias',
+      'Assistência e Certificação Técnica de Monta-Cargas'
+    ]
+  },
+  {
+    id: 'reparacao-elevadores',
+    name: 'Reparação de Elevadores',
+    iconName: 'Wrench',
+    description: 'Profissionais e empresas que realizam reparação, manutenção e assistência de elevadores',
+    popularCount: 1560,
+    color: 'teal',
+    group: 'Casa & Manutenção',
+    items: [
+      'Reparação Corretiva Urgente de Elevadores Avariados',
+      'Substituição de Cabos de Tração, Roldanas e Travões',
+      'Reparação e Troca de Motores de Tração e Redutores',
+      'Reparação de Portas de Pavimento e Cabina Automática',
+      'Modernização de Elevadores e Atualização Tecnológica',
+      'Reparação de Monta-Cargas e Plataformas Elevatórias'
+    ]
+  },
+
+  // --- Atendimento & Receção ---
+  {
+    id: 'atendimento-publico',
+    name: 'Atendimento ao Público',
+    iconName: 'Headphones',
+    description: 'Profissionais que trabalham com atendimento, recepção, apoio ao cliente e funções relacionadas',
+    popularCount: 1740,
+    color: 'blue',
+    group: 'Gestão & Negócios',
+    items: [
+      'Rececionista e Acolhimento Presencial de Visitantes',
+      'Apoio e Atendimento ao Cliente (SAC e Call Center)',
+      'Atendimento em Balcão e Caixa Comercial',
+      'Apoio ao Cliente em Clínicas, Hotéis e Empresas',
+      'Secretariado, Triagem e Encaminhamento de Processos',
+      'Apoio ao Cliente Digital, Chat e Redes Sociais'
+    ]
+  },
+
+  // --- Segurança & Vigilância ---
+  {
+    id: 'seguranca-eventos',
+    name: 'Segurança para Eventos',
+    iconName: 'ShieldCheck',
+    description: 'Profissionais de segurança que prestam serviços em eventos, festas, cerimónias, conferências e outras atividades',
+    popularCount: 1890,
+    color: 'emerald',
+    group: 'Eventos',
+    items: [
+      'Segurança e Vigilância para Festas Privadas e Aniversários',
+      'Segurança e Controlo de Acessos para Casamentos e Cerimónias',
+      'Controlo de Portaria, Revista e Check-in VIP',
+      'Segurança para Conferências, Congressos e Feiras Corporativas',
+      'Segurança para Festivais, Shows Musicais e Grandes Eventos',
+      'Prevenção, Gestão de Conflitos e Escolta em Eventos'
+    ]
+  },
+
   // --- Pedido Personalizado / Outro Serviço ---
   {
     id: 'pedido-personalizado',

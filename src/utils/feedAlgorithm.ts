@@ -130,6 +130,8 @@ export function rankWorkFeedPosts(
     return post.categoryName?.toLowerCase() === selectedCategoryFilter.toLowerCase();
   });
 
+  if (filtered.length === 0) return [];
+
   // Garantir unicidade estrita de publicações (sem duplicados por ID)
   const uniquePostsMap = new Map<string, WorkFeedPost>();
   filtered.forEach(p => {
@@ -140,29 +142,119 @@ export function rankWorkFeedPosts(
 
   const uniquePosts = Array.from(uniquePostsMap.values());
 
-  // Ordenar pelo algoritmo de score
-  return uniquePosts.sort((a, b) => {
-    const scoreA = calculateFeedScore({
-      post: a,
-      currentUser,
-      professionals,
-      selectedCategoryFilter
-    });
-
-    const scoreB = calculateFeedScore({
-      post: b,
-      currentUser,
-      professionals,
-      selectedCategoryFilter
-    });
-
-    // Em caso de pontuações muito próximas, priorizar a data mais recente
-    if (Math.abs(scoreB - scoreA) < 0.001) {
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    }
-
-    return scoreB - scoreA;
+  // O(1) Professional lookup map para evitar buscas repetidas no array durante ordenação
+  const proMap = new Map<string, ProfessionalProfile>();
+  professionals.forEach(p => {
+    if (p && p.id) proMap.set(p.id, p);
   });
+
+  // Pré-computar scores e timestamps uma única vez por post (Transformada de Schwartzian)
+  const scoredPosts = uniquePosts.map(post => {
+    const pro = proMap.get(post.professionalId);
+    const score = calculateFeedScoreFast({
+      post,
+      currentUser,
+      pro,
+      selectedCategoryFilter
+    });
+    const timestamp = new Date(post.createdAt).getTime() || 0;
+    return { post, score, timestamp };
+  });
+
+  // Ordenar pelos scores pré-calculados
+  scoredPosts.sort((a, b) => {
+    if (Math.abs(b.score - a.score) < 0.001) {
+      return b.timestamp - a.timestamp;
+    }
+    return b.score - a.score;
+  });
+
+  return scoredPosts.map(item => item.post);
+}
+
+export interface FeedRankingFastParams {
+  post: WorkFeedPost;
+  currentUser?: User | null;
+  pro?: ProfessionalProfile | null;
+  selectedCategoryFilter?: string;
+}
+
+export function calculateFeedScoreFast(params: FeedRankingFastParams): number {
+  const { post, currentUser, pro, selectedCategoryFilter } = params;
+  const proPlan = pro ? getProPlanStatus(pro) : null;
+
+  // Se a conta do profissional estiver bloqueada pelo Administrador, não pontuar
+  if (pro?.blocked === true || (pro as any)?.accountStatus === 'BLOCKED') {
+    return -99999;
+  }
+
+  // 1. Recência da publicação
+  const now = Date.now();
+  const postTime = new Date(post.createdAt).getTime();
+  const diffHours = Math.max(0, (now - postTime) / (1000 * 60 * 60));
+  
+  // Decaimento suave da recência: 
+  const recencyScore = 100 / (1 + (diffHours / 24));
+
+  // 2. Relevância da categoria para o utilizador
+  let categoryScore = 0;
+  if (selectedCategoryFilter && selectedCategoryFilter !== 'Todas') {
+    if (post.categoryName?.toLowerCase() === selectedCategoryFilter.toLowerCase()) {
+      categoryScore += 75;
+    }
+  } else if (currentUser?.categories && currentUser.categories.length > 0) {
+    if (currentUser.categories.includes(post.categoryName)) {
+      categoryScore += 40;
+    }
+  }
+
+  // 3. Localização aproximada (Província)
+  let locationScore = 0;
+  const userProvince = currentUser?.province?.toLowerCase();
+  const proProvince = pro?.province?.toLowerCase();
+  if (userProvince && proProvince && userProvince === proProvince && userProvince !== 'todas') {
+    locationScore += 30;
+  }
+
+  // 4. Interações com a publicação (Gostos)
+  const likes = post.likesCount || (post.likedBy?.length || 0);
+  const interactionScore = Math.min(likes * 6, 60);
+
+  // 5. Qualidade do conteúdo & Verificação
+  let qualityScore = 0;
+  if (post.description && post.description.trim().length >= 35) {
+    qualityScore += 15;
+  }
+  if (post.mediaUrl && post.mediaUrl.trim().length > 0) {
+    qualityScore += 15;
+  }
+  if (post.professionalVerified || pro?.verified) {
+    qualityScore += 20;
+  }
+
+  // 6. Disponibilidade do profissional
+  let availabilityScore = 0;
+  if (pro?.status === 'disponivel') {
+    availabilityScore += 20;
+  } else if (pro?.status === 'ocupado') {
+    availabilityScore += 5;
+  }
+
+  // 7. Estado da subscrição do profissional
+  let subscriptionScore = 0;
+  if (proPlan?.isActive) {
+    subscriptionScore += 35;
+  } else {
+    subscriptionScore -= 10;
+  }
+
+  return (recencyScore * 2.2)
+    + categoryScore
+    + locationScore
+    + interactionScore
+    + qualityScore
+    + availabilityScore
+    + subscriptionScore;
 }
 
 /**

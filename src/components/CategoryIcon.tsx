@@ -52,7 +52,11 @@ import {
   Volume2,
   Shirt,
   Navigation,
-  Compass
+  Compass,
+  ArrowUpDown,
+  Headphones,
+  ShieldCheck,
+  UserCheck
 } from 'lucide-react';
 
 interface CategoryIconProps {
@@ -163,6 +167,16 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({ name, className = "w
       return <Navigation className={className} />;
     case 'Compass':
       return <Compass className={className} />;
+    case 'Shield':
+      return <Shield className={className} />;
+    case 'ShieldCheck':
+      return <ShieldCheck className={className} />;
+    case 'ArrowUpDown':
+      return <ArrowUpDown className={className} />;
+    case 'Headphones':
+      return <Headphones className={className} />;
+    case 'UserCheck':
+      return <UserCheck className={className} />;
     default:
       return <Briefcase className={className} />;
   }

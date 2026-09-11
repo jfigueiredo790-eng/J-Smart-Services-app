@@ -142,7 +142,14 @@ function MainContent() {
         const matchName = pro.name.toLowerCase().includes(q);
         const matchBio = pro.bio.toLowerCase().includes(q);
         const matchCity = (pro.city || '').toLowerCase().includes(q);
-        if (!matchName && !matchBio && !matchCity) return false;
+        const matchCategory = pro.categories.some(catId => {
+          const cat = categories.find(c => c.id === catId);
+          return cat && (
+            cat.name.toLowerCase().includes(q) ||
+            (cat.items && cat.items.some(item => item.toLowerCase().includes(q)))
+          );
+        });
+        if (!matchName && !matchBio && !matchCity && !matchCategory) return false;
       }
 
       return true;

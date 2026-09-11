@@ -56,15 +56,15 @@ export const sanitizeFeedPostsForStorage = <T extends any[]>(posts: T): any[] =>
     if (!item || typeof item !== 'object') return item;
     const clean = { ...item };
     
-    // If mediaUrl is an oversized base64 data url (> 20KB), avoid storing giant string in localStorage
-    if (typeof clean.mediaUrl === 'string' && clean.mediaUrl.startsWith('data:image/') && clean.mediaUrl.length > 25000) {
+    // If mediaUrl is an oversized base64 data url (> ~75KB), avoid storing giant string in localStorage
+    if (typeof clean.mediaUrl === 'string' && clean.mediaUrl.startsWith('data:image/') && clean.mediaUrl.length > 95000) {
       // Keep a notice or truncated reference; Firestore contains the true data
       clean.mediaUrl = '';
     }
-    if (typeof clean.beforeImageUrl === 'string' && clean.beforeImageUrl.startsWith('data:image/') && clean.beforeImageUrl.length > 25000) {
+    if (typeof clean.beforeImageUrl === 'string' && clean.beforeImageUrl.startsWith('data:image/') && clean.beforeImageUrl.length > 95000) {
       clean.beforeImageUrl = '';
     }
-    if (typeof clean.afterImageUrl === 'string' && clean.afterImageUrl.startsWith('data:image/') && clean.afterImageUrl.length > 25000) {
+    if (typeof clean.afterImageUrl === 'string' && clean.afterImageUrl.startsWith('data:image/') && clean.afterImageUrl.length > 95000) {
       clean.afterImageUrl = '';
     }
     return clean;

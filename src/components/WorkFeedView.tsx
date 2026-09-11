@@ -173,17 +173,24 @@ export const WorkFeedView: React.FC = () => {
     setSelectedPro, 
     triggerBlockedActionPrompt,
     switchRole,
-    forceSyncWithFirestore,
+    refreshWorkFeed,
     isSyncing,
     syncStatus
   } = useApp();
 
+  const [isRefreshingFeed, setIsRefreshingFeed] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
-  const handleManualSync = async () => {
-    const res = await forceSyncWithFirestore();
-    setSyncFeedback(res.message);
-    setTimeout(() => setSyncFeedback(null), 3000);
+  const handleRefreshFeed = async () => {
+    if (isRefreshingFeed) return;
+    setIsRefreshingFeed(true);
+    try {
+      const res = await refreshWorkFeed();
+      setSyncFeedback(res.message);
+      setTimeout(() => setSyncFeedback(null), 3000);
+    } finally {
+      setIsRefreshingFeed(false);
+    }
   };
 
   const [selectedCatFilter, setSelectedCatFilter] = useState<string>('Todas');
@@ -295,7 +302,7 @@ export const WorkFeedView: React.FC = () => {
       setIsUploading(true);
       try {
         if (file.type.startsWith('image/')) {
-          const compressed = await compressImageFile(file, 1200, 0.85);
+          const compressed = await compressImageFile(file, 900, 0.78);
           setCustomFilePreview(compressed);
           setNewMediaUrl(compressed);
         } else {
@@ -323,7 +330,7 @@ export const WorkFeedView: React.FC = () => {
       return;
     }
 
-    let finalMedia = newMediaUrl.trim() || customFilePreview;
+    const finalMedia = (newMediaUrl.trim() || customFilePreview || '').trim();
     if (!finalMedia) {
       alert('Por favor carregue uma fotografia ou vídeo real do serviço concluído.');
       return;
@@ -331,22 +338,7 @@ export const WorkFeedView: React.FC = () => {
 
     setIsUploading(true);
 
-    // Fail-safe emergency timer: guarantees publication button is never stuck in "A processar..."
-    const emergencyTimer = setTimeout(() => {
-      setIsUploading(false);
-    }, 5500);
-
     try {
-      // Se for um Data URL de imagem, fazer upload seguro no Firebase Storage
-      if (finalMedia.startsWith('data:image/')) {
-        const uploadRes = await uploadWorkPostImageToStorage(finalMedia, currentUser.id);
-        if (uploadRes.success && uploadRes.url) {
-          finalMedia = uploadRes.url;
-        }
-      }
-
-      clearTimeout(emergencyTimer);
-
       const matchedPro = professionals.find(p => p.id === currentUser.id) || (currentUser as ProfessionalProfile);
 
       const res = addWorkFeedPost({
@@ -365,7 +357,10 @@ export const WorkFeedView: React.FC = () => {
         ownerId: currentUser.id
       });
 
-      if (res.success) {
+      if (res.success && res.post) {
+        const createdPostId = res.post.id;
+        
+        // Fechar o modal imediatamente e libertar a interface sem bloqueios
         setIsPublishModalOpen(false);
         setNewTitle('');
         setNewDesc('');
@@ -373,13 +368,34 @@ export const WorkFeedView: React.FC = () => {
         setNewPriceKz('');
         setNewMediaUrl('');
         setCustomFilePreview(null);
+        setIsUploading(false);
+
+        // Se o filtro atual esconder a nova publicação, alternar para a categoria ou 'Todas'
+        if (selectedCatFilter !== 'Todas' && selectedCatFilter !== newCategoryName && selectedCatFilter !== 'Minhas') {
+          setSelectedCatFilter('Todas');
+        }
+
+        setSyncFeedback('Publicação divulgada no feed com sucesso!');
+        setTimeout(() => setSyncFeedback(null), 3000);
+
+        // Upload em segundo plano no Firebase Storage (assíncrono e não-bloqueante)
+        if (finalMedia.startsWith('data:image/')) {
+          uploadWorkPostImageToStorage(finalMedia, currentUser.id)
+            .then(uploadRes => {
+              if (uploadRes.success && uploadRes.url && uploadRes.url !== finalMedia) {
+                updateWorkFeedPost(createdPostId, { mediaUrl: uploadRes.url });
+              }
+            })
+            .catch(err => {
+              console.warn('Upload de imagem em segundo plano notice:', err);
+            });
+        }
       } else if (res.error) {
+        setIsUploading(false);
         triggerBlockedActionPrompt(res.error);
       }
     } catch (err) {
-      clearTimeout(emergencyTimer);
       console.error('Erro ao submeter publicação:', err);
-    } finally {
       setIsUploading(false);
     }
   };
@@ -416,7 +432,7 @@ export const WorkFeedView: React.FC = () => {
       setIsEditUploading(true);
       try {
         if (file.type.startsWith('image/')) {
-          const compressed = await compressImageFile(file, 1200, 0.85);
+          const compressed = await compressImageFile(file, 900, 0.78);
           setEditCustomPreview(compressed);
           setEditMediaUrl(compressed);
         } else {
@@ -445,7 +461,7 @@ export const WorkFeedView: React.FC = () => {
       return;
     }
 
-    let finalMedia = editMediaUrl.trim() || editCustomPreview || editingPost.mediaUrl;
+    const finalMedia = (editMediaUrl.trim() || editCustomPreview || editingPost.mediaUrl || '').trim();
     if (!finalMedia) {
       setEditFeedback({ type: 'error', message: 'A publicação deve conter uma fotografia ou vídeo.' });
       return;
@@ -454,26 +470,12 @@ export const WorkFeedView: React.FC = () => {
     setIsEditUploading(true);
     setEditFeedback(null);
 
-    // Fail-safe emergency timer for editing
-    const emergencyEditTimer = setTimeout(() => {
-      setIsEditUploading(false);
-    }, 5500);
-
     try {
-      // Se o utilizador substituiu ou adicionou nova imagem via Data URL, faz upload para o Storage
-      if (finalMedia.startsWith('data:image/')) {
-        const uploadRes = await uploadWorkPostImageToStorage(finalMedia, currentUser.id);
-        if (uploadRes.success && uploadRes.url) {
-          finalMedia = uploadRes.url;
-        }
-      }
-
-      clearTimeout(emergencyEditTimer);
-
       // Encontrar ID da categoria se aplicável
       const matchedCat = categories.find(c => c.name === editCategoryName);
+      const editingId = editingPost.id;
 
-      const result = await updateWorkFeedPost(editingPost.id, {
+      const result = await updateWorkFeedPost(editingId, {
         title: editTitle.trim() || undefined,
         description: editDesc.trim(),
         categoryName: editCategoryName,
@@ -489,12 +491,24 @@ export const WorkFeedView: React.FC = () => {
         setTimeout(() => {
           setEditingPost(null);
           setEditFeedback(null);
-        }, 1200);
+        }, 600);
+
+        // Se a imagem for uma nova foto local (data:image), fazer upload seguro no background
+        if (finalMedia.startsWith('data:image/')) {
+          uploadWorkPostImageToStorage(finalMedia, currentUser.id)
+            .then(uploadRes => {
+              if (uploadRes.success && uploadRes.url && uploadRes.url !== finalMedia) {
+                updateWorkFeedPost(editingId, { mediaUrl: uploadRes.url });
+              }
+            })
+            .catch(err => {
+              console.warn('Upload de imagem em segundo plano (edição) notice:', err);
+            });
+        }
       } else {
         setEditFeedback({ type: 'error', message: result.message || 'Erro ao atualizar publicação.' });
       }
     } catch (err: any) {
-      clearTimeout(emergencyEditTimer);
       console.error('Erro ao salvar alterações da publicação:', err);
       setEditFeedback({ type: 'error', message: `Erro ao salvar alterações: ${err.message || err}` });
     } finally {
@@ -546,15 +560,15 @@ export const WorkFeedView: React.FC = () => {
           {/* Botões de Ação: Sincronizar e Publicar Trabalho */}
           <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
             <button
-              onClick={handleManualSync}
-              disabled={isSyncing}
+              onClick={handleRefreshFeed}
+              disabled={isRefreshingFeed}
               className={`p-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/15 transition-all flex items-center gap-1.5 shrink-0 ${
-                isSyncing ? 'opacity-70 cursor-wait' : 'active:scale-95'
+                isRefreshingFeed ? 'opacity-70 cursor-wait' : 'active:scale-95'
               }`}
-              title="Sincronizar publicações com a base de dados em tempo real"
+              title="Atualizar publicações do feed em tempo real"
             >
-              <RefreshCw className={`w-4 h-4 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{isSyncing ? 'A sincronizar...' : 'Atualizar'}</span>
+              <RefreshCw className={`w-4 h-4 text-emerald-400 ${isRefreshingFeed ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{isRefreshingFeed ? 'A atualizar...' : 'Atualizar'}</span>
             </button>
 
             {isPro ? (
