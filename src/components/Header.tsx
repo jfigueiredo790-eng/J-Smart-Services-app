@@ -21,7 +21,8 @@ import {
   Wifi,
   WifiOff,
   TestTube,
-  ArrowRightLeft
+  ArrowRightLeft,
+  CheckCircle2
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -44,12 +45,24 @@ export const Header: React.FC = () => {
     logoutUser,
     isOnline,
     setIsOnline,
-    setIsTestSuiteOpen
+    setIsTestSuiteOpen,
+    forceSyncWithFirestore,
+    isSyncing,
+    syncStatus,
+    lastSyncTimestamp
   } = useApp();
 
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [isProvinceDropdownOpen, setIsProvinceDropdownOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [syncToast, setSyncToast] = useState<string | null>(null);
+
+  const handleSyncPlatform = async () => {
+    if (isSyncing) return;
+    const res = await forceSyncWithFirestore();
+    setSyncToast(res.message);
+    setTimeout(() => setSyncToast(null), 3500);
+  };
 
   // Count active requests for notifications
   const activeCount = requests.filter(r => r.status === 'pendente' || r.status === 'em_progresso').length;
@@ -141,6 +154,29 @@ export const Header: React.FC = () => {
             </button>
           )}
 
+          {/* Universal Cloud / Platform Synchronization Button */}
+          <button
+            onClick={handleSyncPlatform}
+            disabled={isSyncing}
+            title={
+              isSyncing 
+                ? "A sincronizar toda a plataforma com a nuvem..." 
+                : `Sincronização da Plataforma: ${syncStatus === 'synced' ? 'Tudo atualizado' : syncStatus}. Clique para atualizar agora.`
+            }
+            className={`p-2 rounded-lg border transition-all flex items-center gap-1.5 ${
+              isSyncing
+                ? 'bg-blue-950 text-blue-300 border-blue-500/50'
+                : syncStatus === 'synced'
+                ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+            }`}
+          >
+            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-blue-400' : 'text-emerald-400'}`} />
+            <span className="hidden lg:inline text-[10px] font-bold">
+              {isSyncing ? 'A sincronizar...' : 'Sincronizar'}
+            </span>
+          </button>
+
           {/* Network Connection Toggle Button (Wi-Fi) */}
           <button
             onClick={() => setIsOnline(!isOnline)}
@@ -214,6 +250,13 @@ export const Header: React.FC = () => {
         </div>
 
       </div>
+
+      {syncToast && (
+        <div className="bg-emerald-600 text-white text-[11px] font-bold py-1 px-4 text-center animate-fade-in flex items-center justify-center gap-1.5 shadow-md border-t border-emerald-500/40">
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-amber-300" />
+          <span>{syncToast}</span>
+        </div>
+      )}
     </header>
   );
 };

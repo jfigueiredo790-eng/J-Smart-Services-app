@@ -40,7 +40,32 @@ import {
 } from 'lucide-react';
 
 export const ProfileView: React.FC = () => {
-  const { currentUser, userRole, updateUserProfile, resetDemoData, switchRole, logoutUser, categories, professionals, requests, setActiveTab, setIsRulesModalOpen } = useApp();
+  const { 
+    currentUser, 
+    userRole, 
+    updateUserProfile, 
+    resetDemoData, 
+    switchRole, 
+    logoutUser, 
+    categories, 
+    professionals, 
+    requests, 
+    setActiveTab, 
+    setIsRulesModalOpen,
+    forceSyncWithFirestore,
+    isSyncing,
+    syncStatus,
+    lastSyncTimestamp
+  } = useApp();
+
+  const [profileSyncToast, setProfileSyncToast] = useState<string | null>(null);
+
+  const handleProfileSync = async () => {
+    if (isSyncing) return;
+    const res = await forceSyncWithFirestore();
+    setProfileSyncToast(res.message);
+    setTimeout(() => setProfileSyncToast(null), 4000);
+  };
 
   const [name, setName] = useState(currentUser.name);
   const [phone, setPhone] = useState(currentUser.phone);
@@ -688,6 +713,48 @@ export const ProfileView: React.FC = () => {
           <span>📜 Ver Regras e Código de Conduta</span>
         </button>
       </div>
+
+      {/* Cloud & Platform Synchronization Card */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-lg shrink-0">
+            🔄
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-xs sm:text-sm font-extrabold text-slate-900">
+                Sincronização com a Nuvem
+              </h3>
+              <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                syncStatus === 'synced' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+              }`}>
+                {syncStatus === 'synced' ? '✓ Atualizado' : syncStatus}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+              {lastSyncTimestamp 
+                ? `Última sincronização: ${new Date(lastSyncTimestamp).toLocaleTimeString('pt-AO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` 
+                : 'Sincronização em tempo real ativa'}
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={handleProfileSync}
+          disabled={isSyncing}
+          className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-5 py-2.5 rounded-xl text-xs transition-all flex items-center justify-center gap-2 shrink-0 shadow-md shadow-emerald-600/20"
+        >
+          <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+          <span>{isSyncing ? 'A Sincronizar Tudo...' : 'Sincronizar Dados Agora'}</span>
+        </button>
+      </div>
+
+      {profileSyncToast && (
+        <div className="bg-emerald-700 text-white text-xs font-bold py-2.5 px-4 rounded-2xl shadow-md flex items-center gap-2 animate-fade-in border border-emerald-500">
+          <CheckCircle2 className="w-4 h-4 text-amber-300 shrink-0" />
+          <span>{profileSyncToast}</span>
+        </div>
+      )}
 
       {/* Account & Session Actions */}
       <div className="bg-slate-100 rounded-3xl p-5 border border-slate-200 space-y-4">

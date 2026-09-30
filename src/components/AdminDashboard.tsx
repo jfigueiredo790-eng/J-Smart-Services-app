@@ -36,7 +36,8 @@ import {
   Eye,
   Smartphone,
   Trash2,
-  X
+  X,
+  RefreshCw
 } from 'lucide-react';
 import { ANGOLA_PROVINCES, User } from '../types';
 
@@ -69,8 +70,21 @@ export const AdminDashboard: React.FC = () => {
     auditAndFixBuggedCategories,
     runAutoTestSuite,
     codeOfConductRules,
-    updateCodeOfConductRules
+    updateCodeOfConductRules,
+    forceSyncWithFirestore,
+    isSyncing,
+    syncStatus,
+    lastSyncTimestamp
   } = useApp();
+
+  const [adminSyncFeedback, setAdminSyncFeedback] = useState<string | null>(null);
+
+  const handleAdminSync = async () => {
+    if (isSyncing) return;
+    const res = await forceSyncWithFirestore();
+    setAdminSyncFeedback(res.message);
+    setTimeout(() => setAdminSyncFeedback(null), 4000);
+  };
 
   const [adminTab, setAdminTab] = useState<'all_registered' | 'payments' | 'financial' | 'users' | 'clients' | 'categories' | 'commissions' | 'reports' | 'staff' | 'audit' | 'tests' | 'code_of_conduct' | 'android_api'>('all_registered');
   const [editableRules, setEditableRules] = useState(() => codeOfConductRules);
@@ -535,12 +549,27 @@ export const AdminDashboard: React.FC = () => {
             {/* Header & Live Indicator */}
             <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 text-white p-6 rounded-3xl border border-slate-800 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                     Sincronização em Tempo Real Ativa
                   </span>
+                  <button
+                    onClick={handleAdminSync}
+                    disabled={isSyncing}
+                    className="bg-emerald-800/80 hover:bg-emerald-700/80 text-emerald-200 border border-emerald-400/40 text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full flex items-center gap-1.5 transition-all shadow-sm"
+                    title="Forçar sincronização de todos os dados da plataforma com o Firestore"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin text-amber-300' : 'text-emerald-300'}`} />
+                    <span>{isSyncing ? 'A Sincronizar Tudo...' : 'Sincronizar Toda a Plataforma'}</span>
+                  </button>
                 </div>
+                {adminSyncFeedback && (
+                  <div className="bg-emerald-700/90 text-white text-xs font-bold py-1.5 px-3 rounded-xl mt-2 flex items-center gap-2 animate-fade-in border border-emerald-500/50">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                    <span>{adminSyncFeedback}</span>
+                  </div>
+                )}
                 <h3 className="text-xl font-black text-white mt-2">
                   Todos os Cadastrados na J Smart Services ({allUsers.length})
                 </h3>

@@ -1209,6 +1209,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Firestore messages snapshot notice:', err.message);
       }));
 
+      // 5. Reviews (sync ratings and feedback in real time)
+      const revsRef = collection(db, 'reviews');
+      unsubscribes.push(onSnapshot(revsRef, (snapshot) => {
+        if (!snapshot.empty) {
+          const fsRevs: Review[] = [];
+          snapshot.forEach(docSnap => {
+            fsRevs.push({ id: docSnap.id, ...docSnap.data() } as Review);
+          });
+          setReviews(prev => {
+            const fsIds = new Set(fsRevs.map(r => r.id));
+            const localOnly = prev.filter(r => !fsIds.has(r.id));
+            const merged = [...fsRevs, ...localOnly];
+            safeStorageSet(`${LOCAL_STORAGE_KEY}_revs`, JSON.stringify(merged));
+            return merged;
+          });
+        }
+      }, (err) => {
+        console.warn('Firestore reviews snapshot notice:', err.message);
+      }));
+
+      // 5b. Wallet Transactions (sync deposits, payments and approvals in real time)
+      const txsRef = collection(db, 'wallet_transactions');
+      unsubscribes.push(onSnapshot(txsRef, (snapshot) => {
+        if (!snapshot.empty) {
+          const fsTxs: WalletTransaction[] = [];
+          snapshot.forEach(docSnap => {
+            const data = docSnap.data() as WalletTransaction;
+            if (!FICTITIOUS_MOCK_IDS.has(data.userId)) {
+              fsTxs.push({ id: docSnap.id, ...data });
+            }
+          });
+          setAllWalletTransactions(prev => {
+            const fsIds = new Set(fsTxs.map(t => t.id));
+            const localPending = prev.filter(t => !fsIds.has(t.id));
+            const merged = [...fsTxs, ...localPending];
+            merged.sort((a, b) => new Date(b.date || b.updatedAt || 0).getTime() - new Date(a.date || a.updatedAt || 0).getTime());
+            safeStorageSet(`${LOCAL_STORAGE_KEY}_txs`, JSON.stringify(merged));
+            return merged;
+          });
+        }
+      }, (err) => {
+        console.warn('Firestore wallet transactions snapshot notice:', err.message);
+      }));
+
+      // 5c. App Notifications (sync broadcasts and alerts in real time)
+      const notifsRef = collection(db, 'app_notifications');
+      unsubscribes.push(onSnapshot(notifsRef, (snapshot) => {
+        if (!snapshot.empty) {
+          const fsNotifs: AppNotification[] = [];
+          snapshot.forEach(docSnap => {
+            fsNotifs.push({ id: docSnap.id, ...docSnap.data() } as AppNotification);
+          });
+          setNotifications(prev => {
+            const fsIds = new Set(fsNotifs.map(n => n.id));
+            const localOnly = prev.filter(n => !fsIds.has(n.id));
+            const merged = [...fsNotifs, ...localOnly];
+            merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            safeStorageSet(`${LOCAL_STORAGE_KEY}_notifications`, JSON.stringify(merged));
+            return merged;
+          });
+        }
+      }, (err) => {
+        console.warn('Firestore notifications snapshot notice:', err.message);
+      }));
+
+      // 5d. Reports (sync user disputes and reports in real time)
+      const reportsRef = collection(db, 'reports');
+      unsubscribes.push(onSnapshot(reportsRef, (snapshot) => {
+        if (!snapshot.empty) {
+          const fsReports: UserReport[] = [];
+          snapshot.forEach(docSnap => {
+            fsReports.push({ id: docSnap.id, ...docSnap.data() } as UserReport);
+          });
+          setReports(prev => {
+            const fsIds = new Set(fsReports.map(r => r.id));
+            const localOnly = prev.filter(r => !fsIds.has(r.id));
+            const merged = [...fsReports, ...localOnly];
+            safeStorageSet(`${LOCAL_STORAGE_KEY}_reports`, JSON.stringify(merged));
+            return merged;
+          });
+        }
+      }, (err) => {
+        console.warn('Firestore reports snapshot notice:', err.message);
+      }));
+
       // 6. Admin Audit Logs (real-time cross-device log sync)
       const auditRef = collection(db, 'admin_audit_logs');
       unsubscribes.push(onSnapshot(auditRef, (snapshot) => {
@@ -1233,6 +1318,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }, (err) => {
         console.warn('Firestore settings snapshot notice:', err.message);
+      }));
+
+      // 7b. Code of Conduct (real-time platform policies)
+      const conductDocRef = doc(db, 'platform_settings', 'code_of_conduct');
+      unsubscribes.push(onSnapshot(conductDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const conductData = docSnap.data();
+          if (Array.isArray(conductData?.rules) && conductData.rules.length > 0) {
+            setCodeOfConductRules(conductData.rules);
+          }
+        }
+      }, (err) => {
+        console.warn('Firestore code of conduct snapshot notice:', err.message);
       }));
 
       // 8. Work Feed Posts (real publications by real registered professionals)
@@ -1511,19 +1609,186 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 fsReqs.push({ id: d.id, ...d.data() } as ServiceRequest);
               });
               setRequests(fsReqs);
+              safeStorageSet(`${LOCAL_STORAGE_KEY}_reqs`, JSON.stringify(fsReqs));
             }
           } catch (e) {
             console.warn('Erro ao sincronizar pedidos:', e);
           }
         };
 
-        // Run all queries concurrently in parallel instead of slow sequential waterfall
+        // 6. Task: Sync Chat Messages
+        const syncChatMessagesTask = async () => {
+          try {
+            const msgsSnap = await getDocs(collection(db, 'chat_messages'));
+            if (!msgsSnap.empty) {
+              const fsMsgs: ChatMessage[] = [];
+              msgsSnap.forEach(d => {
+                fsMsgs.push({ id: d.id, ...d.data() } as ChatMessage);
+              });
+              setMessages(prev => {
+                const fsIds = new Set(fsMsgs.map(m => m.id));
+                const localUnsaved = prev.filter(m => !fsIds.has(m.id) && m.status === 'enviando');
+                const merged = [...fsMsgs, ...localUnsaved];
+                merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                safeStorageSet(`${LOCAL_STORAGE_KEY}_msgs`, JSON.stringify(merged));
+                return merged;
+              });
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar mensagens de chat:', e);
+          }
+        };
+
+        // 7. Task: Sync Reviews & Ratings
+        const syncReviewsTask = async () => {
+          try {
+            const revsSnap = await getDocs(collection(db, 'reviews'));
+            if (!revsSnap.empty) {
+              const fsRevs: Review[] = [];
+              revsSnap.forEach(d => {
+                fsRevs.push({ id: d.id, ...d.data() } as Review);
+              });
+              setReviews(prev => {
+                const fsIds = new Set(fsRevs.map(r => r.id));
+                const localOnly = prev.filter(r => !fsIds.has(r.id));
+                const merged = [...fsRevs, ...localOnly];
+                safeStorageSet(`${LOCAL_STORAGE_KEY}_revs`, JSON.stringify(merged));
+                return merged;
+              });
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar avaliações:', e);
+          }
+        };
+
+        // 8. Task: Sync Wallet Transactions
+        const syncWalletTransactionsTask = async () => {
+          try {
+            const txsSnap = await getDocs(collection(db, 'wallet_transactions'));
+            if (!txsSnap.empty) {
+              const fsTxs: WalletTransaction[] = [];
+              txsSnap.forEach(d => {
+                const data = d.data() as WalletTransaction;
+                if (!FICTITIOUS_MOCK_IDS.has(data.userId)) {
+                  fsTxs.push({ id: d.id, ...data });
+                }
+              });
+              setAllWalletTransactions(prev => {
+                const fsIds = new Set(fsTxs.map(t => t.id));
+                const localPending = prev.filter(t => !fsIds.has(t.id));
+                const merged = [...fsTxs, ...localPending];
+                merged.sort((a, b) => new Date(b.date || b.updatedAt || 0).getTime() - new Date(a.date || a.updatedAt || 0).getTime());
+                safeStorageSet(`${LOCAL_STORAGE_KEY}_txs`, JSON.stringify(merged));
+                return merged;
+              });
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar transações da carteira:', e);
+          }
+        };
+
+        // 9. Task: Sync App Notifications
+        const syncNotificationsTask = async () => {
+          try {
+            const notifsSnap = await getDocs(collection(db, 'app_notifications'));
+            if (!notifsSnap.empty) {
+              const fsNotifs: AppNotification[] = [];
+              notifsSnap.forEach(d => {
+                fsNotifs.push({ id: d.id, ...d.data() } as AppNotification);
+              });
+              setNotifications(prev => {
+                const fsIds = new Set(fsNotifs.map(n => n.id));
+                const localOnly = prev.filter(n => !fsIds.has(n.id));
+                const merged = [...fsNotifs, ...localOnly];
+                merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+                safeStorageSet(`${LOCAL_STORAGE_KEY}_notifications`, JSON.stringify(merged));
+                return merged;
+              });
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar notificações:', e);
+          }
+        };
+
+        // 10. Task: Sync User Reports
+        const syncReportsTask = async () => {
+          try {
+            const reportsSnap = await getDocs(collection(db, 'reports'));
+            if (!reportsSnap.empty) {
+              const fsReports: UserReport[] = [];
+              reportsSnap.forEach(d => {
+                fsReports.push({ id: d.id, ...d.data() } as UserReport);
+              });
+              setReports(prev => {
+                const fsIds = new Set(fsReports.map(r => r.id));
+                const localOnly = prev.filter(r => !fsIds.has(r.id));
+                const merged = [...fsReports, ...localOnly];
+                safeStorageSet(`${LOCAL_STORAGE_KEY}_reports`, JSON.stringify(merged));
+                return merged;
+              });
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar denúncias:', e);
+          }
+        };
+
+        // 11. Task: Sync Admin Audit Logs
+        const syncAuditLogsTask = async () => {
+          try {
+            const logsSnap = await getDocs(collection(db, 'admin_audit_logs'));
+            if (!logsSnap.empty) {
+              const fsLogs: AdminAuditLog[] = [];
+              logsSnap.forEach(d => {
+                fsLogs.push({ id: d.id, ...d.data() } as AdminAuditLog);
+              });
+              fsLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+              setAuditLogs(fsLogs);
+              safeStorageSet(`${LOCAL_STORAGE_KEY}_audit_logs`, JSON.stringify(fsLogs));
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar logs de auditoria:', e);
+          }
+        };
+
+        // 12. Task: Sync Platform Settings & Code of Conduct
+        const syncPlatformSettingsTask = async () => {
+          try {
+            const settingsSnap = await getDoc(doc(db, 'platform_settings', 'global_config'));
+            if (settingsSnap.exists()) {
+              const fsSettings = settingsSnap.data() as PlatformSettings;
+              setPlatformSettings(prev => {
+                const merged = { ...prev, ...fsSettings };
+                safeStorageSet(`${LOCAL_STORAGE_KEY}_settings`, JSON.stringify(merged));
+                return merged;
+              });
+            }
+            const conductSnap = await getDoc(doc(db, 'platform_settings', 'code_of_conduct'));
+            if (conductSnap.exists()) {
+              const conductData = conductSnap.data();
+              if (Array.isArray(conductData?.rules) && conductData.rules.length > 0) {
+                setCodeOfConductRules(conductData.rules);
+                safeStorageSet(`${LOCAL_STORAGE_KEY}_code_of_conduct`, JSON.stringify(conductData.rules));
+              }
+            }
+          } catch (e) {
+            console.warn('Erro ao sincronizar configurações da plataforma:', e);
+          }
+        };
+
+        // Run all 12 platform queries concurrently in parallel for ultra-fast, robust complete synchronization
         await Promise.allSettled([
           syncCategoriesTask(),
           syncUsersTask(),
           syncProfessionalsTask(),
           syncFeedTask(),
-          syncRequestsTask()
+          syncRequestsTask(),
+          syncChatMessagesTask(),
+          syncReviewsTask(),
+          syncWalletTransactionsTask(),
+          syncNotificationsTask(),
+          syncReportsTask(),
+          syncAuditLogsTask(),
+          syncPlatformSettingsTask()
         ]);
 
         return { timeout: false };
@@ -2704,7 +2969,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newRev: Review = {
       ...reviewData,
       id: `rev-${Date.now()}`,
-      date: new Date().toISOString().split('T')[0]
+      date: new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
 
     setReviews(prev => [newRev, ...prev]);
@@ -2715,14 +2982,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (p.id === reviewData.professionalId) {
         const proReviews = [...reviews.filter(r => r.professionalId === p.id), newRev];
         const avg = proReviews.reduce((acc, curr) => acc + curr.rating, 0) / proReviews.length;
-        return {
+        const updated = {
           ...p,
           rating: Number(avg.toFixed(1)),
           reviewCount: proReviews.length
         };
+        // Persist updated rating to Firestore
+        setDoc(doc(db, 'professionals', p.id), { rating: updated.rating, reviewCount: updated.reviewCount }, { merge: true }).catch(() => {});
+        return updated;
       }
       return p;
     }));
+
+    // Persist review to Firestore
+    setDoc(doc(db, 'reviews', newRev.id), newRev).catch(err => {
+      console.warn('Erro ao guardar avaliação no Firestore:', err);
+    });
+
+    // Mark request hasReview in Firestore
+    setDoc(doc(db, 'service_requests', reviewData.requestId), { hasReview: true }, { merge: true }).catch(() => {});
 
     setIsReviewModalOpen(false);
     setReviewingRequestId(null);
@@ -4215,6 +4493,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString()
     };
     setReports(prev => [newReport, ...prev]);
+    try {
+      setDoc(doc(db, 'reports', newReport.id), newReport).catch(err => {
+        console.warn('Erro ao guardar denúncia no Firestore:', err);
+      });
+    } catch (e) {}
   };
 
   const blockUser = async (userId: string): Promise<{ success: boolean; message: string }> => {
@@ -4528,6 +4811,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateCodeOfConductRules = (newRules: CodeOfConductSection[]) => {
     setCodeOfConductRules(newRules);
     safeStorageSet(`${LOCAL_STORAGE_KEY}_code_of_conduct`, JSON.stringify(newRules));
+    try {
+      setDoc(doc(db, 'platform_settings', 'code_of_conduct'), { rules: newRules, updatedAt: new Date().toISOString() }, { merge: true }).catch(err => {
+        console.warn('Erro ao guardar código de conduta no Firestore:', err);
+      });
+    } catch (e) {}
     logAdminAction('Atualização do Código de Conduta', 'all', 'Novas regras salvas pelo Administrador');
   };
 
