@@ -5,6 +5,17 @@ import { CategoryMultiSelect } from './CategoryMultiSelect';
 import { UserAvatar } from './UserAvatar';
 import { ANGOLA_PROVINCES, UserRole, AccountType } from '../types';
 import { uploadProfilePhotoToStorage } from '../utils/imageUtils';
+import {
+  ANGOLA_COUNTRY_CODE,
+  ANGOLA_PHONE_NATIONAL_LENGTH,
+  INVALID_ANGOLA_PHONE_MESSAGE,
+  areSamePhoneNumber,
+  buildFullAngolaPhone,
+  extractAngolaNineDigits,
+  isOfficialAdminPhone,
+  sanitizeAngolaPhoneDigitsInput,
+  validateStrictAngolaPhone
+} from '../utils/phoneAuthUtils';
 import { 
   User as UserIcon, 
   ShieldCheck, 
@@ -48,6 +59,7 @@ export const ProfileView: React.FC = () => {
     switchRole, 
     logoutUser, 
     categories, 
+    allUsers,
     professionals, 
     requests, 
     setActiveTab, 
@@ -68,7 +80,8 @@ export const ProfileView: React.FC = () => {
   };
 
   const [name, setName] = useState(currentUser.name);
-  const [phone, setPhone] = useState(currentUser.phone);
+  const [phoneDigits, setPhoneDigits] = useState(() => extractAngolaNineDigits(currentUser.phone));
+  const [phoneError, setPhoneError] = useState('');
   const [gender, setGender] = useState<'masculino' | 'feminino'>(currentUser.gender || 'masculino');
   const [email, setEmail] = useState(currentUser.email);
   const [province, setProvince] = useState(currentUser.province || 'Luanda');
@@ -93,7 +106,8 @@ export const ProfileView: React.FC = () => {
 
   useEffect(() => {
     setName(currentUser.name);
-    setPhone(currentUser.phone);
+    setPhoneDigits(extractAngolaNineDigits(currentUser.phone));
+    setPhoneError('');
     setGender(currentUser.gender || 'masculino');
     setEmail(currentUser.email);
     setProvince(currentUser.province || 'Luanda');
@@ -179,10 +193,35 @@ export const ProfileView: React.FC = () => {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    setPhoneError('');
+
+    const fullPhone = buildFullAngolaPhone(phoneDigits);
+    const validatedPhone = validateStrictAngolaPhone(fullPhone);
+    if (!validatedPhone.isValid) {
+      setPhoneError(validatedPhone.error || INVALID_ANGOLA_PHONE_MESSAGE);
+      return;
+    }
+
+    const phoneChanged = !areSamePhoneNumber(currentUser.phone, validatedPhone.e164);
+    if (phoneChanged) {
+      if (currentUser.role !== 'admin' && isOfficialAdminPhone(validatedPhone.e164)) {
+        setPhoneError('Este número de telefone pertence à conta oficial da plataforma.');
+        return;
+      }
+      const hasDuplicate = [...allUsers, ...professionals].some(
+        u => !u.isDeleted && u.id !== currentUser.id && areSamePhoneNumber(u.phone, validatedPhone.e164)
+      );
+      if (hasDuplicate) {
+        setPhoneError('Este número de telefone já está associado a outra conta na plataforma.');
+        return;
+      }
+    }
+
     const finalAvatar = avatar || currentUser.avatar || '';
     updateUserProfile({
       name,
-      phone,
+      phone: validatedPhone.e164,
+      phoneE164: validatedPhone.e164,
       gender,
       email,
       province,
@@ -553,13 +592,48 @@ export const ProfileView: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Telefone (+244 Angola)</label>
-              <input 
-                type="text" 
-                value={phone} 
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full text-xs p-3 rounded-xl border border-slate-200 font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
+              <label className="block text-xs font-bold text-slate-500 mb-1">Telefone ({ANGOLA_COUNTRY_CODE} Angola — 9 dígitos)</label>
+              <div className={`flex items-stretch rounded-xl border bg-white focus-within:ring-2 focus-within:ring-emerald-500 overflow-hidden ${
+                phoneError ? 'border-rose-400' : 'border-slate-200'
+              }`}>
+                <span className="inline-flex items-center px-3 bg-emerald-50 border-r border-slate-200 text-xs font-extrabold text-emerald-800 select-none shrink-0">
+                  {ANGOLA_COUNTRY_CODE}
+                </span>
+                <input 
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={ANGOLA_PHONE_NATIONAL_LENGTH}
+                  value={phoneDigits} 
+                  onChange={(e) => {
+                    setPhoneDigits(sanitizeAngolaPhoneDigitsInput(e.target.value));
+                    if (phoneError) setPhoneError('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (
+                      e.ctrlKey || e.metaKey || e.altKey ||
+                      ['Backspace', 'Delete', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)
+                    ) {
+                      return;
+                    }
+                    if (!/^[0-9]$/.test(e.key)) {
+                      e.preventDefault();
+                    }
+                  }}
+                  placeholder="923456789"
+                  className="w-full text-xs p-3 font-bold tracking-wider text-slate-900 bg-transparent focus:outline-none"
+                />
+                <span className={`inline-flex items-center pr-3 text-[10px] font-extrabold select-none shrink-0 ${
+                  phoneDigits.length === ANGOLA_PHONE_NATIONAL_LENGTH ? 'text-emerald-600' : 'text-slate-400'
+                }`}>
+                  {phoneDigits.length}/{ANGOLA_PHONE_NATIONAL_LENGTH}
+                </span>
+              </div>
+              {phoneError && (
+                <p className="text-[11px] text-rose-600 font-bold mt-1 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{phoneError}</span>
+                </p>
+              )}
             </div>
 
             <div>

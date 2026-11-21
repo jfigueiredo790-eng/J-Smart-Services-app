@@ -1,21 +1,31 @@
 import React, { useState } from 'react';
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { signOut } from 'firebase/auth';
+import { auth } from '../lib/firebase';
 import { useApp } from '../context/AppContext';
 import { BrandLogo } from './BrandLogo';
-import { stripSensitiveFields } from '../utils/securityUtils';
-import { User } from '../types';
+import { AccountRecoveryModal } from './AccountRecoveryModal';
+import {
+  ANGOLA_COUNTRY_CODE,
+  ANGOLA_PHONE_NATIONAL_LENGTH,
+  INVALID_ANGOLA_PHONE_MESSAGE,
+  buildFullAngolaPhone,
+  extractAngolaNineDigits,
+  sanitizeAngolaPhoneDigitsInput,
+  validateStrictAngolaPhone
+} from '../utils/phoneAuthUtils';
 import { 
   ShieldCheck, 
   Lock, 
-  Mail, 
+  Phone, 
   ArrowRight, 
   AlertCircle, 
   ArrowLeft,
   CheckCircle2,
   Building2,
-  ShieldAlert
+  ShieldAlert,
+  Eye,
+  EyeOff,
+  KeyRound
 } from 'lucide-react';
 
 interface AdminLoginPageProps {
@@ -24,13 +34,15 @@ interface AdminLoginPageProps {
 
 export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
   const { 
-    loginUser, 
+    loginUserWithCredentialsAsync,
     setActiveTab, 
     setIsLoggedIn
   } = useApp();
 
-  const [adminIdentifier, setAdminIdentifier] = useState('');
+  const [adminPhone, setAdminPhone] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -40,11 +52,12 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
     setError('');
     setSuccessMsg('');
 
-    const emailTrimmed = adminIdentifier.trim().toLowerCase();
+    const fullPhone = buildFullAngolaPhone(adminPhone);
+    const validatedPhone = validateStrictAngolaPhone(fullPhone);
     const passTrimmed = adminPassword.trim();
 
-    if (!emailTrimmed || !emailTrimmed.includes('@')) {
-      setError('Por segurança, introduza um e-mail de administrador válido.');
+    if (!validatedPhone.isValid) {
+      setError(validatedPhone.error || INVALID_ANGOLA_PHONE_MESSAGE);
       return;
     }
     if (!passTrimmed || passTrimmed.length < 6) {
@@ -55,58 +68,48 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
     setIsSubmitting(true);
 
     try {
-      const cred = await signInWithEmailAndPassword(auth, emailTrimmed, passTrimmed);
-      const fbUser = cred.user;
+      const res = await loginUserWithCredentialsAsync(validatedPhone.e164, passTrimmed, 'admin');
 
-      const [userSnap, adminSnap] = await Promise.all([
-        getDoc(doc(db, 'users', fbUser.uid)),
-        getDoc(doc(db, 'admins', fbUser.uid)).catch(() => null)
-      ]);
+      if (!res.success) {
+        setError(res.message || 'Acesso Recusado: Número de telefone ou palavra-passe incorretos.');
+        return;
+      }
 
-      const userData = userSnap.exists() ? (stripSensitiveFields({ id: userSnap.id, ...userSnap.data() }) as User) : null;
-      const isBootstrapAdmin = fbUser.emailVerified === true && fbUser.email?.toLowerCase() === 'jfigueiredo790@gmail.com';
-      const hasAdminRecord = (adminSnap && adminSnap.exists()) || userData?.role === 'admin' || isBootstrapAdmin;
-
-      if (!hasAdminRecord) {
-        await signOut(auth);
+      if (res.role !== 'admin') {
+        await signOut(auth).catch(() => {});
+        setIsLoggedIn(false);
         setError('Acesso Recusado: Esta conta não possui privilégios de administrador verificados.');
         return;
       }
 
-      if (userData?.isDeleted || userData?.blocked || userData?.status === 'bloqueado') {
-        await signOut(auth);
-        setError('Acesso Recusado: Conta administrativa suspensa ou desativada.');
-        return;
-      }
-
-      const adminUserObj: User = userData
-        ? { ...userData, role: 'admin' }
-        : {
-            id: fbUser.uid,
-            name: fbUser.displayName || 'Administrador J Smart',
-            email: fbUser.email || emailTrimmed,
-            phone: '',
-            role: 'admin',
-            adminSubRole: 'super_admin',
-            province: 'Icolo e Bengo',
-            avatar: fbUser.photoURL || '',
-            verified: true,
-            createdAt: new Date().toISOString()
-          };
-
-      setSuccessMsg('Acesso concedido. A abrir o Painel Administrativo...');
+      setSuccessMsg('Acesso administrativo confirmado. A abrir o Painel Administrativo...');
       setTimeout(() => {
-        loginUser(adminUserObj, 'admin');
         setIsLoggedIn(true);
         setActiveTab('admin');
-      }, 400);
+      }, 350);
     } catch (err: any) {
       console.error('Erro no login administrativo:', err?.code || err);
-      setError('Acesso Recusado: E-mail ou palavra-passe incorretos.');
+      setError('Acesso Recusado: Verifique o número de telefone e a palavra-passe.');
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  if (showRecoveryModal) {
+    return (
+      <AccountRecoveryModal
+        initialType="password"
+        initialPhone={adminPhone ? buildFullAngolaPhone(adminPhone) : ''}
+        onClose={() => setShowRecoveryModal(false)}
+        onSuccessReturnToLogin={(recoveredPhone) => {
+          setShowRecoveryModal(false);
+          if (recoveredPhone) {
+            setAdminPhone(extractAngolaNineDigits(recoveredPhone));
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-[85vh] bg-slate-950 text-white flex flex-col items-center justify-center p-4 sm:p-6 animate-fade-in relative overflow-hidden">
@@ -133,7 +136,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
               <span>Acesso Administrativo</span>
             </h1>
             <p className="text-xs text-slate-400 font-medium mt-1">
-              Área Restrita da Direcção & Administração J Smart Services
+              Área Restrita da Direcção &amp; Administração J Smart Services
             </p>
           </div>
         </div>
@@ -144,7 +147,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
           <div className="leading-relaxed">
             <p className="font-bold text-amber-200">Área Protegida de Gestão</p>
             <p className="text-[11px] text-slate-300 mt-0.5">
-              Este portal é exclusivo para administradores da plataforma. Clientes e profissionais devem utilizar o login da página principal.
+              Entre com o número de telefone registado da administração e a sua palavra-passe. As permissões administrativas existentes são totalmente preservadas.
             </p>
           </div>
         </div>
@@ -164,40 +167,95 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
           </div>
         )}
 
-        {/* Form */}
+        {/* Form (Apenas 2 campos: Número de telefone + Palavra-passe) */}
         <form onSubmit={handleAdminLogin} className="space-y-4">
           
-          {/* E-mail / Phone Identifier */}
+          {/* 1. Número de Telefone (+244XXXXXXXXX) */}
           <div>
-            <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <Mail className="w-4 h-4 text-emerald-400" />
-              <span>E-mail ou Telefone do Administrador *</span>
+            <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Phone className="w-4 h-4 text-emerald-400" />
+                <span>Número de telefone *</span>
+              </span>
+              <span className="text-[10px] text-emerald-400 font-extrabold">🇦🇴 {ANGOLA_COUNTRY_CODE} (9 dígitos)</span>
             </label>
-            <input
-              type="text"
-              value={adminIdentifier}
-              onChange={(e) => { setAdminIdentifier(e.target.value); setError(''); }}
-              placeholder="Ex: jfigueiredo790@gmail.com ou 956011985"
-              className="w-full text-xs font-bold p-3.5 rounded-xl bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none transition-all"
-              required
-              autoFocus
-            />
+            <div className="flex items-stretch rounded-xl bg-slate-950 border border-slate-700 focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 overflow-hidden transition-all">
+              <span className="inline-flex items-center px-3.5 bg-emerald-950/70 border-r border-slate-700 text-xs font-extrabold text-emerald-400 select-none shrink-0">
+                {ANGOLA_COUNTRY_CODE}
+              </span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel-national"
+                maxLength={ANGOLA_PHONE_NATIONAL_LENGTH}
+                value={adminPhone}
+                onChange={(e) => {
+                  setAdminPhone(sanitizeAngolaPhoneDigitsInput(e.target.value));
+                  setError('');
+                }}
+                onKeyDown={(e) => {
+                  if (
+                    e.ctrlKey || e.metaKey || e.altKey ||
+                    ['Backspace', 'Delete', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)
+                  ) {
+                    return;
+                  }
+                  if (!/^[0-9]$/.test(e.key)) {
+                    e.preventDefault();
+                  }
+                }}
+                placeholder="956011985"
+                className="w-full text-xs font-bold tracking-wider p-3.5 bg-transparent text-white placeholder-slate-500 focus:outline-none"
+                required
+                autoFocus
+              />
+              <span className={`inline-flex items-center pr-3 text-[10px] font-extrabold select-none shrink-0 ${
+                adminPhone.length === ANGOLA_PHONE_NATIONAL_LENGTH ? 'text-emerald-400' : 'text-slate-500'
+              }`}>
+                {adminPhone.length}/{ANGOLA_PHONE_NATIONAL_LENGTH}
+              </span>
+            </div>
           </div>
 
-          {/* Password / Admin PIN */}
+          {/* 2. Palavra-passe (com mostrar/ocultar) */}
           <div>
-            <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <Lock className="w-4 h-4 text-emerald-400" />
-              <span>Palavra-passe de Administrador *</span>
-            </label>
-            <input
-              type="password"
-              value={adminPassword}
-              onChange={(e) => { setAdminPassword(e.target.value); setError(''); }}
-              placeholder="••••••••"
-              className="w-full text-xs font-bold p-3.5 rounded-xl bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none transition-all"
-              required
-            />
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Lock className="w-4 h-4 text-emerald-400" />
+                <span>Palavra-passe *</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRecoveryModal(true);
+                  setError('');
+                }}
+                className="text-[11px] text-emerald-400 hover:text-emerald-300 font-bold transition-colors flex items-center gap-1"
+              >
+                <KeyRound className="w-3 h-3" />
+                <span>Esqueci a palavra-passe</span>
+              </button>
+            </div>
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
+                value={adminPassword}
+                onChange={(e) => { setAdminPassword(e.target.value); setError(''); }}
+                placeholder="Introduza a sua palavra-passe"
+                className="w-full text-xs font-bold p-3.5 pr-11 rounded-xl bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none transition-all"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Ocultar palavra-passe' : 'Mostrar palavra-passe'}
+                title={showPassword ? 'Ocultar palavra-passe' : 'Mostrar palavra-passe'}
+                className="absolute right-3.5 top-3.5 text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           {/* Submit Button */}

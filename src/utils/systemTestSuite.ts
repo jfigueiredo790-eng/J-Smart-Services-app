@@ -2,6 +2,13 @@ import { User, ProfessionalProfile, ServiceRequest, Review, ServiceCategory, Use
 import { getProPlanStatus, validateProAction, PLAN_PRICES, GLOBAL_SUBSCRIPTIONS_ACTIVE } from './planUtils';
 import { isNotificationForUser } from './notificationUtils';
 import { rankWorkFeedPosts, formatPostDateFriendly } from './feedAlgorithm';
+import {
+  normalizePhoneNumber,
+  phoneToSyntheticAuthEmail,
+  getPublicUserEmail,
+  areSamePhoneNumber,
+  isOfficialAdminPhone
+} from './phoneAuthUtils';
 
 export interface TestResult {
   id: string;
@@ -58,14 +65,14 @@ export function runFullSystemTestSuite(): TestSuiteReport {
     }
   };
 
-  // 1. AUTENTICAÇÃO E SESSÃO
-  runTest('T1.1', 'Autenticação - Entrada (Login)', 'Entrada apenas por Número de Telefone válido e Palavra-passe correspondente', () => {
+  // 1. AUTENTICAÇÃO E SESSÃO (EXCLUSIVAMENTE POR NÚMERO DE TELEFONE + PALAVRA-PASSE)
+  runTest('T1.1', 'Autenticação - Entrada (Login)', 'Entrada apenas por Número de Telefone normalizado (+244) e Palavra-passe correspondente', () => {
     const registeredUser: User = {
       id: 'test-user-login-1',
       name: 'António Abel',
-      email: 'antonio@gmail.com',
+      email: '',
       phone: '+244 923 111 222',
-      password: 'mypassword123',
+      phoneE164: '+244923111222',
       role: 'cliente',
       accountType: 'cliente',
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
@@ -74,177 +81,192 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       createdAt: new Date().toISOString(),
     };
 
-    // Validar login por telefone e palavra-passe
-    const validateLogin = (phoneInput: string, passwordInput: string, userRecord: User) => {
-      const inputDigits = phoneInput.replace(/\D/g, '');
-      const userDigits = userRecord.phone.replace(/\D/g, '');
-      const isPhoneMatch = inputDigits.endsWith(userDigits) || userDigits.endsWith(inputDigits);
-      const isPasswordMatch = userRecord.password === passwordInput;
+    const validatePhoneLogin = (phoneInput: string, passwordInput: string, expectedPass: string, userRecord: User) => {
+      const normalized = normalizePhoneNumber(phoneInput);
+      if (!normalized.isValid) return false;
+      const isPhoneMatch = areSamePhoneNumber(normalized.e164, userRecord.phone);
+      const isPasswordMatch = passwordInput.length >= 6 && passwordInput === expectedPass;
       return isPhoneMatch && isPasswordMatch;
     };
 
-    const validAttempt = validateLogin('923 111 222', 'mypassword123', registeredUser);
-    const invalidPhoneAttempt = validateLogin('999 000 000', 'mypassword123', registeredUser);
-    const invalidPassAttempt = validateLogin('923 111 222', 'wrongpass', registeredUser);
+    const valid9Digits = validatePhoneLogin('923 111 222', 'mypassword123', 'mypassword123', registeredUser);
+    const validWithPrefix = validatePhoneLogin('+244923111222', 'mypassword123', 'mypassword123', registeredUser);
+    const rejectsEmailInPhoneField = !validatePhoneLogin('antonio@gmail.com', 'mypassword123', 'mypassword123', registeredUser);
+    const invalidPhoneAttempt = !validatePhoneLogin('999 000 000', 'mypassword123', 'mypassword123', registeredUser);
+    const invalidPassAttempt = !validatePhoneLogin('923 111 222', 'wrongpass', 'mypassword123', registeredUser);
 
-    const passed = validAttempt && !invalidPhoneAttempt && !invalidPassAttempt;
+    const passed = valid9Digits && validWithPrefix && rejectsEmailInPhoneField && invalidPhoneAttempt && invalidPassAttempt;
 
     return {
       passed,
-      message: 'Login por Número de Telefone Válido e Palavra-passe validado com rigor.',
+      message: 'Login exclusivo por Número de Telefone normalizado (+244) e Palavra-passe validado.',
       details: [
-        'Acesso com Telefone + Palavra-passe corretos: ✅ Autorizado',
-        'Acesso com Telefone diferente: ❌ Recusado',
-        'Acesso com Palavra-passe errada: ❌ Recusado',
+        'Acesso com 9 dígitos (923 111 222) + Palavra-passe: ✅ Autorizado',
+        'Acesso com indicativo (+244923111222) + Palavra-passe: ✅ Autorizado',
+        'Rejeição de e-mail no campo de telefone: ✅ Recusado',
+        'Rejeição de telefone diferente ou palavra-passe errada: ✅ Recusado',
       ],
     };
   });
 
-  runTest('T1.2', 'Autenticação - Registo Inicial', 'Registo de conta pela primeira vez com visibilidade condicional da Área de Actuação', () => {
-    const proRegistrationFields = {
-      accountType: 'duplo' as const,
-      name: 'Mateus Agostinho',
-      province: 'Luanda',
-      email: 'mateus.agostinho@gmail.com',
-      phone: '+244 923 444 555',
-      documentNumber: '004821943LA041',
-      categories: ['eletricista', 'canalizador'],
-      address: 'Bairro Talatona, Rua 12, Luanda',
-      password: 'senhaSegura123'
-    };
-
-    const clientRegistrationFields = {
+  runTest('T1.2', 'Autenticação - Registo Sem E-mail & Normalização', 'Registo de conta com telefone obrigatório normalizado, e-mail opcional e visibilidade condicional da Área de Actuação', () => {
+    const phoneOnlyClient = {
       accountType: 'cliente' as const,
       name: 'Ana Silva',
       province: 'Luanda',
-      email: 'ana.silva@gmail.com',
-      phone: '+244 912 333 444',
-      documentNumber: '005910293LA032',
-      address: 'Bairro Maianga, Luanda',
-      password: 'clienteSenha123'
+      email: '',
+      phone: '912333444',
+      address: 'Bairro Maianga, Luanda'
     };
 
+    const proRegistration = {
+      accountType: 'duplo' as const,
+      name: 'Mateus Agostinho',
+      province: 'Luanda',
+      email: '',
+      phone: '00244 923-444-555',
+      categories: ['eletricista', 'canalizador'],
+      address: 'Bairro Talatona, Rua 12, Luanda'
+    };
+
+    const normClient = normalizePhoneNumber(phoneOnlyClient.phone);
+    const normPro = normalizePhoneNumber(proRegistration.phone);
+    const syntheticEmail = phoneToSyntheticAuthEmail(normClient.e164);
+    const publicEmailHidden = getPublicUserEmail(syntheticEmail) === '';
+
     const isProRequired = (type: string) => type === 'profissional' || type === 'duplo';
+    const isCategoryVisibleForPro = isProRequired(proRegistration.accountType) && proRegistration.categories.length > 0;
+    const isCategoryHiddenForClient = !isProRequired(phoneOnlyClient.accountType);
 
-    // Para Conta Dupla / Profissional, Área de Actuação é visível e obrigatória
-    const isCategoryVisibleForPro = isProRequired(proRegistrationFields.accountType);
-    const hasCategoriesForPro = Array.isArray(proRegistrationFields.categories) && proRegistrationFields.categories.length > 0;
-
-    // Para Conta Cliente, Área de Actuação NÃO é visível
-    const isCategoryHiddenForClient = !isProRequired(clientRegistrationFields.accountType);
-
-    const passed = isCategoryVisibleForPro && hasCategoriesForPro && isCategoryHiddenForClient;
+    const passed =
+      normClient.isValid &&
+      normClient.display === '+244912333444' &&
+      normClient.e164 === '+244912333444' &&
+      normPro.isValid &&
+      normPro.display === '+244923444555' &&
+      normPro.e164 === '+244923444555' &&
+      Boolean(syntheticEmail) &&
+      publicEmailHidden &&
+      isCategoryVisibleForPro &&
+      isCategoryHiddenForClient;
 
     return {
       passed,
-      message: 'Registo Inicial validado: Área de Actuação exibe-se apenas para Profissional e Conta Dupla.',
+      message: 'Registo sem e-mail e normalização oficial (+244XXXXXXXXX) validados.',
       details: [
-        '1. Conta Profissional / Conta Dupla: ✅ Exibe selecção de Áreas de Actuação',
-        '2. Conta Cliente: ❌ Oculta selecção de Áreas de Actuação',
-        '3. Campos base (Nome, Província, Email, Telefone, Endereço): ✅ Requeridos para todos',
+        `1. Cliente sem e-mail normalizado: ${normClient.e164} ✅`,
+        `2. Profissional/Duplo normalizado: ${normPro.e164} ✅`,
+        '3. Identificador interno sintético oculto do perfil público: ✅',
+        '4. Área de Actuação visível apenas para Profissional/Conta Dupla: ✅',
       ],
     };
   });
 
-  runTest('T1.3', 'Autenticação Única & Redirecionamento por Role', 'Tela única de login para Cliente, Profissional e Admin com identificação interna da role', () => {
-    // 1. Simular base de dados com utilizadores dos 3 papéis
-    const usersDatabase: User[] = [
+  runTest('T1.3', 'Autenticação Única & Redirecionamento por Role (Cliente, Pro, Admin)', 'Login exclusivo por telefone para Cliente, Profissional e Administrador preservando permissões de Admin', () => {
+    const usersDatabase: Array<{ user: User; secret: string }> = [
       {
-        id: 'user-client-makaya',
-        name: 'Makaya',
-        email: 'makaya@gmail.com',
-        phone: '+244 945 112 233',
-        password: 'clientePass123',
-        role: 'cliente',
-        accountType: 'cliente',
-        province: 'Luanda',
-        avatar: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=150',
-        verified: true,
-        createdAt: new Date().toISOString()
+        user: {
+          id: 'user-client-makaya',
+          name: 'Makaya',
+          email: '',
+          phone: '+244 945 112 233',
+          phoneE164: '+244945112233',
+          role: 'cliente',
+          accountType: 'cliente',
+          province: 'Luanda',
+          avatar: '',
+          verified: true,
+          createdAt: new Date().toISOString()
+        },
+        secret: 'clientePass123'
       },
       {
-        id: 'user-pro-lusevakueno',
-        name: 'Lusevakueno Júlio',
-        email: 'lusevakueno.julio@gmail.com',
-        phone: '+244 923 456 789',
-        password: 'proPass123',
-        role: 'profissional',
-        accountType: 'duplo',
-        province: 'Luanda',
-        avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150',
-        verified: true,
-        createdAt: new Date().toISOString()
+        user: {
+          id: 'user-pro-lusevakueno',
+          name: 'Lusevakueno Júlio',
+          email: '',
+          phone: '+244 923 456 789',
+          phoneE164: '+244923456789',
+          role: 'profissional',
+          accountType: 'duplo',
+          province: 'Luanda',
+          avatar: '',
+          verified: true,
+          createdAt: new Date().toISOString()
+        },
+        secret: 'proPass123'
       },
       {
-        id: 'user-admin-abel',
-        name: 'António Abel Figueiredo Júlio',
-        email: 'jfigueiredo790@gmail.com',
-        phone: '+244 956 011 985',
-        password: 'fixture-admin-secret-check',
-        role: 'admin',
-        adminSubRole: 'super_admin',
-        province: 'Icolo e Bengo',
-        avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
-        verified: true,
-        createdAt: new Date().toISOString()
+        user: {
+          id: 'user-admin-abel',
+          name: 'António Abel Figueiredo Júlio',
+          email: 'jfigueiredo790@gmail.com',
+          phone: '+244 956 011 985',
+          phoneE164: '+244956011985',
+          role: 'admin',
+          adminSubRole: 'super_admin',
+          province: 'Icolo e Bengo',
+          avatar: '',
+          verified: true,
+          createdAt: new Date().toISOString()
+        },
+        secret: 'fixture-admin-secret-check'
       }
     ];
 
-    // Motor de autenticação único
     const authenticateAndRoute = (phoneInput: string, passInput: string) => {
-      const cleanPhone = phoneInput.replace(/\D/g, '');
-      const user = usersDatabase.find(u => {
-        const uPhoneDigits = u.phone.replace(/\D/g, '');
-        const phoneMatches = cleanPhone && uPhoneDigits && (uPhoneDigits.endsWith(cleanPhone) || cleanPhone.endsWith(uPhoneDigits));
-        const emailMatches = u.email && u.email.toLowerCase() === phoneInput.toLowerCase();
-        return (phoneMatches || emailMatches) && u.password === passInput;
-      });
+      const normalized = normalizePhoneNumber(phoneInput);
+      if (!normalized.isValid) return { success: false, targetTab: 'none', role: 'none' };
 
-      if (!user) return { success: false, targetTab: 'none', role: 'none' };
+      const record = usersDatabase.find(
+        entry => areSamePhoneNumber(entry.user.phone, normalized.e164) && entry.secret === passInput
+      );
+      if (!record) return { success: false, targetTab: 'none', role: 'none' };
 
-      // Identificação interna por role
-      const detectedRole: UserRole = user.role === 'admin' 
-        ? 'admin' 
-        : (user.accountType === 'profissional' || user.role === 'profissional') 
-          ? 'profissional' 
+      const { user } = record;
+      // Admin role is strictly preserved and NEVER downgraded
+      const detectedRole: UserRole = user.role === 'admin'
+        ? 'admin'
+        : (user.accountType === 'profissional' || user.role === 'profissional')
+          ? 'profissional'
           : 'cliente';
 
-      const targetTab = detectedRole === 'admin' 
-        ? 'admin' 
-        : detectedRole === 'profissional' 
-          ? 'pro_dashboard' 
+      const targetTab = detectedRole === 'admin'
+        ? 'admin'
+        : detectedRole === 'profissional'
+          ? 'pro_dashboard'
           : 'home';
 
-      return { success: true, targetTab, role: detectedRole };
+      return { success: true, targetTab, role: detectedRole, adminSubRole: user.adminSubRole };
     };
 
-    // Testar Login de Cliente
     const clientAuth = authenticateAndRoute('945 112 233', 'clientePass123');
-    const isClientRoutedCorrectly = clientAuth.success && clientAuth.targetTab === 'home' && clientAuth.role === 'cliente';
+    const proAuth = authenticateAndRoute('+244 923 456 789', 'proPass123');
+    const adminAuth = authenticateAndRoute('956011985', 'fixture-admin-secret-check');
+    const adminWrongPass = authenticateAndRoute('956011985', 'wrong-pass');
+    const officialAdminRecognized = isOfficialAdminPhone('956 011 985');
 
-    // Testar Login de Profissional
-    const proAuth = authenticateAndRoute('923 456 789', 'proPass123');
-    const isProRoutedCorrectly = proAuth.success && proAuth.targetTab === 'pro_dashboard' && proAuth.role === 'profissional';
+    const isClientBlockedFromAdmin = (clientAuth.role as string) !== 'admin';
+    const isProBlockedFromAdmin = (proAuth.role as string) !== 'admin';
 
-    // Testar Login de Administrador (mesma tela pública)
-    const adminAuth = authenticateAndRoute('956 011 985', 'fixture-admin-secret-check');
-    const isAdminRoutedCorrectly = adminAuth.success && adminAuth.targetTab === 'admin' && adminAuth.role === 'admin';
-
-    // Testar Proteção de Rota (Guarda de Rota Admin)
-    const canClientAccessAdmin = clientAuth.role === 'admin';
-    const canProAccessAdmin = proAuth.role === 'admin';
-
-    const passed = isClientRoutedCorrectly && isProRoutedCorrectly && isAdminRoutedCorrectly && !canClientAccessAdmin && !canProAccessAdmin;
+    const passed =
+      clientAuth.success && clientAuth.role === 'cliente' && clientAuth.targetTab === 'home' &&
+      proAuth.success && proAuth.role === 'profissional' && proAuth.targetTab === 'pro_dashboard' &&
+      adminAuth.success && adminAuth.role === 'admin' && adminAuth.targetTab === 'admin' && adminAuth.adminSubRole === 'super_admin' &&
+      !adminWrongPass.success &&
+      officialAdminRecognized &&
+      isClientBlockedFromAdmin &&
+      isProBlockedFromAdmin;
 
     return {
       passed,
-      message: 'Sistema de Autenticação Único e Redirecionamento Automático por Role 100% validado.',
+      message: 'Login exclusivo por telefone para Cliente, Profissional e Administrador com preservação total de permissões validado.',
       details: [
-        '1. Login Cliente (Makaya) → Redirecionado automaticamente para Painel do Cliente (home): ✅',
-        '2. Login Profissional (Lusevakueno Júlio) → Redirecionado automaticamente para Painel do Profissional (pro_dashboard): ✅',
-        '3. Login Administrador (António Abel) → Redirecionado automaticamente para Painel do Administrador (admin): ✅',
-        '4. Tela pública única sem botão/campo de Admin: ✅',
-        '5. Bloqueio de acesso não autorizado a rotas restritas: ✅'
+        '1. Login Cliente por telefone → Painel Cliente (home): ✅',
+        '2. Login Profissional por telefone → Painel Profissional (pro_dashboard): ✅',
+        '3. Login Administrador (956011985) → Painel Admin com super_admin preservado: ✅',
+        '4. Rejeição de palavra-passe errada no Administrador: ✅',
+        '5. Bloqueio de elevação de privilégios para Cliente/Profissional: ✅'
       ]
     };
   });

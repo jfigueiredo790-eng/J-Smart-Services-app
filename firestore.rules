@@ -43,12 +43,19 @@ service cloud.firestore {
     }
 
     function hasNoSecrets(data) {
-      return !('password' in data) && !('adminPin' in data) && !('otpCode' in data);
+      return !('password' in data) && !('passwordHash' in data) && !('adminPin' in data) && !('otpCode' in data);
+    }
+
+    function isValidAngolaPhone(phone) {
+      return phone is string && phone.matches('^\\+244[0-9]{9}$');
     }
 
     function isValidUserCreate(data, userId) {
       return hasNoSecrets(data) &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+        isValidAngolaPhone(data.phone) &&
+        (!('phoneE164' in data) || isValidAngolaPhone(data.phoneE164)) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
         (!('role' in data) || data.role in ['cliente', 'profissional']) &&
         (!('walletBalanceKz' in data) || data.walletBalanceKz == 0) &&
         (!('blocked' in data) || data.blocked == false) &&
@@ -65,6 +72,9 @@ service cloud.firestore {
     function isValidUserUpdate(data, prev) {
       return hasNoSecrets(data) &&
         (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 120)) &&
+        (!('phone' in data) || (('phone' in prev && data.phone == prev.phone) || isValidAngolaPhone(data.phone))) &&
+        (!('phoneE164' in data) || (('phoneE164' in prev && data.phoneE164 == prev.phoneE164) || isValidAngolaPhone(data.phoneE164))) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
         (!('role' in data) || data.role == prev.role || (prev.accountType == 'duplo' && data.role in ['cliente', 'profissional'])) &&
         (!('accountType' in data) || data.accountType == prev.accountType) &&
         (!('adminSubRole' in data) || ('adminSubRole' in prev && data.adminSubRole == prev.adminSubRole)) &&
@@ -86,9 +96,12 @@ service cloud.firestore {
     function isValidPublicPro(data) {
       return !('email' in data) &&
         !('phone' in data) &&
+        !('phoneE164' in data) &&
+        !('phoneHash' in data) &&
         !('documentNumber' in data) &&
         !('walletBalanceKz' in data) &&
         !('password' in data) &&
+        !('passwordHash' in data) &&
         !('adminPin' in data) &&
         !('proofUrl' in data) &&
         !('proofFileName' in data) &&
@@ -122,6 +135,21 @@ service cloud.firestore {
         (!('blocked' in data) || ('blocked' in prev && data.blocked == prev.blocked)) &&
         (!('isDeleted' in data) || ('isDeleted' in prev && data.isDeleted == prev.isDeleted)) &&
         (!('experienceVerified' in data) || ('experienceVerified' in prev && data.experienceVerified == prev.experienceVerified));
+    }
+
+    function isValidPhoneLoginIndex(data) {
+      return hasNoSecrets(data) &&
+        !('phone' in data) &&
+        !('phoneE164' in data) &&
+        !('name' in data) &&
+        !('documentNumber' in data) &&
+        data.keys().hasAll(['uid', 'authMode']) &&
+        data.keys().hasOnly(['uid', 'authMode', 'authEmail', 'hasRealEmail', 'updatedAt']) &&
+        data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
+        data.authMode in ['phone_synthetic', 'legacy_email'] &&
+        (!('authEmail' in data) || (data.authEmail is string && data.authEmail.size() <= 200)) &&
+        (!('hasRealEmail' in data) || data.hasRealEmail is bool) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
     function isValidServiceRequest(data) {
@@ -197,6 +225,21 @@ service cloud.firestore {
       allow create: if isValidId(proId) && (isAdmin() || (isOwner(proId) && isValidPublicProCreate(incoming())));
       allow update: if isValidId(proId) && (isAdmin() || (isOwner(proId) && isValidPublicProUpdate(incoming(), existing())));
       allow delete: if isValidId(proId) && isAdmin();
+    }
+
+    // --- PRIVACY-PRESERVING HASHED PHONE LOGIN INDEX (No raw phones, no public listing, prevents phone hijacking) ---
+    match /phone_login_index/{phoneHash} {
+      allow get: if isValidId(phoneHash) && phoneHash.matches('^ph_[a-f0-9]{16,64}$');
+      allow list: if isAdmin();
+      allow create: if isValidId(phoneHash) && phoneHash.matches('^ph_[a-f0-9]{16,64}$') && isValidPhoneLoginIndex(incoming()) && (
+        isAdmin() ||
+        (isSignedIn() && incoming().uid == request.auth.uid)
+      );
+      allow update: if isValidId(phoneHash) && phoneHash.matches('^ph_[a-f0-9]{16,64}$') && isValidPhoneLoginIndex(incoming()) && (
+        isAdmin() ||
+        (isSignedIn() && existing().uid == request.auth.uid && incoming().uid == request.auth.uid)
+      );
+      allow delete: if isValidId(phoneHash) && isAdmin();
     }
 
     // --- ANTI-DUPLICATE FREE TRIAL CLAIMS (One initial 30-day free trial per identity) ---

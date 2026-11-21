@@ -3,6 +3,15 @@ import { useApp } from '../context/AppContext';
 import { CategoryMultiSelect } from './CategoryMultiSelect';
 import { UserRole, AccountType, ANGOLA_PROVINCES, User, ProfessionalProfile } from '../types';
 import { compressImageFile } from '../utils/imageUtils';
+import {
+  ANGOLA_COUNTRY_CODE,
+  ANGOLA_PHONE_NATIONAL_LENGTH,
+  INVALID_ANGOLA_PHONE_MESSAGE,
+  buildFullAngolaPhone,
+  extractAngolaNineDigits,
+  sanitizeAngolaPhoneDigitsInput,
+  validateStrictAngolaPhone
+} from '../utils/phoneAuthUtils';
 import { UserAvatar } from './UserAvatar';
 import { AccountRecoveryModal } from './AccountRecoveryModal';
 import { 
@@ -18,15 +27,13 @@ import {
   Mail, 
   ShieldCheck, 
   MapPin, 
-  FileText, 
   AlertCircle, 
   Camera, 
   Image, 
   Eye, 
   EyeOff, 
   KeyRound, 
-  HelpCircle,
-  MessageSquare
+  HelpCircle
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -49,6 +56,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
   const [role, setRole] = useState<UserRole>(initialRole);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  // One-time optional legacy email binding (shown ONLY if an unindexed legacy account fails first phone login)
+  const [showLegacyLinkHelper, setShowLegacyLinkHelper] = useState(false);
+  const [legacyMigrationEmail, setLegacyMigrationEmail] = useState('');
 
   // Auto-switch mode to register if opened via share/register link
   React.useEffect(() => {
@@ -112,8 +123,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
     setSuccessInfo('');
 
     if (mode === 'login') {
-      if (!email.trim() || !email.includes('@')) {
-        setAuthError('Por favor introduza o e-mail da sua conta (ex: nome@gmail.com).');
+      const fullPhone = buildFullAngolaPhone(phone);
+      const validatedPhone = validateStrictAngolaPhone(fullPhone);
+      if (!validatedPhone.isValid) {
+        setAuthError(validatedPhone.error || INVALID_ANGOLA_PHONE_MESSAGE);
         return;
       }
       if (!password) {
@@ -122,17 +135,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
       }
 
       setIsSubmitting(true);
-      const emergencyLoginTimer = setTimeout(() => setIsSubmitting(false), 7000);
+      const emergencyLoginTimer = setTimeout(() => setIsSubmitting(false), 8000);
 
       try {
-        // Validates credentials via Firebase Auth and routes by verified role
-        const res = await loginUserWithCredentialsAsync(email.trim(), password, role);
+        const res = await loginUserWithCredentialsAsync(
+          validatedPhone.e164,
+          password,
+          role,
+          showLegacyLinkHelper && legacyMigrationEmail.trim()
+            ? { legacyEmail: legacyMigrationEmail.trim() }
+            : undefined
+        );
         clearTimeout(emergencyLoginTimer);
 
         if (res.success) {
           onClose();
         } else {
           setAuthError(res.message);
+          if (res.suggestLegacyMigration) {
+            setShowLegacyLinkHelper(true);
+          }
         }
       } catch {
         clearTimeout(emergencyLoginTimer);
@@ -141,7 +163,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         setIsSubmitting(false);
       }
     } else if (mode === 'register') {
-      // Registration form validations
+      // Registration form validations (Phone mandatory in +244XXXXXXXXX format, Email optional)
       if (!name.trim()) {
         setAuthError('Por favor preencha o seu Nome Completo.');
         return;
@@ -150,12 +172,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         setAuthError('Por favor escolha a Província onde vive.');
         return;
       }
-      if (!email.trim() || !email.includes('@')) {
-        setAuthError('Por favor introduza um Gmail / E-mail válido.');
+      const fullPhone = buildFullAngolaPhone(phone);
+      const validatedPhone = validateStrictAngolaPhone(fullPhone);
+      if (!validatedPhone.isValid) {
+        setAuthError(validatedPhone.error || INVALID_ANGOLA_PHONE_MESSAGE);
         return;
       }
-      if (!phone.trim()) {
-        setAuthError('Por favor introduza um Número de Telefone válido.');
+      const optionalEmail = email.trim();
+      if (optionalEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(optionalEmail)) {
+        setAuthError('O e-mail opcional introduzido é inválido. Corrija-o ou deixe em branco.');
         return;
       }
       if (!password.trim() || password.length < 6) {
@@ -171,7 +196,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         return;
       }
 
-      const formattedPhone = phone.trim().startsWith('+244') ? phone.trim() : `+244 ${phone.trim()}`;
       const targetRole: UserRole = accountType === 'profissional' ? 'profissional' : 'cliente';
 
       const activeCatNames = selectedCategories
@@ -201,8 +225,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
 
       const newUser: Partial<User & ProfessionalProfile> = {
         name: name.trim(),
-        email: email.trim(),
-        phone: formattedPhone,
+        email: optionalEmail,
+        phone: validatedPhone.e164,
+        phoneE164: validatedPhone.e164,
         gender,
         role: targetRole,
         accountType,
@@ -217,7 +242,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
       };
 
       setIsSubmitting(true);
-      const emergencyRegTimer = setTimeout(() => setIsSubmitting(false), 8000);
+      const emergencyRegTimer = setTimeout(() => setIsSubmitting(false), 9000);
 
       try {
         const res = await registerUserAsync(newUser, password.trim());
@@ -241,12 +266,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
     return (
       <AccountRecoveryModal
         initialType={recoveryType}
+        initialPhone={phone ? buildFullAngolaPhone(phone) : ''}
         onClose={() => setShowRecoveryModal(false)}
-        onSuccessReturnToLogin={(recoveredId) => {
+        onSuccessReturnToLogin={(recoveredPhone) => {
           setShowRecoveryModal(false);
           setMode('login');
-          if (recoveredId && recoveredId.includes('@')) {
-            setEmail(recoveredId.trim());
+          if (recoveredPhone) {
+            setPhone(extractAngolaNineDigits(recoveredPhone));
           }
         }}
       />
@@ -282,7 +308,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
           {/* Mode Selector (Login vs Criar Conta) */}
           <div className="flex bg-slate-100 p-1 rounded-2xl my-4">
             <button
-              onClick={() => { setMode('login'); setAuthError(''); setSuccessInfo(''); }}
+              type="button"
+              onClick={() => { setMode('login'); setAuthError(''); setSuccessInfo(''); setShowLegacyLinkHelper(false); }}
               className={`flex-1 py-2.5 text-xs font-extrabold rounded-xl transition-all ${
                 mode === 'login' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
               }`}
@@ -290,7 +317,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
               Entrar
             </button>
             <button
-              onClick={() => { setMode('register'); setAuthError(''); setSuccessInfo(''); }}
+              type="button"
+              onClick={() => { setMode('register'); setAuthError(''); setSuccessInfo(''); setShowLegacyLinkHelper(false); }}
               className={`flex-1 py-2.5 text-xs font-extrabold rounded-xl transition-all ${
                 mode === 'register' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
               }`}
@@ -318,43 +346,56 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
           {/* Form for Login and Register */}
           <form onSubmit={handleSubmit} className="space-y-3.5">
             
-            {/* ==================== LOGIN MODE ==================== */}
+            {/* ==================== LOGIN MODE (APENAS 2 CAMPOS: TELEFONE + PALAVRA-PASSE) ==================== */}
             {mode === 'login' && (
               <>
-                {/* E-mail de Acesso */}
+                {/* 1. Número de Telefone (+244XXXXXXXXX) */}
                 <div>
-                  <label className="text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>E-mail da conta *</span>
+                  <label className="text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Número de telefone *</span>
+                    </span>
+                    <span className="text-[10px] text-emerald-600 font-extrabold">🇦🇴 {ANGOLA_COUNTRY_CODE} (9 dígitos)</span>
                   </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  <div className="flex items-stretch rounded-xl border border-slate-200 bg-slate-50/50 focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 overflow-hidden">
+                    <span className="inline-flex items-center px-3 bg-emerald-50 border-r border-slate-200 text-xs font-extrabold text-emerald-800 select-none shrink-0">
+                      {ANGOLA_COUNTRY_CODE}
+                    </span>
                     <input 
-                      type="email" 
-                      value={email} 
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="seu@email.com" 
-                      className="w-full text-xs p-3 pl-10 rounded-xl border border-slate-200 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-slate-50/50"
+                      type="tel" 
+                      inputMode="numeric"
+                      autoComplete="tel-national"
+                      maxLength={ANGOLA_PHONE_NATIONAL_LENGTH}
+                      value={phone} 
+                      onChange={(e) => {
+                        setPhone(sanitizeAngolaPhoneDigitsInput(e.target.value));
+                        if (authError) setAuthError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (
+                          e.ctrlKey || e.metaKey || e.altKey ||
+                          ['Backspace', 'Delete', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)
+                        ) {
+                          return;
+                        }
+                        if (!/^[0-9]$/.test(e.key)) {
+                          e.preventDefault();
+                        }
+                      }}
+                      placeholder="923456789" 
+                      className="w-full text-xs p-3 font-bold tracking-wider text-slate-900 bg-transparent focus:outline-none"
                       required
                     />
-                  </div>
-                  <div className="flex justify-end mt-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRecoveryType('phone');
-                        setShowRecoveryModal(true);
-                        setAuthError('');
-                      }}
-                      className="text-[11px] text-slate-500 hover:text-emerald-700 font-bold transition-colors flex items-center gap-1"
-                    >
-                      <HelpCircle className="w-3 h-3 text-slate-400" />
-                      <span>Recuperar acesso à conta</span>
-                    </button>
+                    <span className={`inline-flex items-center pr-3 text-[10px] font-extrabold select-none shrink-0 ${
+                      phone.length === ANGOLA_PHONE_NATIONAL_LENGTH ? 'text-emerald-600' : 'text-slate-400'
+                    }`}>
+                      {phone.length}/{ANGOLA_PHONE_NATIONAL_LENGTH}
+                    </span>
                   </div>
                 </div>
 
-                {/* Palavra-passe */}
+                {/* 2. Palavra-passe */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
@@ -377,6 +418,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                   <div className="relative">
                     <input 
                       type={showPassword ? 'text' : 'password'} 
+                      autoComplete="current-password"
                       value={password} 
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Introduza a sua palavra-passe" 
@@ -386,6 +428,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Ocultar palavra-passe' : 'Mostrar palavra-passe'}
+                      title={showPassword ? 'Ocultar palavra-passe' : 'Mostrar palavra-passe'}
                       className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -393,9 +437,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                   </div>
                 </div>
 
+                {/* One-time binding helper ONLY shown when an unindexed legacy account needs to associate its old email once */}
+                {showLegacyLinkHelper && (
+                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl space-y-2">
+                    <div className="flex items-start gap-2 text-[11px] text-amber-900 font-semibold">
+                      <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <span>
+                        Conta criada antes desta atualização com e-mail? Indique o seu e-mail antigo <strong>apenas uma vez</strong> para associá-lo automaticamente ao seu telefone.
+                      </span>
+                    </div>
+                    <input
+                      type="email"
+                      value={legacyMigrationEmail}
+                      onChange={(e) => setLegacyMigrationEmail(e.target.value)}
+                      placeholder="E-mail da conta antiga (opcional — apenas 1 vez)"
+                      className="w-full text-xs p-2.5 rounded-xl border border-amber-300 bg-white font-medium text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+
                 <div className="bg-emerald-50/80 p-3 rounded-2xl border border-emerald-200 text-[11px] text-emerald-950 font-medium flex items-start gap-2 leading-relaxed">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>O sistema reconhece automaticamente o tipo da sua conta (cliente e profissional) ao entrar.</span>
+                  <span>Entre com o seu número de telefone e palavra-passe. O sistema reconhece automaticamente o seu perfil (Cliente, Profissional ou Administração).</span>
                 </div>
               </>
             )}
@@ -589,57 +652,98 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                   </select>
                 </div>
 
-                {/* 4. Gmail / E-mail */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Gmail / E-mail *</span>
-                  </label>
-                  <input 
-                    type="email" 
-                    value={email} 
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="exemplo@gmail.com" 
-                    className="w-full text-xs p-3 rounded-xl border border-slate-200 font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    required
-                  />
-                </div>
-
-                {/* 5. Número de Telefone */}
+                {/* 4. Número de Telefone (OBRIGATÓRIO: +244XXXXXXXXX) */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
                       <Phone className="w-3.5 h-3.5 text-emerald-600" />
                       <span>Número de Telefone *</span>
                     </span>
-                    <span className="text-[10px] text-emerald-600 font-extrabold">🇦🇴 +244</span>
+                    <span className="text-[10px] text-emerald-600 font-extrabold">🇦🇴 {ANGOLA_COUNTRY_CODE} (9 dígitos)</span>
                   </label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-3 text-xs font-bold text-slate-400">+244</span>
+                  <div className="flex items-stretch rounded-xl border border-slate-200 bg-white focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 overflow-hidden">
+                    <span className="inline-flex items-center px-3 bg-emerald-50 border-r border-slate-200 text-xs font-extrabold text-emerald-800 select-none shrink-0">
+                      {ANGOLA_COUNTRY_CODE}
+                    </span>
                     <input 
                       type="tel" 
+                      inputMode="numeric"
+                      autoComplete="tel-national"
+                      maxLength={ANGOLA_PHONE_NATIONAL_LENGTH}
                       value={phone} 
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="923 111 222" 
-                      className="w-full text-xs p-3 pl-14 rounded-xl border border-slate-200 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      onChange={(e) => {
+                        setPhone(sanitizeAngolaPhoneDigitsInput(e.target.value));
+                        if (authError) setAuthError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (
+                          e.ctrlKey || e.metaKey || e.altKey ||
+                          ['Backspace', 'Delete', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)
+                        ) {
+                          return;
+                        }
+                        if (!/^[0-9]$/.test(e.key)) {
+                          e.preventDefault();
+                        }
+                      }}
+                      placeholder="923456789" 
+                      className="w-full text-xs p-3 font-bold tracking-wider text-slate-900 bg-transparent focus:outline-none"
                       required
                     />
+                    <span className={`inline-flex items-center pr-3 text-[10px] font-extrabold select-none shrink-0 ${
+                      phone.length === ANGOLA_PHONE_NATIONAL_LENGTH ? 'text-emerald-600' : 'text-slate-400'
+                    }`}>
+                      {phone.length}/{ANGOLA_PHONE_NATIONAL_LENGTH}
+                    </span>
                   </div>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Formato oficial de Angola: <strong>+244XXXXXXXXX</strong> (apenas 9 dígitos, sem espaços).
+                  </p>
                 </div>
 
-                {/* Palavra-passe de Registo */}
+                {/* 5. Palavra-passe de Registo (com Mostrar/Ocultar) */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
                     <Lock className="w-3.5 h-3.5 text-emerald-600" />
                     <span>Palavra-passe de Acesso *</span>
                   </label>
+                  <div className="relative">
+                    <input 
+                      type={showPassword ? 'text' : 'password'} 
+                      autoComplete="new-password"
+                      value={password} 
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Crie a sua palavra-passe (mín. 6 caracteres)" 
+                      className="w-full text-xs p-3 pr-10 rounded-xl border border-slate-200 font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Ocultar palavra-passe' : 'Mostrar palavra-passe'}
+                      title={showPassword ? 'Ocultar palavra-passe' : 'Mostrar palavra-passe'}
+                      className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 6. E-mail (OPCIONAL) */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-slate-400" />
+                      <span>E-mail</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">(Opcional)</span>
+                  </label>
                   <input 
-                    type="password" 
-                    value={password} 
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Crie a sua palavra-passe" 
+                    type="email" 
+                    value={email} 
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Opcional — pode deixar em branco" 
                     className="w-full text-xs p-3 rounded-xl border border-slate-200 font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    required
                   />
                 </div>
 
@@ -752,7 +856,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                   Não tem uma conta?{' '}
                   <button
                     type="button"
-                    onClick={() => { setMode('register'); setAuthError(''); }}
+                    onClick={() => { setMode('register'); setAuthError(''); setShowLegacyLinkHelper(false); }}
                     className="text-emerald-700 hover:text-emerald-800 font-black hover:underline"
                   >
                     Criar conta
@@ -763,7 +867,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                   Já possui uma conta?{' '}
                   <button
                     type="button"
-                    onClick={() => { setMode('login'); setAuthError(''); }}
+                    onClick={() => { setMode('login'); setAuthError(''); setShowLegacyLinkHelper(false); }}
                     className="text-emerald-700 hover:text-emerald-800 font-black hover:underline"
                   >
                     Entrar

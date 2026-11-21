@@ -7,8 +7,11 @@
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "maxLength": 100 },
-        "email": { "type": "string", "format": "email", "maxLength": 200 },
-        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 13, "pattern": "^\\+244[0-9]{9}$" },
+        "phoneE164": { "type": "string", "maxLength": 13, "pattern": "^\\+244[0-9]{9}$" },
+        "phoneHash": { "type": "string", "maxLength": 128 },
+        "authIdentifierType": { "type": "string", "enum": ["phone", "legacy_email"] },
         "role": { "type": "string", "enum": ["cliente", "profissional", "admin"] },
         "accountType": { "type": "string", "enum": ["cliente", "profissional", "duplo"] },
         "province": { "type": "string", "maxLength": 100 },
@@ -32,8 +35,11 @@
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "maxLength": 100 },
-        "email": { "type": "string", "format": "email", "maxLength": 200 },
-        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 13, "pattern": "^\\+244[0-9]{9}$" },
+        "phoneE164": { "type": "string", "maxLength": 13, "pattern": "^\\+244[0-9]{9}$" },
+        "phoneHash": { "type": "string", "maxLength": 128 },
+        "authIdentifierType": { "type": "string", "enum": ["phone", "legacy_email"] },
         "role": { "type": "string", "enum": ["profissional"] },
         "accountType": { "type": "string", "enum": ["profissional", "duplo"] },
         "categories": { "type": "array" },
@@ -97,15 +103,17 @@
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "maxLength": 100 },
-        "email": { "type": "string", "format": "email", "maxLength": 200 },
-        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 13, "pattern": "^\\+244[0-9]{9}$" },
+        "phoneE164": { "type": "string", "maxLength": 13, "pattern": "^\\+244[0-9]{9}$" },
+        "phoneHash": { "type": "string", "maxLength": 128 },
         "role": { "type": "string", "enum": ["admin"] },
         "adminSubRole": { "type": "string", "enum": ["super_admin", "atendimento", "gestao_profissionais", "financeiro"] },
         "ownerId": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "name", "email", "role", "adminSubRole", "createdAt"]
+      "required": ["id", "name", "phone", "role", "adminSubRole", "createdAt"]
     },
     "Servico": {
       "title": "Servico",
@@ -321,6 +329,19 @@
         "createdAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "claimedBy"]
+    },
+    "PhoneLoginIndex": {
+      "title": "PhoneLoginIndex",
+      "description": "Índice hash de login por telefone sem exposição de números em texto simples",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "authMode": { "type": "string", "enum": ["phone_synthetic", "legacy_email"] },
+        "authEmail": { "type": "string", "maxLength": 200 },
+        "hasRealEmail": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["uid", "authMode"]
     }
   },
   "firestore": {
@@ -431,6 +452,10 @@
     "/trial_claims/{claimId}": {
       "schema": { "$ref": "#/entities/TrialClaim" },
       "description": "Controlo anti-duplicação do período experimental único por utilizador"
+    },
+    "/phone_login_index/{phoneHash}": {
+      "schema": { "$ref": "#/entities/PhoneLoginIndex" },
+      "description": "Índice hash privado para autenticação por telefone e prevenção de duplicados"
     }
   }
 }

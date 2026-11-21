@@ -5,6 +5,7 @@ import { UserAvatar } from './UserAvatar';
 import { AdminCategoryManager } from './AdminCategoryManager';
 import { sanitizeMediaUrl, openSafePdfProof } from '../utils/securityUtils';
 import { buildShareUrl } from '../config/domain';
+import { auth } from '../lib/firebase';
 import { 
   ShieldCheck, 
   Users, 
@@ -70,6 +71,8 @@ export const AdminDashboard: React.FC = () => {
     adminChangeUserAccountType,
     adminUpdateProCategories,
     auditAndFixBuggedCategories,
+    migrateLegacyAccountsPhoneIndexAsync,
+    sendAdminVerificationEmailAsync,
     runAutoTestSuite,
     codeOfConductRules,
     updateCodeOfConductRules,
@@ -80,6 +83,8 @@ export const AdminDashboard: React.FC = () => {
   } = useApp();
 
   const [adminSyncFeedback, setAdminSyncFeedback] = useState<string | null>(null);
+  const [isMigratingPhones, setIsMigratingPhones] = useState(false);
+  const [isSendingAdminVerify, setIsSendingAdminVerify] = useState(false);
 
   const handleAdminSync = async () => {
     if (isSyncing) return;
@@ -2604,6 +2609,64 @@ export const AdminDashboard: React.FC = () => {
       {/* TAB 8: AUDITORIA DE SEGURANÇA E CATEGORIAS */}
       {adminTab === 'audit' && (
         <div className="space-y-6">
+          {/* Card de Migração Segura de Login por Telefone (Não Destrutivo) */}
+          <div className="bg-white rounded-3xl p-6 border border-emerald-200 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-5 h-5 text-emerald-600" />
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Migração Não-Destrutiva de Telefones (Login por Telefone)
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                  Normaliza os números de telefone (+244) e sincroniza o índice seguro (hash SHA-256) das contas antigas de clientes, profissionais e administradores para permitir entrada imediata apenas com telefone e palavra-passe — <strong>sem eliminar nem alterar quaisquer dados, publicações ou permissões</strong>.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={isMigratingPhones}
+                  onClick={async () => {
+                    setIsMigratingPhones(true);
+                    try {
+                      const res = await migrateLegacyAccountsPhoneIndexAsync();
+                      showToast(res.success ? 'success' : 'error', res.message);
+                    } catch {
+                      showToast('error', 'Erro ao sincronizar telefones das contas.');
+                    } finally {
+                      setIsMigratingPhones(false);
+                    }
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isMigratingPhones ? 'animate-spin' : ''}`} />
+                  <span>{isMigratingPhones ? 'A sincronizar contas...' : 'Sincronizar Telefones de Contas Antigas'}</span>
+                </button>
+
+                {auth.currentUser && !auth.currentUser.emailVerified && (
+                  <button
+                    type="button"
+                    disabled={isSendingAdminVerify}
+                    onClick={async () => {
+                      setIsSendingAdminVerify(true);
+                      try {
+                        const res = await sendAdminVerificationEmailAsync();
+                        showToast(res.success ? 'success' : 'error', res.message);
+                      } finally {
+                        setIsSendingAdminVerify(false);
+                      }
+                    }}
+                    className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-60"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>{isSendingAdminVerify ? 'A enviar...' : 'Confirmar Verificação do Admin'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Card de Auditoria & Correção de Áreas de Atuação */}
           <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl p-6 border border-slate-700 shadow-xl space-y-4">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

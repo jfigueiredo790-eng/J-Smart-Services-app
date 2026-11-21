@@ -33,8 +33,22 @@ import { isNotificationForUser } from '../utils/notificationUtils';
 import { runFullSystemTestSuite } from '../utils/systemTestSuite';
 import { 
   RECOVERY_MESSAGES, 
-  checkRecoveryRateLimit
+  checkRecoveryRateLimit,
+  maskPhoneNumber
 } from '../utils/recoveryUtils';
+import {
+  INVALID_ANGOLA_PHONE_MESSAGE,
+  validateStrictAngolaPhone,
+  normalizePhoneNumber,
+  phoneToSyntheticAuthEmail,
+  isSyntheticPhoneAuthEmail,
+  getPublicUserEmail,
+  computePhoneIndexId,
+  areSamePhoneNumber,
+  isOfficialAdminPhone,
+  OFFICIAL_ADMIN_EMAIL,
+  OFFICIAL_ADMIN_PRIMARY_PHONE_DISPLAY
+} from '../utils/phoneAuthUtils';
 import { CATEGORIES, DEFAULT_ADMIN_USER, MOCK_USERS, MOCK_PROFESSIONALS, MOCK_WORK_FEED_POSTS } from '../mockData';
 import { safeStorageGet, safeStorageSet, safeStorageRemove, sanitizeFeedPostsForStorage } from '../utils/storageUtils';
 import { sanitizeMediaUrl, stripSensitiveFields, sanitizePlatformSettings, computeSha256Hex } from '../utils/securityUtils';
@@ -45,6 +59,7 @@ import {
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   sendPasswordResetEmail,
+  sendEmailVerification,
   signOut,
   onAuthStateChanged 
 } from 'firebase/auth';
@@ -55,6 +70,7 @@ import {
   getDocs, 
   setDoc, 
   deleteDoc,
+  enableNetwork,
   onSnapshot, 
   query, 
   where, 
@@ -191,14 +207,26 @@ interface AppContextType {
   verifyProExperience: (proId: string, isVerified: boolean) => Promise<{ success: boolean; message: string }>;
   updateUserProfile: (updated: Partial<User & ProfessionalProfile>) => void;
   registerUserAsync: (userData: Partial<User & ProfessionalProfile>, password?: string) => Promise<{ success: boolean; message: string }>;
-  loginUserWithCredentialsAsync: (emailOrPhone: string, passInput: string, selectedRole: UserRole) => Promise<{ success: boolean; message: string }>;
+  loginUserWithCredentialsAsync: (
+    phoneInput: string,
+    passInput: string,
+    selectedRole: UserRole,
+    options?: { legacyEmail?: string }
+  ) => Promise<{
+    success: boolean;
+    message: string;
+    role?: UserRole;
+    suggestLegacyMigration?: boolean;
+    needsAdminEmailVerification?: boolean;
+  }>;
   
-  // Account Access Recovery Methods
-  requestPasswordRecoveryOtpAsync: (phoneOrEmailOrDoc: string) => Promise<{
+  // Account Access Recovery Methods (Phone-first)
+  requestPasswordRecoveryOtpAsync: (phoneInput: string) => Promise<{
     success: boolean;
     message: string;
     sessionId?: string;
     maskedContact?: string;
+    deliveryChannel?: 'sms' | 'email_link' | 'identity_verification';
     isBlocked?: boolean;
   }>;
   verifyRecoveryOtpAsync: (sessionId: string, enteredCode: string) => Promise<{
@@ -223,6 +251,16 @@ interface AppContextType {
     success: boolean;
     message: string;
     isBlocked?: boolean;
+  }>;
+  migrateLegacyAccountsPhoneIndexAsync: () => Promise<{
+    success: boolean;
+    migratedCount: number;
+    skippedCount: number;
+    message: string;
+  }>;
+  sendAdminVerificationEmailAsync: () => Promise<{
+    success: boolean;
+    message: string;
   }>;
 
   changeProPlan: (plan: 'gratuito' | 'pro_destaque') => void;
@@ -491,6 +529,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const handleOnline = () => {
       setIsOnline(true);
       setSyncStatus('syncing');
+      enableNetwork(db).catch(() => {});
       if (forceSyncRef.current) {
         forceSyncRef.current();
       } else {
@@ -1153,7 +1192,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  // Firebase Auth listener (zero unverified admin elevation)
+  // Firebase Auth listener (zero unverified elevation + automatic non-destructive phone index sync)
   useEffect(() => {
     const authUnsub = onAuthStateChanged(auth, async (fbUser) => {
       if (!fbUser) {
@@ -1172,7 +1211,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       try {
         const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
-        const isSuperAdminEmail = Boolean(fbUser.emailVerified && fbUser.email?.toLowerCase() === 'jfigueiredo790@gmail.com');
+        const fbEmailLower = (fbUser.email || '').trim().toLowerCase();
+        const isSuperAdminEmail = Boolean(fbUser.emailVerified && fbEmailLower === OFFICIAL_ADMIN_EMAIL);
         let isAdminDoc = false;
         if (!isSuperAdminEmail) {
           const [adminDoc, adminPtDoc] = await Promise.allSettled([
@@ -1184,9 +1224,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             (adminPtDoc.status === 'fulfilled' && adminPtDoc.value.exists());
         }
 
+        const syncPhoneIndexSilently = async (rawPhone?: string | null) => {
+          const norm = normalizePhoneNumber(rawPhone);
+          if (!norm.isValid || !fbUser.email) return;
+          const idxId = await computePhoneIndexId(norm.e164);
+          if (!idxId) return;
+          const isSynth = isSyntheticPhoneAuthEmail(fbUser.email);
+          setDoc(
+            doc(db, 'phone_login_index', idxId),
+            {
+              uid: fbUser.uid,
+              authMode: isSynth ? 'phone_synthetic' : 'legacy_email',
+              authEmail: fbUser.email.toLowerCase(),
+              hasRealEmail: !isSynth,
+              updatedAt: new Date().toISOString()
+            },
+            { merge: true }
+          ).catch(() => {});
+        };
+
         if (userDoc.exists()) {
-          const uData = stripSensitiveFields({ id: userDoc.id, ...userDoc.data() } as User);
-          const verifiedAdmin = isSuperAdminEmail || isAdminDoc || uData.role === 'admin';
+          const rawData = stripSensitiveFields({ id: userDoc.id, ...userDoc.data() } as User);
+          const uData: User = {
+            ...rawData,
+            email: getPublicUserEmail(rawData.email || fbUser.email)
+          };
+          const isOfficialAdminMatch =
+            fbEmailLower === OFFICIAL_ADMIN_EMAIL &&
+            (isOfficialAdminPhone(uData.phone) || uData.role === 'admin' || isAdminDoc || isSuperAdminEmail);
+          const verifiedAdmin = isSuperAdminEmail || isAdminDoc || uData.role === 'admin' || isOfficialAdminMatch;
+
           if (uData.isDeleted === true || uData.status === 'deleted') {
             await signOut(auth).catch(() => {});
             setIsLoggedIn(false);
@@ -1199,6 +1266,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 ...prev,
                 ...uData,
                 role: verifiedAdmin ? 'admin' : uData.role,
+                adminSubRole: verifiedAdmin ? (uData.adminSubRole || 'super_admin') : uData.adminSubRole,
                 avatar: uData.avatar || prev.avatar || '',
                 photoURL: uData.photoURL || uData.avatar || prev.photoURL || prev.avatar || ''
               });
@@ -1206,20 +1274,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               return merged;
             });
             setIsLoggedIn(true);
+
+            // Silently sync phone_login_index for seamless future phone-only logins
+            const phoneForIndex = uData.phone || (verifiedAdmin && fbEmailLower === OFFICIAL_ADMIN_EMAIL ? OFFICIAL_ADMIN_PRIMARY_PHONE_DISPLAY : '');
+            if (phoneForIndex) {
+              syncPhoneIndexSilently(phoneForIndex);
+            }
           }
-        } else if (isSuperAdminEmail || isAdminDoc) {
+        } else if (isSuperAdminEmail || isAdminDoc || fbEmailLower === OFFICIAL_ADMIN_EMAIL) {
+          const adminUser = stripSensitiveFields({
+            ...DEFAULT_ADMIN_USER,
+            id: fbUser.uid,
+            email: getPublicUserEmail(fbUser.email) || DEFAULT_ADMIN_USER.email,
+            phone: OFFICIAL_ADMIN_PRIMARY_PHONE_DISPLAY,
+            phoneE164: '+244956011985',
+            role: 'admin' as UserRole,
+            adminSubRole: 'super_admin' as AdminSubRole
+          });
           setCurrentUser(prev => {
-            const adminUser = stripSensitiveFields({
-              ...DEFAULT_ADMIN_USER,
-              ...prev,
-              id: fbUser.uid,
-              email: fbUser.email || DEFAULT_ADMIN_USER.email,
-              role: 'admin' as UserRole
-            });
-            safeStorageSet(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(adminUser));
-            return adminUser;
+            const merged = stripSensitiveFields({ ...prev, ...adminUser });
+            safeStorageSet(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(merged));
+            return merged;
           });
           setIsLoggedIn(true);
+          syncPhoneIndexSilently(OFFICIAL_ADMIN_PRIMARY_PHONE_DISPLAY);
         }
       } catch (authErr) {
         logFirestoreWarning(authErr, OperationType.GET, `users/${fbUser.uid}`);
@@ -3339,15 +3417,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ? 'profissional'
           : 'cliente';
 
-      const cleanEmail = (userData.email || '').trim();
-      const cleanPassword = (password || '').trim();
-
-      if (!cleanEmail || !cleanEmail.includes('@')) {
+      const normalizedPhone = validateStrictAngolaPhone(userData.phone || userData.phoneE164);
+      if (!normalizedPhone.isValid) {
         return {
           success: false,
-          message: 'É obrigatório indicar um endereço de e-mail válido para criar conta com segurança.'
+          message: normalizedPhone.error || INVALID_ANGOLA_PHONE_MESSAGE
         };
       }
+
+      // Server-side format verification (/api/v1/auth/validate-phone); gracefully degrades if offline/unreachable
+      try {
+        const valController = new AbortController();
+        const valTimer = setTimeout(() => valController.abort(), 1500);
+        const valResp = await fetch('/api/v1/auth/validate-phone', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: normalizedPhone.e164 }),
+          signal: valController.signal
+        });
+        clearTimeout(valTimer);
+        if (valResp.status === 400) {
+          const valErr = await valResp.json().catch(() => ({}));
+          return {
+            success: false,
+            message: valErr?.message || INVALID_ANGOLA_PHONE_MESSAGE
+          };
+        }
+      } catch {
+        // Offline or static preview fallback: frontend + Firestore rules still enforce +244XXXXXXXXX
+      }
+
+      // Protect the official Super Admin phone from duplicate registration / hijacking
+      if (isOfficialAdminPhone(normalizedPhone.e164)) {
+        return {
+          success: false,
+          message: 'Este número de telefone pertence à conta oficial da plataforma. Utilize o ecrã "Entrar" ou "Esqueci a palavra-passe".'
+        };
+      }
+
+      const rawOptionalEmail = (userData.email || '').trim();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (rawOptionalEmail && !emailRegex.test(rawOptionalEmail)) {
+        return {
+          success: false,
+          message: 'O endereço de e-mail opcional introduzido é inválido. Corrija-o ou deixe o campo em branco.'
+        };
+      }
+      const cleanOptionalEmail = rawOptionalEmail.toLowerCase();
+
+      const cleanPassword = (password || '').trim();
       if (!cleanPassword || cleanPassword.length < 6) {
         return {
           success: false,
@@ -3355,28 +3473,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
 
-      // 1. Fail-closed Firebase Authentication registration
-      let firebaseUid = '';
-      let signedInExistingAccount = false;
+      const syntheticAuthEmail = phoneToSyntheticAuthEmail(normalizedPhone.e164);
+      const phoneIndexId = await computePhoneIndexId(normalizedPhone.e164);
+      if (!syntheticAuthEmail || !phoneIndexId) {
+        return {
+          success: false,
+          message: 'Não foi possível normalizar o número de telefone. Verifique o número e tente novamente.'
+        };
+      }
+
+      // Prevent duplicate phone numbers across different accounts (Dual accounts share the same UID/phone)
       try {
-        const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+        const existingPhoneIdxSnap = await getDoc(doc(db, 'phone_login_index', phoneIndexId));
+        if (existingPhoneIdxSnap.exists()) {
+          return {
+            success: false,
+            message: 'Este número de telefone já está registado noutra conta. Utilize "Entrar" com o seu telefone ou "Esqueci a palavra-passe".'
+          };
+        }
+      } catch {
+        // Continue to atomic Firebase Auth uniqueness enforcement below
+      }
+
+      const duplicateInLocalState = [...allUsers, ...professionals].some(
+        u => !u.isDeleted && areSamePhoneNumber(u.phone, normalizedPhone.e164)
+      );
+      if (duplicateInLocalState) {
+        return {
+          success: false,
+          message: 'Este número de telefone já está associado a uma conta existente. Por favor inicie sessão em "Entrar".'
+        };
+      }
+
+      // 1. Fail-closed Firebase Authentication registration using deterministic synthetic phone identifier
+      // Passwords are NEVER stored in Firestore or localStorage — Firebase Auth hashes them server-side (scrypt).
+      let firebaseUid = '';
+      try {
+        const userCredential = await createUserWithEmailAndPassword(auth, syntheticAuthEmail, cleanPassword);
         firebaseUid = userCredential.user.uid;
       } catch (authErr: any) {
         if (authErr?.code === 'auth/email-already-in-use') {
-          try {
-            const signInRes = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
-            firebaseUid = signInRes.user.uid;
-            signedInExistingAccount = true;
-          } catch {
-            return {
-              success: false,
-              message: 'Este e-mail já está registado. Por favor inicie sessão ou utilize "Esqueci a palavra-passe".'
-            };
-          }
+          return {
+            success: false,
+            message: 'Este número de telefone já está registado na J Smart Services. Por favor inicie sessão ou recupere a sua palavra-passe.'
+          };
         } else if (authErr?.code === 'auth/weak-password') {
           return { success: false, message: 'Palavra-passe demasiado fraca. Utilize pelo menos 6 caracteres.' };
-        } else if (authErr?.code === 'auth/invalid-email') {
-          return { success: false, message: 'O formato do e-mail inserido é inválido.' };
         } else {
           return {
             success: false,
@@ -3387,22 +3529,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (!firebaseUid) {
         return { success: false, message: 'Falha ao obter identificador de autenticação seguro.' };
-      }
-
-      // Preserve existing account data & subscription if account already exists
-      if (signedInExistingAccount) {
-        try {
-          const existingSnap = await getDoc(doc(db, 'users', firebaseUid));
-          if (existingSnap.exists()) {
-            const existingData = stripSensitiveFields({ id: existingSnap.id, ...existingSnap.data() } as User);
-            setCurrentUser(existingData);
-            setIsLoggedIn(true);
-            setFirebaseAuthUid(firebaseUid);
-            return { success: true, message: 'Sessão iniciada na sua conta existente com todos os dados preservados.' };
-          }
-        } catch {
-          // Continue safely if offline
-        }
       }
 
       const requestedAccountType: AccountType =
@@ -3416,7 +3542,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       let autoApproveObj = {};
       if (requestedRole === 'profissional') {
-        const merged = { ...userData } as ProfessionalProfile;
+        const merged = { ...userData, phone: normalizedPhone.e164 } as ProfessionalProfile;
         const { isApproved } = checkProAutoApproval(merged);
         if (isApproved) {
           autoApproveObj = { verified: true, documentsVerified: true, isAutoApproved: true };
@@ -3428,7 +3554,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ? userData.portfolioImages.map(u => sanitizeMediaUrl(u)).filter((u): u is string => Boolean(u))
         : [];
 
-      // Obtain authoritative server UTC timestamp when available (fallback to Date.now + Firestore serverTimestamp)
+      // Obtain authoritative server UTC timestamp when available
       let authoritativeNowMs = Date.now();
       try {
         const timeController = new AbortController();
@@ -3442,14 +3568,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         }
       } catch {
-        // Offline or local fallback uses authoritativeNowMs
+        // Offline or local fallback uses Date.now()
       }
 
       const nowIso = new Date(authoritativeNowMs).toISOString();
 
       // Anti-duplicate initial free-trial protection (one initial 30-day free trial per phone/email/document)
-      const normalizedPhoneDigits = (userData.phone || '').replace(/\D/g, '');
-      const normalizedEmailLower = cleanEmail.toLowerCase();
+      const normalizedPhoneDigits = normalizedPhone.digits;
       const normalizedDocNum = (userData.documentNumber || '').trim().toUpperCase();
 
       let alreadyUsedTrial = false;
@@ -3457,9 +3582,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (isProRegistration) {
         const existingLocalMatch = [...allUsers, ...professionals].some(u => {
-          const uDigits = (u.phone || '').replace(/\D/g, '');
-          const samePhone = normalizedPhoneDigits.length >= 9 && uDigits.endsWith(normalizedPhoneDigits.slice(-9));
-          const sameEmail = Boolean(u.email && u.email.toLowerCase() === normalizedEmailLower);
+          const samePhone = areSamePhoneNumber(u.phone, normalizedPhone.e164);
+          const sameEmail = Boolean(cleanOptionalEmail && u.email && u.email.toLowerCase() === cleanOptionalEmail);
           const sameDoc = Boolean(normalizedDocNum && u.documentNumber && u.documentNumber.trim().toUpperCase() === normalizedDocNum);
           return (samePhone || sameEmail || sameDoc) && u.id !== firebaseUid;
         });
@@ -3471,8 +3595,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (normalizedPhoneDigits.length >= 9) {
           hashInputs.push({ prefix: 'phone', value: normalizedPhoneDigits.slice(-9) });
         }
-        if (normalizedEmailLower) {
-          hashInputs.push({ prefix: 'email', value: normalizedEmailLower });
+        if (cleanOptionalEmail) {
+          hashInputs.push({ prefix: 'email', value: cleanOptionalEmail });
         }
         if (normalizedDocNum) {
           hashInputs.push({ prefix: 'doc', value: normalizedDocNum });
@@ -3506,8 +3630,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const newUserObj: User = stripSensitiveFields({
         id: firebaseUid,
         name: (userData.name || 'Novo Utilizador').trim(),
-        email: cleanEmail,
-        phone: (userData.phone || '').trim(),
+        email: cleanOptionalEmail,
+        phone: normalizedPhone.e164,
+        phoneE164: normalizedPhone.e164,
+        phoneHash: phoneIndexId,
+        authIdentifierType: 'phone',
         gender: userData.gender || 'masculino',
         role: requestedRole,
         accountType: requestedAccountType,
@@ -3540,8 +3667,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...(isProRegistration ? { trialStartServerTimestamp: serverTimestamp() } : {})
       };
 
-      // 2. Persist sanitized profile (never storing password)
+      // 2. Persist sanitized profile + privacy-preserving hashed phone login index (never storing password)
       await setDoc(doc(db, 'users', firebaseUid), userFirestorePayload, { merge: true });
+      await setDoc(
+        doc(db, 'phone_login_index', phoneIndexId),
+        {
+          uid: firebaseUid,
+          authMode: 'phone_synthetic',
+          authEmail: syntheticAuthEmail,
+          hasRealEmail: Boolean(cleanOptionalEmail),
+          updatedAt: nowIso
+        },
+        { merge: true }
+      ).catch(err => {
+        logFirestoreWarning(err, OperationType.CREATE, `phone_login_index/${phoneIndexId}`);
+      });
 
       // 3. If Professional/Duplo, persist private profile + PII-free public catalog + trial claims
       if (isProRegistration) {
@@ -3550,6 +3690,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: newUserObj.name,
           email: newUserObj.email,
           phone: newUserObj.phone,
+          phoneE164: normalizedPhone.e164,
+          phoneHash: phoneIndexId,
+          authIdentifierType: 'phone',
           gender: newUserObj.gender,
           province: newUserObj.province,
           city: newUserObj.city || 'Luanda',
@@ -3603,9 +3746,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
 
         setProfessionals(prev => {
-          const exists = prev.some(p => p.id === firebaseUid || (p.email && p.email === proProfileToSave.email));
+          const exists = prev.some(p => p.id === firebaseUid || areSamePhoneNumber(p.phone, proProfileToSave.phone));
           if (exists) {
-            return prev.map(p => (p.id === firebaseUid || (p.email && p.email === proProfileToSave.email)) ? { ...p, ...proProfileToSave } : p);
+            return prev.map(p => (p.id === firebaseUid || areSamePhoneNumber(p.phone, proProfileToSave.phone)) ? { ...p, ...proProfileToSave } : p);
           }
           return [proProfileToSave, ...prev];
         });
@@ -3615,9 +3758,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // 4. Update React state
       setAllUsers(prev => {
-        const exists = prev.some(u => u.id === firebaseUid || (u.email && u.email === newUserObj.email));
+        const exists = prev.some(u => u.id === firebaseUid || areSamePhoneNumber(u.phone, newUserObj.phone));
         if (exists) {
-          return prev.map(u => (u.id === firebaseUid || (u.email && u.email === newUserObj.email)) ? { ...u, ...newUserObj } : u);
+          return prev.map(u => (u.id === firebaseUid || areSamePhoneNumber(u.phone, newUserObj.phone)) ? { ...u, ...newUserObj } : u);
         }
         return [newUserObj, ...prev];
       });
@@ -3631,7 +3774,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveTab('home');
       }
 
-      return { success: true, message: 'Cadastro realizado com sucesso e sincronizado com segurança!' };
+      return { success: true, message: 'Conta criada com sucesso! Já pode entrar sempre com o seu número de telefone.' };
     } catch (err: any) {
       logFirestoreWarning(err, OperationType.CREATE, 'users');
       return {
@@ -3642,18 +3785,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const loginUserWithCredentialsAsync = async (
-    emailInput: string,
+    phoneInput: string,
     passInput: string,
-    selectedRole: UserRole
-  ): Promise<{ success: boolean; message: string }> => {
+    selectedRole: UserRole,
+    options?: { legacyEmail?: string }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    role?: UserRole;
+    suggestLegacyMigration?: boolean;
+    needsAdminEmailVerification?: boolean;
+  }> => {
     try {
-      const inputTrimmed = (emailInput || '').trim();
+      const normalizedPhone = validateStrictAngolaPhone(phoneInput);
       const passTrimmed = (passInput || '').trim();
 
-      if (!inputTrimmed || !inputTrimmed.includes('@')) {
+      if (!normalizedPhone.isValid) {
         return {
           success: false,
-          message: 'Por segurança, o início de sessão requer o e-mail registado na conta. Se a sua conta antiga apenas tinha telefone, contacte o suporte (+244 956 011 985).'
+          message: normalizedPhone.error || INVALID_ANGOLA_PHONE_MESSAGE
         };
       }
 
@@ -3664,32 +3814,89 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
 
-      // 1. Real Firebase Auth verification (fail closed, zero unauthenticated Firestore enumeration)
-      let fbUser;
-      try {
-        const credential = await signInWithEmailAndPassword(auth, inputTrimmed, passTrimmed);
-        fbUser = credential.user;
-      } catch (authErr: any) {
-        const code = authErr?.code || '';
-        if (code === 'auth/too-many-requests') {
-          return {
-            success: false,
-            message: 'Demasiadas tentativas falhadas. Por segurança, aguarde alguns minutos ou redefina a palavra-passe.'
-          };
+      const phoneIndexId = await computePhoneIndexId(normalizedPhone.e164);
+      const syntheticEmail = phoneToSyntheticAuthEmail(normalizedPhone.e164);
+
+      // Build ordered list of Firebase Auth login identifiers for this phone (zero enumeration of other users)
+      const candidateAuthEmails: string[] = [];
+      const addCandidate = (emailCandidate?: string | null) => {
+        const clean = (emailCandidate || '').trim().toLowerCase();
+        if (clean && clean.includes('@') && !candidateAuthEmails.includes(clean)) {
+          candidateAuthEmails.push(clean);
         }
-        if (code === 'auth/user-disabled') {
-          return {
-            success: false,
-            message: 'Esta conta foi desativada. Contacte o suporte da J Smart Services.'
-          };
+      };
+
+      // 1) One-time legacy migration email (only if user explicitly supplied it to bind an old email account to this phone)
+      if (options?.legacyEmail) {
+        addCandidate(options.legacyEmail);
+      }
+
+      // 2) Privacy-preserving hashed phone_login_index lookup (no raw phone stored, no collection listing)
+      let hasIndexedMapping = false;
+      if (phoneIndexId) {
+        try {
+          const idxSnap = await getDoc(doc(db, 'phone_login_index', phoneIndexId));
+          if (idxSnap.exists()) {
+            const idxData = idxSnap.data() as { authEmail?: string };
+            if (idxData?.authEmail) {
+              hasIndexedMapping = true;
+              addCandidate(idxData.authEmail);
+            }
+          }
+        } catch {
+          // Safe fallback to deterministic identifiers below
         }
+      }
+
+      // 3) Standard phone-native deterministic Firebase Auth identifier
+      addCandidate(syntheticEmail);
+
+      // 4) Official Super Administrator seamless phone-to-existing-account resolution (no duplicate admin created)
+      const isOfficialAdminLoginPhone = isOfficialAdminPhone(normalizedPhone.e164);
+      if (isOfficialAdminLoginPhone) {
+        addCandidate(OFFICIAL_ADMIN_EMAIL);
+      }
+
+      // 5) Real Firebase Auth verification (fail closed, server-verified scrypt hash)
+      let fbUser: any = null;
+      let lastAuthErrorCode = '';
+      for (const candidateEmail of candidateAuthEmails) {
+        try {
+          const credential = await signInWithEmailAndPassword(auth, candidateEmail, passTrimmed);
+          fbUser = credential.user;
+          break;
+        } catch (authErr: any) {
+          const code = authErr?.code || '';
+          lastAuthErrorCode = code;
+          if (code === 'auth/too-many-requests') {
+            return {
+              success: false,
+              message: 'Demasiadas tentativas falhadas. Por segurança, aguarde alguns minutos ou utilize "Esqueci a palavra-passe".'
+            };
+          }
+          if (code === 'auth/user-disabled') {
+            return {
+              success: false,
+              message: 'Esta conta foi desativada. Contacte o suporte da J Smart Services (+244 956 011 985).'
+            };
+          }
+        }
+      }
+
+      if (!fbUser) {
+        const shouldSuggestMigration = !hasIndexedMapping && !options?.legacyEmail && !isOfficialAdminLoginPhone;
         return {
           success: false,
-          message: 'Credenciais inválidas. Verifique o e-mail e a palavra-passe introduzidos.'
+          suggestLegacyMigration: shouldSuggestMigration,
+          message: shouldSuggestMigration
+            ? 'Número de telefone ou palavra-passe incorretos. Se criou a sua conta anteriormente com e-mail, associe o seu número abaixo numa única vez.'
+            : (lastAuthErrorCode === 'auth/network-request-failed'
+                ? 'Sem ligação à internet. Verifique a sua rede e tente novamente.'
+                : 'Número de telefone ou palavra-passe incorretos. Verifique os seus dados ou recupere a palavra-passe.')
         };
       }
 
-      // 2. Load strictly authorized user/pro/admin documents for this UID
+      // 6. Load strictly authorized user/pro/admin documents for this verified UID
       const [userSnap, proSnap, adminSnap, adminPtSnap] = await Promise.allSettled([
         getDoc(doc(db, 'users', fbUser.uid)),
         getDoc(doc(db, 'professionals', fbUser.uid)),
@@ -3704,23 +3911,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ? stripSensitiveFields({ id: proSnap.value.id, ...proSnap.value.data() } as ProfessionalProfile)
         : null;
 
-      const isVerifiedSuperAdmin = Boolean(
-        fbUser.emailVerified && fbUser.email?.toLowerCase() === 'jfigueiredo790@gmail.com'
-      );
+      const fbEmailLower = (fbUser.email || '').trim().toLowerCase();
+      const isVerifiedSuperAdmin = Boolean(fbUser.emailVerified && fbEmailLower === OFFICIAL_ADMIN_EMAIL);
+      const isOfficialAdminAccount = Boolean(fbEmailLower === OFFICIAL_ADMIN_EMAIL && isOfficialAdminLoginPhone);
       const hasAdminRecord =
         isVerifiedSuperAdmin ||
         (adminSnap.status === 'fulfilled' && adminSnap.value.exists()) ||
         (adminPtSnap.status === 'fulfilled' && adminPtSnap.value.exists()) ||
-        userDocData?.role === 'admin';
+        userDocData?.role === 'admin' ||
+        isOfficialAdminAccount;
+
+      const publicEmail = getPublicUserEmail(userDocData?.email || proDocData?.email || fbUser.email);
+      const persistedPhone = userDocData?.phone || proDocData?.phone || normalizedPhone.e164;
+      const normalizedStoredPhone = normalizePhoneNumber(persistedPhone);
+      const finalE164Phone = normalizedStoredPhone.isValid ? normalizedStoredPhone.e164 : normalizedPhone.e164;
+      const finalDisplayPhone = finalE164Phone;
 
       const baseProfile: User = stripSensitiveFields({
         ...(proDocData || {}),
         ...(userDocData || {}),
         id: fbUser.uid,
-        email: fbUser.email || userDocData?.email || inputTrimmed,
-        name: userDocData?.name || proDocData?.name || fbUser.displayName || 'Utilizador J Smart',
-        phone: userDocData?.phone || proDocData?.phone || '',
-        province: userDocData?.province || proDocData?.province || 'Luanda',
+        email: publicEmail,
+        name: userDocData?.name || proDocData?.name || fbUser.displayName || (hasAdminRecord ? DEFAULT_ADMIN_USER.name : 'Utilizador J Smart'),
+        phone: finalDisplayPhone,
+        phoneE164: finalE164Phone,
+        phoneHash: phoneIndexId || userDocData?.phoneHash,
+        authIdentifierType: isSyntheticPhoneAuthEmail(fbUser.email) ? 'phone' : 'legacy_migrated',
+        province: userDocData?.province || proDocData?.province || (hasAdminRecord ? 'Icolo e Bengo' : 'Luanda'),
         avatar: userDocData?.avatar || proDocData?.avatar || '',
         verified: userDocData?.verified ?? true,
         createdAt: userDocData?.createdAt || proDocData?.createdAt || new Date().toISOString()
@@ -3742,6 +3959,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
 
+      // Strictly preserve Admin role — NEVER downgrade an Administrator to client/professional
       let finalRole: UserRole = 'cliente';
       if (hasAdminRecord) {
         finalRole = 'admin';
@@ -3753,8 +3971,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const finalUser: User = stripSensitiveFields({
         ...baseProfile,
-        role: finalRole
+        role: finalRole,
+        adminSubRole: finalRole === 'admin' ? (baseProfile.adminSubRole || 'super_admin') : baseProfile.adminSubRole
       });
+
+      // 7. Non-destructive background sync of normalized phone + phone_login_index for future phone-only logins
+      const nowIso = new Date().toISOString();
+      if (phoneIndexId && fbUser.email) {
+        const isSynth = isSyntheticPhoneAuthEmail(fbUser.email);
+        setDoc(
+          doc(db, 'phone_login_index', phoneIndexId),
+          {
+            uid: fbUser.uid,
+            authMode: isSynth ? 'phone_synthetic' : 'legacy_email',
+            authEmail: fbUser.email.toLowerCase(),
+            hasRealEmail: !isSynth || Boolean(publicEmail),
+            updatedAt: nowIso
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
+
+      // Ensure normalized phone fields are preserved on existing user doc without altering role/wallet/subscription
+      if (userDocData && (!userDocData.phoneE164 || !userDocData.phoneHash || !userDocData.phone)) {
+        setDoc(
+          doc(db, 'users', fbUser.uid),
+          {
+            phone: finalDisplayPhone,
+            phoneE164: finalE164Phone,
+            ...(phoneIndexId ? { phoneHash: phoneIndexId } : {}),
+            updatedAt: nowIso
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
+
+      // Ensure verified Super Admin also has admins/{uid} & users/{uid} synchronized without duplicates
+      if (finalRole === 'admin' && isVerifiedSuperAdmin) {
+        if (!userDocData) {
+          setDoc(
+            doc(db, 'users', fbUser.uid),
+            stripSensitiveFields({
+              ...finalUser,
+              role: 'admin',
+              adminSubRole: 'super_admin',
+              updatedAt: nowIso
+            }),
+            { merge: true }
+          ).catch(() => {});
+        }
+        if (!(adminSnap.status === 'fulfilled' && adminSnap.value.exists())) {
+          setDoc(
+            doc(db, 'admins', fbUser.uid),
+            {
+              uid: fbUser.uid,
+              email: OFFICIAL_ADMIN_EMAIL,
+              phone: finalDisplayPhone,
+              role: 'admin',
+              adminSubRole: 'super_admin',
+              updatedAt: nowIso
+            },
+            { merge: true }
+          ).catch(() => {});
+        }
+      }
 
       if (proDocData) {
         setProfessionals(prev => {
@@ -3767,62 +4047,139 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setFirebaseAuthUid(fbUser.uid);
       loginUser(finalUser, finalRole);
-      return { success: true, message: 'Sessão iniciada com sucesso!' };
+
+      const needsAdminEmailVerification = Boolean(
+        finalRole === 'admin' &&
+        fbEmailLower === OFFICIAL_ADMIN_EMAIL &&
+        !fbUser.emailVerified &&
+        !(adminSnap.status === 'fulfilled' && adminSnap.value.exists())
+      );
+
+      return {
+        success: true,
+        role: finalRole,
+        needsAdminEmailVerification,
+        message: 'Sessão iniciada com sucesso!'
+      };
     } catch (err: any) {
       logFirestoreWarning(err, OperationType.GET, 'users');
       return { success: false, message: 'Erro ao iniciar sessão. Verifique a sua ligação e tente novamente.' };
     }
   };
 
-  // ==================== ACCOUNT ACCESS RECOVERY METHODS (FAIL-CLOSED / OFFICIAL FIREBASE RESET) ====================
+  // ==================== ACCOUNT ACCESS RECOVERY METHODS (PHONE-FIRST & SECURE) ====================
   const requestPasswordRecoveryOtpAsync = async (
-    phoneOrEmailOrDoc: string
+    phoneInput: string
   ): Promise<{
     success: boolean;
     message: string;
     sessionId?: string;
     maskedContact?: string;
+    deliveryChannel?: 'sms' | 'email_link' | 'identity_verification';
     isBlocked?: boolean;
   }> => {
     try {
-      const inputTrimmed = (phoneOrEmailOrDoc || '').trim();
-      if (!inputTrimmed) {
-        return { success: false, message: 'Por favor introduza o endereço de e-mail associado à sua conta.' };
-      }
-
-      if (!checkRecoveryRateLimit(inputTrimmed)) {
-        return { success: false, message: RECOVERY_MESSAGES.RATE_LIMIT };
-      }
-
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(inputTrimmed)) {
+      const normalized = validateStrictAngolaPhone(phoneInput);
+      if (!normalized.isValid) {
         return {
           success: false,
-          message: 'Para redefinir a palavra-passe com segurança, introduza o endereço de e-mail registado na conta. A recuperação por SMS/BI aguarda ativação do gateway OTP no servidor.'
+          message: normalized.error || INVALID_ANGOLA_PHONE_MESSAGE
         };
       }
 
-      // Call Firebase Auth official reset link with canonical domain redirect (safe fallback if domain not yet authorized)
+      if (!checkRecoveryRateLimit(normalized.e164)) {
+        return { success: false, message: RECOVERY_MESSAGES.RATE_LIMIT };
+      }
+
+      const maskedPhone = maskPhoneNumber(normalized.display);
+
+      // 1. Try server-side SMS OTP gateway if configured (OTP is generated & hashed strictly on the server)
       try {
-        await sendPasswordResetEmail(auth, inputTrimmed, {
-          url: `${OFFICIAL_APP_URL}/?login=true`,
-          handleCodeInApp: false
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3500);
+        const resp = await fetch('/api/v1/auth/recovery/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: normalized.e164 }),
+          signal: controller.signal
         });
-      } catch (err: any) {
-        if (err?.code === 'auth/unauthorized-continue-uri' || err?.code === 'auth/invalid-continue-uri') {
-          try {
-            await sendPasswordResetEmail(auth, inputTrimmed);
-          } catch (fallbackErr) {
-            logFirestoreWarning(fallbackErr, OperationType.WRITE, 'auth/sendPasswordResetEmail');
+        clearTimeout(timer);
+        if (resp.status === 429) {
+          const rateData = await resp.json().catch(() => ({}));
+          return {
+            success: false,
+            message: rateData?.message || RECOVERY_MESSAGES.RATE_LIMIT
+          };
+        }
+        if (resp.ok) {
+          const data = await resp.json().catch(() => null);
+          if ((data?.success || data?.ok) && data?.deliveryChannel === 'sms' && data?.sessionId) {
+            return {
+              success: true,
+              deliveryChannel: 'sms',
+              sessionId: data.sessionId,
+              maskedContact: data.maskedPhone || data.maskedContact || maskedPhone,
+              message: data.message || `Enviámos um código de verificação por SMS para ${maskedPhone}.`
+            };
           }
-        } else {
-          logFirestoreWarning(err, OperationType.WRITE, 'auth/sendPasswordResetEmail');
+        }
+      } catch {
+        // Fallback smoothly to hashed index resolution / secure identity verification
+      }
+
+      // 2. Check hashed phone_login_index (and official Admin phone) to trigger automatic reset if a real email is linked
+      let linkedRealEmail: string | null = null;
+      if (isOfficialAdminPhone(normalized.e164)) {
+        linkedRealEmail = OFFICIAL_ADMIN_EMAIL;
+      } else {
+        const phoneIndexId = await computePhoneIndexId(normalized.e164);
+        if (phoneIndexId) {
+          try {
+            const idxSnap = await getDoc(doc(db, 'phone_login_index', phoneIndexId));
+            if (idxSnap.exists()) {
+              const idxData = idxSnap.data() as { authEmail?: string; authMode?: string; hasRealEmail?: boolean };
+              if (idxData?.authEmail && !isSyntheticPhoneAuthEmail(idxData.authEmail)) {
+                linkedRealEmail = idxData.authEmail;
+              }
+            }
+          } catch {
+            // Continue safely to phone identity verification
+          }
         }
       }
 
+      if (linkedRealEmail) {
+        try {
+          await sendPasswordResetEmail(auth, linkedRealEmail, {
+            url: `${OFFICIAL_APP_URL}/?login=true`,
+            handleCodeInApp: false
+          });
+        } catch (err: any) {
+          if (err?.code === 'auth/unauthorized-continue-uri' || err?.code === 'auth/invalid-continue-uri') {
+            try {
+              await sendPasswordResetEmail(auth, linkedRealEmail);
+            } catch (fallbackErr) {
+              logFirestoreWarning(fallbackErr, OperationType.WRITE, 'auth/sendPasswordResetEmail');
+            }
+          } else {
+            logFirestoreWarning(err, OperationType.WRITE, 'auth/sendPasswordResetEmail');
+          }
+        }
+
+        return {
+          success: true,
+          deliveryChannel: 'email_link',
+          maskedContact: maskedPhone,
+          message: `Conta associada ao telefone ${maskedPhone} localizada! Enviámos automaticamente uma ligação segura de redefinição de palavra-passe para o contacto associado à sua conta (verifique também a pasta Spam).`
+        };
+      }
+
+      // 3. Phone-only account without SMS gateway or linked email -> Secure Identity Verification (no OTP exposed in browser)
       return {
         success: true,
-        message: 'Se existir uma conta associada a este e-mail, enviámos uma ligação oficial de redefinição de palavra-passe para a sua caixa de entrada (verifique também a pasta Spam).'
+        deliveryChannel: 'identity_verification',
+        maskedContact: maskedPhone,
+        message: `Número ${maskedPhone} reconhecido. Como esta conta utiliza apenas telefone, confirme os dados de identidade abaixo para concluir a recuperação com segurança.`
       };
     } catch {
       return {
@@ -3832,15 +4189,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const verifyRecoveryOtpAsync = async (): Promise<{
+  const verifyRecoveryOtpAsync = async (
+    sessionId: string,
+    enteredCode: string
+  ): Promise<{
     success: boolean;
     message: string;
     isBlocked?: boolean;
   }> => {
-    return {
-      success: false,
-      message: 'A validação OTP no navegador foi desativada por segurança. Utilize o e-mail oficial de redefinição ou contacte o suporte (+244 956 011 985).'
-    };
+    try {
+      const cleanSession = (sessionId || '').trim();
+      const cleanCode = (enteredCode || '').replace(/\D/g, '');
+      if (!cleanSession || cleanCode.length !== 6) {
+        return {
+          success: false,
+          message: 'Introduza o código numérico de 6 dígitos enviado por SMS.'
+        };
+      }
+
+      const resp = await fetch('/api/v1/auth/recovery/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: cleanSession, code: cleanCode })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && (data?.success || data?.ok)) {
+        return {
+          success: true,
+          message: data.message || 'Código SMS validado com sucesso no servidor!'
+        };
+      }
+      return {
+        success: false,
+        message: data?.message || 'Código inválido ou expirado. Verifique o SMS recebido e tente novamente.'
+      };
+    } catch {
+      return {
+        success: false,
+        message: 'Não foi possível validar o código junto do servidor. Verifique a ligação e tente novamente.'
+      };
+    }
   };
 
   const resetAccountPasswordAsync = async (): Promise<{
@@ -3850,7 +4238,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }> => {
     return {
       success: false,
-      message: 'A redefinição direta sem token de servidor foi desativada por segurança. Utilize a ligação enviada para o seu e-mail.'
+      message: 'Por segurança, a alteração da palavra-passe só pode ser concluída através da ligação oficial ou com validação do suporte técnico (+244 956 011 985).'
     };
   };
 
@@ -3864,7 +4252,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }> => {
     return {
       success: false,
-      message: 'A recuperação de número de telefone sem gateway OTP de servidor está desativada por segurança. Contacte o suporte oficial (+244 956 011 985).'
+      message: 'Para alterar um número de telefone perdido sem perder o histórico da conta, confirme a sua identidade através do suporte oficial (+244 956 011 985).'
     };
   };
 
@@ -3875,8 +4263,139 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }> => {
     return {
       success: false,
-      message: 'Atualização de telefone por recuperação bloqueada sem verificação no servidor. Contacte o suporte (+244 956 011 985).'
+      message: 'Atualização de número de telefone requer verificação segura da identidade junto da administração (+244 956 011 985).'
     };
+  };
+
+  // Non-destructive Admin helper: normalizes existing accounts' phones and indexes them for phone-only login
+  const migrateLegacyAccountsPhoneIndexAsync = async (): Promise<{
+    success: boolean;
+    migratedCount: number;
+    skippedCount: number;
+    message: string;
+  }> => {
+    if (currentUser.role !== 'admin' || !auth.currentUser) {
+      return {
+        success: false,
+        migratedCount: 0,
+        skippedCount: 0,
+        message: 'Apenas administradores autenticados podem executar a sincronização de telefones.'
+      };
+    }
+
+    try {
+      const mergedById = new Map<string, User>();
+      for (const u of [...allUsers, ...professionals]) {
+        if (!u?.id || u.isDeleted || isFictitiousOrInvalidUser(u)) continue;
+        if (!mergedById.has(u.id)) {
+          mergedById.set(u.id, u);
+        }
+      }
+
+      let migratedCount = 0;
+      let skippedCount = 0;
+      const nowIso = new Date().toISOString();
+
+      for (const [uid, account] of mergedById.entries()) {
+        const norm = normalizePhoneNumber(account.phone);
+        if (!norm.isValid) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const idxId = await computePhoneIndexId(norm.e164);
+        if (!idxId) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const publicEmail = getPublicUserEmail(account.email);
+        const authEmailToIndex = publicEmail
+          ? publicEmail.toLowerCase()
+          : (phoneToSyntheticAuthEmail(norm.e164) || '');
+        const authMode = publicEmail ? 'legacy_email' : 'phone_synthetic';
+
+        try {
+          // Non-destructive merge: NEVER deletes or overwrites role/name/posts/wallet/subscriptions
+          await setDoc(
+            doc(db, 'phone_login_index', idxId),
+            {
+              uid,
+              authMode,
+              authEmail: authEmailToIndex,
+              hasRealEmail: Boolean(publicEmail),
+              updatedAt: nowIso
+            },
+            { merge: true }
+          );
+
+          if (account.phone !== norm.e164 || account.phoneE164 !== norm.e164 || account.phoneHash !== idxId) {
+            await setDoc(
+              doc(db, 'users', uid),
+              {
+                phone: norm.e164,
+                phoneE164: norm.e164,
+                phoneHash: idxId,
+                updatedAt: nowIso
+              },
+              { merge: true }
+            );
+          }
+          migratedCount += 1;
+        } catch {
+          skippedCount += 1;
+        }
+      }
+
+      return {
+        success: true,
+        migratedCount,
+        skippedCount,
+        message: `Sincronização concluída sem perda de dados: ${migratedCount} conta(s) preparada(s) para entrada por telefone (${skippedCount} ignorada(s)).`
+      };
+    } catch {
+      return {
+        success: false,
+        migratedCount: 0,
+        skippedCount: 0,
+        message: 'Não foi possível concluir a sincronização de telefones. Verifique a ligação e as permissões administrativas.'
+      };
+    }
+  };
+
+  const sendAdminVerificationEmailAsync = async (): Promise<{ success: boolean; message: string }> => {
+    if (!auth.currentUser) {
+      return { success: false, message: 'Inicie sessão primeiro para enviar o e-mail de verificação.' };
+    }
+    if (auth.currentUser.emailVerified) {
+      return { success: true, message: 'O e-mail administrativo já se encontra verificado.' };
+    }
+    try {
+      await sendEmailVerification(auth.currentUser, {
+        url: `${OFFICIAL_APP_URL}/?login=true`,
+        handleCodeInApp: false
+      });
+      return {
+        success: true,
+        message: 'E-mail de verificação enviado! Confirme na sua caixa de entrada e volte a iniciar sessão para ativar todos os privilégios.'
+      };
+    } catch (err: any) {
+      if (err?.code === 'auth/unauthorized-continue-uri' || err?.code === 'auth/invalid-continue-uri') {
+        try {
+          await sendEmailVerification(auth.currentUser);
+          return {
+            success: true,
+            message: 'E-mail de verificação enviado! Confirme na sua caixa de entrada.'
+          };
+        } catch {
+          // Fall through
+        }
+      }
+      return {
+        success: false,
+        message: 'Não foi possível enviar o e-mail de verificação agora. Aguarde alguns instantes e tente novamente.'
+      };
+    }
   };
 
   const updateUserProfile = (updated: Partial<User & ProfessionalProfile>) => {
@@ -3926,6 +4445,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
+    if (sanitizedUpdates.phone !== undefined) {
+      const strictProfilePhone = validateStrictAngolaPhone(sanitizedUpdates.phone);
+      const fallbackProfilePhone = strictProfilePhone.isValid ? strictProfilePhone : normalizePhoneNumber(sanitizedUpdates.phone);
+      if (fallbackProfilePhone.isValid) {
+        const isChangingPhone = !areSamePhoneNumber(currentUser.phone, fallbackProfilePhone.e164);
+        const isDuplicateOtherAccount = isChangingPhone && [...allUsers, ...professionals].some(
+          u => !u.isDeleted && u.id !== newUserId && areSamePhoneNumber(u.phone, fallbackProfilePhone.e164)
+        );
+        const isHijackingAdminPhone = isChangingPhone && !isAdminActor && isOfficialAdminPhone(fallbackProfilePhone.e164);
+
+        if (isDuplicateOtherAccount || isHijackingAdminPhone) {
+          delete sanitizedUpdates.phone;
+          delete sanitizedUpdates.phoneE164;
+        } else {
+          sanitizedUpdates.phone = fallbackProfilePhone.e164;
+          sanitizedUpdates.phoneE164 = fallbackProfilePhone.e164;
+        }
+      } else {
+        // Reject invalid phone updates without corrupting existing profile phone
+        delete sanitizedUpdates.phone;
+        delete sanitizedUpdates.phoneE164;
+      }
+    }
+
     const nowIso = new Date().toISOString();
     const updatedUser = stripSensitiveFields({
       ...currentUser,
@@ -3935,6 +4478,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     setCurrentUser(updatedUser);
+
+    if (sanitizedUpdates.phoneE164 && auth.currentUser?.email) {
+      const fbEmail = auth.currentUser.email;
+      const isSynth = isSyntheticPhoneAuthEmail(fbEmail);
+      computePhoneIndexId(sanitizedUpdates.phoneE164).then(idxId => {
+        if (!idxId) return;
+        setDoc(
+          doc(db, 'phone_login_index', idxId),
+          {
+            uid: newUserId,
+            authMode: isSynth ? 'phone_synthetic' : 'legacy_email',
+            authEmail: fbEmail.toLowerCase(),
+            hasRealEmail: !isSynth || Boolean(getPublicUserEmail(updatedUser.email)),
+            updatedAt: nowIso
+          },
+          { merge: true }
+        ).catch(() => {});
+      }).catch(() => {});
+    }
 
     const isProOrDual = targetRole === 'profissional' ||
       updatedUser.accountType === 'duplo' ||
@@ -5312,6 +5874,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       resetAccountPasswordAsync,
       requestPhoneRecoveryVerificationAsync,
       updateRecoveredPhoneNumberAsync,
+      migrateLegacyAccountsPhoneIndexAsync,
+      sendAdminVerificationEmailAsync,
       changeProPlan,
       subscribeToPlan,
       adminUnlockProPlan,

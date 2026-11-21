@@ -42,6 +42,9 @@ export interface User {
   name: string;
   email: string;
   phone: string;
+  phoneE164?: string;
+  phoneHash?: string;
+  authIdentifierType?: 'phone' | 'legacy_email';
   gender?: 'masculino' | 'feminino';
   role: UserRole;
   adminSubRole?: AdminSubRole; // Sub-papeis de administracao

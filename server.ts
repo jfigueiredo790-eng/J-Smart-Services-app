@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "crypto";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 
@@ -14,6 +15,75 @@ const ALLOWED_ORIGINS = new Set<string>([
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 60;
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+const RECOVERY_WINDOW_MS = 15 * 60_000;
+const RECOVERY_MAX_PER_WINDOW = 5;
+const recoveryBuckets = new Map<string, { count: number; resetAt: number }>();
+
+interface ServerOtpSession {
+  phoneE164: string;
+  salt: string;
+  codeHashHex: string;
+  expiresAt: number;
+  attemptsLeft: number;
+  verified: boolean;
+}
+const otpSessions = new Map<string, ServerOtpSession>();
+
+const ANGOLA_PHONE_STRICT_REGEX = /^\+244[0-9]{9}$/;
+const INVALID_ANGOLA_PHONE_MSG = "Introduza um número de telefone válido de Angola.";
+
+function validateAngolaPhoneServer(raw: unknown): { isValid: boolean; e164: string; national9: string; masked: string } {
+  if (typeof raw !== "string") return { isValid: false, e164: "", national9: "", masked: "" };
+  if (!ANGOLA_PHONE_STRICT_REGEX.test(raw)) {
+    return { isValid: false, e164: "", national9: "", masked: "" };
+  }
+  const national9 = raw.slice(4);
+  return {
+    isValid: true,
+    e164: raw,
+    national9,
+    masked: `+244${national9.slice(0, 3)}••••${national9.slice(-2)}`
+  };
+}
+
+function isSafeHttpsGatewayUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "https:") return false;
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host.startsWith("10.") ||
+      host.startsWith("192.168.") ||
+      host.startsWith("169.254.") ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hashOtpScrypt(code: string, salt: string): string {
+  return crypto.scryptSync(code, salt, 32).toString("hex");
+}
+
+function checkRecoveryRate(key: string): boolean {
+  const now = Date.now();
+  const bucket = recoveryBuckets.get(key);
+  if (!bucket || now > bucket.resetAt) {
+    recoveryBuckets.set(key, { count: 1, resetAt: now + RECOVERY_WINDOW_MS });
+    return true;
+  }
+  if (bucket.count >= RECOVERY_MAX_PER_WINDOW) return false;
+  bucket.count += 1;
+  return true;
+}
 
 async function startServer() {
   const app = express();
@@ -85,6 +155,161 @@ async function startServer() {
     });
   });
 
+  // 1.1.5 Authoritative Backend Phone Format Validation (+244XXXXXXXXX)
+  app.post("/api/v1/auth/validate-phone", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const parsedPhone = validateAngolaPhoneServer(req.body?.phone);
+    if (!parsedPhone.isValid) {
+      res.status(400).json({
+        success: false,
+        message: INVALID_ANGOLA_PHONE_MSG
+      });
+      return;
+    }
+    res.status(200).json({
+      success: true,
+      phone: parsedPhone.e164,
+      countryCode: "+244",
+      nationalDigits: parsedPhone.national9
+    });
+  });
+
+  // 1.2 Phone Password Recovery - Request OTP (server-side scrypt hashed, never exposes OTP to client)
+  app.post("/api/v1/auth/recovery/request", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const parsedPhone = validateAngolaPhoneServer(req.body?.phone);
+    if (!parsedPhone.isValid) {
+      res.status(400).json({
+        success: false,
+        message: INVALID_ANGOLA_PHONE_MSG
+      });
+      return;
+    }
+
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    if (!checkRecoveryRate(`ip:${ip}`) || !checkRecoveryRate(`phone:${parsedPhone.e164}`)) {
+      res.status(429).json({
+        success: false,
+        message: "Demasiadas tentativas de recuperação. Por segurança, aguarde 15 minutos antes de tentar novamente."
+      });
+      return;
+    }
+
+    const smsProviderUrl = process.env.SMS_PROVIDER_URL?.trim() || "";
+    const smsApiKey = process.env.SMS_API_KEY?.trim() || "";
+    const smsSenderId = process.env.SMS_SENDER_ID?.trim() || "JSmart";
+
+    if (smsProviderUrl && smsApiKey && isSafeHttpsGatewayUrl(smsProviderUrl)) {
+      const otpCode = String(crypto.randomInt(100000, 1000000));
+      const salt = crypto.randomBytes(16).toString("hex");
+      const sessionId = `rec_${crypto.randomBytes(16).toString("hex")}`;
+
+      otpSessions.set(sessionId, {
+        phoneE164: parsedPhone.e164,
+        salt,
+        codeHashHex: hashOtpScrypt(otpCode, salt),
+        expiresAt: Date.now() + 10 * 60_000,
+        attemptsLeft: 3,
+        verified: false
+      });
+
+      try {
+        const smsRes = await fetch(smsProviderUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${smsApiKey}`
+          },
+          body: JSON.stringify({
+            to: parsedPhone.e164,
+            from: smsSenderId,
+            message: `J Smart Services: o seu código de verificação é ${otpCode}. Válido por 10 minutos.`
+          })
+        });
+
+        if (!smsRes.ok) {
+          otpSessions.delete(sessionId);
+          res.status(200).json({
+            success: true,
+            deliveryChannel: "fallback_verified",
+            maskedPhone: parsedPhone.masked,
+            message: "A iniciar verificação segura alternativa para este número de telefone."
+          });
+          return;
+        }
+
+        res.status(200).json({
+          success: true,
+          deliveryChannel: "sms",
+          sessionId,
+          maskedPhone: parsedPhone.masked,
+          message: `Enviámos um código SMS de 6 dígitos para ${parsedPhone.masked}.`
+        });
+        return;
+      } catch {
+        otpSessions.delete(sessionId);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      deliveryChannel: "fallback_verified",
+      maskedPhone: parsedPhone.masked,
+      message: "A iniciar verificação segura para o número informado."
+    });
+  });
+
+  // 1.3 Phone Password Recovery - Verify OTP (constant-time scrypt comparison)
+  app.post("/api/v1/auth/recovery/verify", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const sessionId = typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : "";
+    const code = typeof req.body?.code === "string" ? req.body.code.replace(/\D/g, "") : "";
+
+    if (!sessionId || code.length !== 6) {
+      res.status(400).json({ success: false, message: "Código de verificação inválido." });
+      return;
+    }
+
+    const session = otpSessions.get(sessionId);
+    if (!session || Date.now() > session.expiresAt) {
+      otpSessions.delete(sessionId);
+      res.status(400).json({
+        success: false,
+        message: "O código informado expirou ou é inválido. Solicite um novo código."
+      });
+      return;
+    }
+
+    if (session.attemptsLeft <= 0) {
+      otpSessions.delete(sessionId);
+      res.status(429).json({
+        success: false,
+        message: "Número máximo de tentativas excedido. Solicite um novo código."
+      });
+      return;
+    }
+
+    const candidateHash = Buffer.from(hashOtpScrypt(code, session.salt), "hex");
+    const storedHash = Buffer.from(session.codeHashHex, "hex");
+    const isMatch = candidateHash.length === storedHash.length && crypto.timingSafeEqual(candidateHash, storedHash);
+
+    if (!isMatch) {
+      session.attemptsLeft -= 1;
+      res.status(400).json({
+        success: false,
+        attemptsRemaining: session.attemptsLeft,
+        message: `Código incorreto. Restam ${session.attemptsLeft} tentativa(s).`
+      });
+      return;
+    }
+
+    session.verified = true;
+    res.status(200).json({
+      success: true,
+      message: "Código validado com sucesso."
+    });
+  });
+
   // 2. Remote Config / App Settings Endpoint
   app.get("/api/v1/config", (_req, res) => {
     res.json({
@@ -96,8 +321,13 @@ async function startServer() {
       forceUpdateNeeded: false,
       maintenanceMode: false,
       supportEmail: "jfigueiredo790@gmail.com",
-      supportPhoneWhatsapp: "+244 956011985",
-      supportPhoneExpress: "+244 956011985",
+      supportPhoneWhatsapp: "+244956011985",
+      supportPhoneExpress: "+244956011985",
+      authPrimaryIdentifier: "phone",
+      phoneCountryCode: "+244",
+      phoneNationalDigits: 9,
+      phoneFormat: "+244XXXXXXXXX",
+      emailOptionalOnSignup: true,
       defaultCommissionPercent: 0,
       freeTrialDays: 30,
       proPlanMonthlyPriceKz: 3000,
@@ -115,7 +345,10 @@ async function startServer() {
       apiEndpoints: {
         health: "/api/v1/health",
         time: "/api/v1/time",
-        config: "/api/v1/config"
+        config: "/api/v1/config",
+        validatePhone: "/api/v1/auth/validate-phone",
+        recoveryRequest: "/api/v1/auth/recovery/request",
+        recoveryVerify: "/api/v1/auth/recovery/verify"
       }
     });
   });
@@ -141,7 +374,7 @@ async function startServer() {
       },
       androidFirebaseConfig: {
         projectId: "tuned-xray-hxctm",
-        authMethodsSupported: ["Email/Password", "Phone Auth"]
+        authMethodsSupported: ["Phone/Password (Angola +244)"]
       }
     });
   });
