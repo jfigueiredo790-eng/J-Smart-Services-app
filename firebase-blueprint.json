@@ -2,35 +2,40 @@
   "entities": {
     "Cliente": {
       "title": "Cliente",
-      "description": "Perfil de utilizador cliente registado para solicitar serviços",
+      "description": "Perfil privado de utilizador na plataforma (inclui PII isolada do público)",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "maxLength": 100 },
-        "email": { "type": "string", "format": "email" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
         "phone": { "type": "string", "maxLength": 30 },
-        "role": { "type": "string", "enum": ["cliente"] },
-        "province": { "type": "string" },
-        "city": { "type": "string" },
+        "role": { "type": "string", "enum": ["cliente", "profissional", "admin"] },
+        "accountType": { "type": "string", "enum": ["cliente", "profissional", "duplo"] },
+        "province": { "type": "string", "maxLength": 100 },
+        "city": { "type": "string", "maxLength": 100 },
+        "address": { "type": "string", "maxLength": 250 },
+        "documentNumber": { "type": "string", "maxLength": 50 },
         "walletBalanceKz": { "type": "number" },
         "verified": { "type": "boolean" },
         "blocked": { "type": "boolean" },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "accountStatus": { "type": "string", "enum": ["ACTIVE", "BLOCKED"] },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "name", "phone", "role", "ownerId", "createdAt", "updatedAt"]
+      "required": ["id", "name", "role", "createdAt"]
     },
     "Profissional": {
       "title": "Profissional",
-      "description": "Perfil de prestador de serviços qualificado",
+      "description": "Perfil completo e privado de prestador de serviços",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "maxLength": 100 },
-        "email": { "type": "string", "format": "email" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
         "phone": { "type": "string", "maxLength": 30 },
         "role": { "type": "string", "enum": ["profissional"] },
+        "accountType": { "type": "string", "enum": ["profissional", "duplo"] },
         "categories": { "type": "array" },
         "bio": { "type": "string", "maxLength": 2000 },
         "hourlyRateKz": { "type": "number" },
@@ -39,169 +44,393 @@
         "reviewCount": { "type": "number" },
         "completedJobs": { "type": "number" },
         "documentsVerified": { "type": "boolean" },
-        "status": { "type": "string", "enum": ["disponivel", "ocupado"] },
-        "province": { "type": "string" },
-        "address": { "type": "string" },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "status": { "type": "string", "enum": ["disponivel", "ocupado", "bloqueado", "deleted", "ativo"] },
+        "province": { "type": "string", "maxLength": 100 },
+        "address": { "type": "string", "maxLength": 250 },
+        "walletBalanceKz": { "type": "number" },
+        "subscriptionPlan": { "type": "string", "enum": ["free_trial", "plan_7d", "plan_14d", "plan_30d", "plan_90d"] },
+        "planStartedAt": { "type": "string", "maxLength": 64 },
+        "planExpiresAt": { "type": "string", "maxLength": 64 },
+        "trialStartDate": { "type": "string", "maxLength": 64 },
+        "trialEndsAt": { "type": "string", "maxLength": 64 },
+        "trialDurationDays": { "type": "number" },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "name", "phone", "role", "categories", "ownerId", "createdAt", "updatedAt"]
+      "required": ["id", "name", "role", "categories", "createdAt"]
+    },
+    "ProfissionalPublico": {
+      "title": "ProfissionalPublico",
+      "description": "Catálogo público sem PII (sem email, telefone, BI ou saldo) para pesquisa e descoberta",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "avatar": { "type": "string", "maxLength": 200000 },
+        "province": { "type": "string", "maxLength": 100 },
+        "city": { "type": "string", "maxLength": 100 },
+        "categories": { "type": "array" },
+        "bio": { "type": "string", "maxLength": 2000 },
+        "hourlyRateKz": { "type": "number" },
+        "experienceYears": { "type": "number" },
+        "experienceVerified": { "type": "boolean" },
+        "rating": { "type": "number" },
+        "reviewCount": { "type": "number" },
+        "completedJobs": { "type": "number" },
+        "verified": { "type": "boolean" },
+        "blocked": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["disponivel", "ocupado", "bloqueado", "deleted", "ativo"] },
+        "subscriptionPlan": { "type": "string", "enum": ["free_trial", "plan_7d", "plan_14d", "plan_30d", "plan_90d"] },
+        "planStartedAt": { "type": "string", "maxLength": 64 },
+        "planExpiresAt": { "type": "string", "maxLength": 64 },
+        "trialStartDate": { "type": "string", "maxLength": 64 },
+        "trialEndsAt": { "type": "string", "maxLength": 64 },
+        "trialDurationDays": { "type": "number" }
+      },
+      "required": ["id", "name", "province", "categories", "status"]
     },
     "Administrador": {
       "title": "Administrador",
-      "description": "Perfil de gestor ou funcionário administrativo da plataforma",
+      "description": "Registo de administrador autorizado",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "maxLength": 100 },
-        "email": { "type": "string", "format": "email" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
         "phone": { "type": "string", "maxLength": 30 },
         "role": { "type": "string", "enum": ["admin"] },
         "adminSubRole": { "type": "string", "enum": ["super_admin", "atendimento", "gestao_profissionais", "financeiro"] },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "name", "email", "role", "adminSubRole", "ownerId", "createdAt", "updatedAt"]
+      "required": ["id", "name", "email", "role", "adminSubRole", "createdAt"]
     },
     "Servico": {
       "title": "Servico",
       "description": "Categoria de serviço disponível na plataforma",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "maxLength": 100 },
         "description": { "type": "string", "maxLength": 500 },
-        "iconName": { "type": "string" },
-        "color": { "type": "string" },
+        "iconName": { "type": "string", "maxLength": 64 },
+        "color": { "type": "string", "maxLength": 32 },
         "popularCount": { "type": "number" },
-        "group": { "type": "string" },
+        "group": { "type": "string", "maxLength": 100 },
         "items": { "type": "array" },
         "subcategories": { "type": "array" },
-        "imageUrl": { "type": "string" },
+        "imageUrl": { "type": "string", "maxLength": 200000 },
         "isActive": { "type": "boolean" },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "name", "ownerId", "createdAt", "updatedAt"]
+      "required": ["id", "name"]
     },
     "Pedido": {
       "title": "Pedido",
-      "description": "Solicitação de serviço efetuada por cliente",
+      "description": "Solicitação de serviço efetuada por cliente (sem exposição de telefone)",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "clientId": { "type": "string" },
-        "clientName": { "type": "string" },
-        "professionalId": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "clientId": { "type": "string", "maxLength": 128 },
+        "clientName": { "type": "string", "maxLength": 100 },
+        "professionalId": { "type": "string", "maxLength": 128 },
         "title": { "type": "string", "maxLength": 200 },
         "description": { "type": "string", "maxLength": 2000 },
-        "categoryId": { "type": "string" },
-        "province": { "type": "string" },
-        "address": { "type": "string" },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "province": { "type": "string", "maxLength": 100 },
+        "address": { "type": "string", "maxLength": 250 },
         "budgetKz": { "type": "number" },
-        "urgency": { "type": "string" },
-        "status": { "type": "string" },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "urgency": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["pendente", "novamente_disponivel", "aceito", "em_negociacao", "em_progresso", "concluido", "cancelado"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "clientId", "title", "categoryId", "province", "budgetKz", "ownerId", "createdAt", "updatedAt"]
+      "required": ["clientId", "title", "categoryId", "province"]
     },
     "Pagamento": {
       "title": "Pagamento",
-      "description": "Transação financeira, comissão ou carregamento de carteira",
+      "description": "Transação financeira, carregamento com comprovativo ou levantamento",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "userId": { "type": "string" },
-        "userName": { "type": "string" },
-        "type": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 100 },
+        "type": { "type": "string", "enum": ["deposit", "payment", "commission", "withdrawal", "earning"] },
         "amountKz": { "type": "number" },
-        "description": { "type": "string" },
-        "status": { "type": "string" },
-        "paymentMethod": { "type": "string" },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "description": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["pendente", "concluido", "rejeitado"] },
+        "paymentMethod": { "type": "string", "maxLength": 100 },
+        "proofUrl": { "type": "string", "maxLength": 2000000 },
+        "planId": { "type": "string", "enum": ["plan_14d", "plan_30d", "plan_90d"] },
+        "planDurationDays": { "type": "number" },
+        "subscriptionStartedAt": { "type": "string", "maxLength": 64 },
+        "subscriptionExpiresAt": { "type": "string", "maxLength": 64 },
+        "reviewedBy": { "type": "string", "maxLength": 128 },
+        "reviewedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "userId", "amountKz", "type", "ownerId", "createdAt", "updatedAt"]
+      "required": ["id", "userId", "amountKz", "type", "status"]
     },
     "Avaliacao": {
       "title": "Avaliacao",
       "description": "Classificação e comentário deixado ao profissional",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "requestId": { "type": "string" },
-        "professionalId": { "type": "string" },
-        "clientId": { "type": "string" },
-        "clientName": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "requestId": { "type": "string", "maxLength": 128 },
+        "professionalId": { "type": "string", "maxLength": 128 },
+        "clientId": { "type": "string", "maxLength": 128 },
+        "clientName": { "type": "string", "maxLength": 100 },
         "rating": { "type": "number" },
         "comment": { "type": "string", "maxLength": 1000 },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "createdAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "requestId", "professionalId", "clientId", "rating", "ownerId", "createdAt", "updatedAt"]
+      "required": ["id", "requestId", "professionalId", "clientId", "rating"]
     },
     "Mensagem": {
       "title": "Mensagem",
-      "description": "Mensagem do chat entre cliente e profissional",
+      "description": "Mensagem privada do chat entre cliente e profissional",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "requestId": { "type": "string" },
-        "senderId": { "type": "string" },
-        "senderRole": { "type": "string" },
-        "senderName": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "requestId": { "type": "string", "maxLength": 128 },
+        "conversationId": { "type": "string", "maxLength": 128 },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "receiverId": { "type": "string", "maxLength": 128 },
+        "participants": { "type": "array" },
+        "senderRole": { "type": "string", "maxLength": 32 },
+        "senderName": { "type": "string", "maxLength": 100 },
         "text": { "type": "string", "maxLength": 2000 },
-        "timestamp": { "type": "string" },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "timestamp": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "requestId", "senderId", "text", "ownerId", "createdAt", "updatedAt"]
+      "required": ["id", "requestId", "senderId", "text", "participants"]
+    },
+    "Conversa": {
+      "title": "Conversa",
+      "description": "Metadados de conversa privada entre participantes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "participants": { "type": "array" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "participants"]
+    },
+    "PublicacaoFeed": {
+      "title": "PublicacaoFeed",
+      "description": "Publicação de trabalho efetuado por profissional no feed",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "professionalId": { "type": "string", "maxLength": 128 },
+        "professionalName": { "type": "string", "maxLength": 100 },
+        "mediaUrl": { "type": "string", "maxLength": 2000000 },
+        "mediaType": { "type": "string", "enum": ["image", "video"] },
+        "description": { "type": "string", "maxLength": 2000 },
+        "categoryName": { "type": "string", "maxLength": 100 },
+        "likesCount": { "type": "number" },
+        "likedBy": { "type": "array" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "professionalId", "description"]
+    },
+    "Notificacao": {
+      "title": "Notificacao",
+      "description": "Notificação segmentada por utilizador ou perfil",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "targetRoleScope": { "type": "string", "maxLength": 32 },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 1000 },
+        "type": { "type": "string", "maxLength": 64 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "title", "message", "type"]
+    },
+    "Denuncia": {
+      "title": "Denuncia",
+      "description": "Denúncia ou ticket de suporte submetido por utilizador autenticado",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "reporterId": { "type": "string", "maxLength": 128 },
+        "reportedUserId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "maxLength": 200 },
+        "details": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["pendente", "resolvido", "bloqueado"] },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "reporterId", "reason", "status"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Registo imutável de ações administrativas",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "adminId": { "type": "string", "maxLength": 128 },
+        "action": { "type": "string", "maxLength": 200 },
+        "details": { "type": "string", "maxLength": 2000 },
+        "timestamp": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "adminId", "action", "timestamp"]
+    },
+    "PlatformSettings": {
+      "title": "PlatformSettings",
+      "description": "Definições públicas e bancárias de pagamento da plataforma (sem PIN/segredos)",
+      "type": "object",
+      "properties": {
+        "commissionRatePercent": { "type": "number" },
+        "minWithdrawalKz": { "type": "number" },
+        "autoApprovePros": { "type": "boolean" },
+        "companyName": { "type": "string", "maxLength": 120 },
+        "adminHolderName": { "type": "string", "maxLength": 120 },
+        "adminEmail": { "type": "string", "maxLength": 200 },
+        "adminPhoneWhatsapp": { "type": "string", "maxLength": 30 },
+        "adminPhoneExpress": { "type": "string", "maxLength": 30 },
+        "adminBankName": { "type": "string", "maxLength": 120 },
+        "adminIban": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "RecoveryOtp": {
+      "title": "RecoveryOtp",
+      "description": "Sessões de recuperação OTP geridas exclusivamente no servidor",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "targetUserId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "targetUserId"]
+    },
+    "TrialClaim": {
+      "title": "TrialClaim",
+      "description": "Registo hash para impedir reutilização duplicada do período experimental gratuito",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "claimedBy": { "type": "string", "maxLength": 128 },
+        "trialDurationDays": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "claimedBy"]
     }
   },
   "firestore": {
-    "/clientes/{clientId}": {
+    "/users/{userId}": {
       "schema": { "$ref": "#/entities/Cliente" },
-      "description": "Coleção de clientes da plataforma"
+      "description": "Perfis privados de utilizadores autenticados"
     },
-    "/profissionais/{proId}": {
+    "/professionals/{proId}": {
       "schema": { "$ref": "#/entities/Profissional" },
-      "description": "Coleção de profissionais prestadores de serviços"
+      "description": "Perfis completos e privados de profissionais"
+    },
+    "/professionals_public/{proId}": {
+      "schema": { "$ref": "#/entities/ProfissionalPublico" },
+      "description": "Catálogo público sem PII para pesquisa de profissionais"
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/Administrador" },
+      "description": "Lista autoritativa de administradores"
     },
     "/administradores/{adminId}": {
       "schema": { "$ref": "#/entities/Administrador" },
-      "description": "Coleção de administradores e funcionários de apoio"
+      "description": "Lista de administradores e pessoal de apoio"
     },
-    "/servicos/{serviceId}": {
-      "schema": { "$ref": "#/entities/Servico" },
-      "description": "Coleção de categorias e tipos de serviços oferecidos"
+    "/admin_audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Registos imutáveis de auditoria administrativa"
+    },
+    "/service_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/Pedido" },
+      "description": "Pedidos de serviços efetuados na plataforma"
+    },
+    "/chat_messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Mensagem" },
+      "description": "Mensagens privadas de chat entre cliente e profissional"
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversa" },
+      "description": "Metadados de conversas privadas"
+    },
+    "/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/Avaliacao" },
+      "description": "Avaliações públicas de serviços prestados"
+    },
+    "/wallet_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/Pagamento" },
+      "description": "Transações de carteira e comprovativos de pagamento"
+    },
+    "/recovery_otps/{sessionId}": {
+      "schema": { "$ref": "#/entities/RecoveryOtp" },
+      "description": "Sessões OTP bloqueadas no cliente (acesso apenas via backend)"
+    },
+    "/work_feed_posts/{postId}": {
+      "schema": { "$ref": "#/entities/PublicacaoFeed" },
+      "description": "Publicações de trabalhos no feed"
+    },
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/PublicacaoFeed" },
+      "description": "Publicações alternativas do feed"
+    },
+    "/app_notifications/{notifId}": {
+      "schema": { "$ref": "#/entities/Notificacao" },
+      "description": "Notificações segmentadas da aplicação"
     },
     "/categories/{catId}": {
       "schema": { "$ref": "#/entities/Servico" },
-      "description": "Coleção principal de categorias e subcategorias"
+      "description": "Categorias e subcategorias de serviços"
+    },
+    "/servicos/{serviceId}": {
+      "schema": { "$ref": "#/entities/Servico" },
+      "description": "Catálogo alternativo de serviços"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/Denuncia" },
+      "description": "Denúncias e conflitos submetidos pelos utilizadores"
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/Denuncia" },
+      "description": "Tickets de suporte submetidos pelos utilizadores"
+    },
+    "/platform_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/PlatformSettings" },
+      "description": "Definições da plataforma e regras de conduta"
+    },
+    "/clientes/{clientId}": {
+      "schema": { "$ref": "#/entities/Cliente" },
+      "description": "Coleção legada de clientes"
+    },
+    "/profissionais/{proId}": {
+      "schema": { "$ref": "#/entities/Profissional" },
+      "description": "Coleção legada de profissionais"
     },
     "/pedidos/{requestId}": {
       "schema": { "$ref": "#/entities/Pedido" },
-      "description": "Coleção de pedidos de serviço solicitados"
+      "description": "Coleção legada de pedidos"
     },
     "/pagamentos/{paymentId}": {
       "schema": { "$ref": "#/entities/Pagamento" },
-      "description": "Coleção de transações e pagamentos"
+      "description": "Coleção legada de pagamentos"
     },
     "/avaliacoes/{reviewId}": {
       "schema": { "$ref": "#/entities/Avaliacao" },
-      "description": "Coleção de avaliações de serviços prestados"
+      "description": "Coleção legada de avaliações"
     },
     "/mensagens/{messageId}": {
       "schema": { "$ref": "#/entities/Mensagem" },
-      "description": "Coleção de mensagens do chat"
+      "description": "Coleção legada de mensagens"
+    },
+    "/trial_claims/{claimId}": {
+      "schema": { "$ref": "#/entities/TrialClaim" },
+      "description": "Controlo anti-duplicação do período experimental único por utilizador"
     }
   }
 }

@@ -31,8 +31,8 @@ export const HelpSupportModal: React.FC<HelpSupportModalProps> = ({ onClose }) =
       a: 'A J Smart Services permite usar a mesma conta para procurar profissionais como Cliente e oferecer serviços como Profissional. Pode alternar de modo a qualquer momento no topo da aplicação com apenas 1 clique.'
     },
     {
-      q: 'Como funciona o Período Gratuito de 14 dias para profissionais?',
-      a: 'Todos os profissionais cadastrados em Angola recebem automaticamente 14 dias de teste 100% gratuito sem qualquer cobrança antecipada para experimentar a recepção de clientes.'
+      q: 'Como funciona o Período Experimental Gratuito de 30 dias (1 mês)?',
+      a: 'Todos os novos profissionais registados em Angola recebem automaticamente 30 dias (1 mês) totalmente grátis a partir da criação da conta para experimentar a plataforma e receber clientes. Cada utilizador tem direito a 1 período gratuito inicial.'
     },
     {
       q: 'Como funciona o sistema de negociação e pagamento dos serviços?',
@@ -229,7 +229,7 @@ export const HelpSupportModal: React.FC<HelpSupportModalProps> = ({ onClose }) =
               <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
                 <h4 className="font-extrabold text-emerald-400 text-xs">2. Direitos e Deveres do Profissional</h4>
                 <p className="text-[11px] text-slate-400">
-                  O profissional tem 14 dias gratuitos no registo inicial. Deve manter a sua subscrição (semanal, quinzenal ou mensal) ativa para ser visível nas pesquisas. Em caso de expiração do plano, o perfil fica suspenso das pesquisas e listas até à renovação, mantendo intacto o histórico e avaliações.
+                  Os novos profissionais recebem 30 dias (1 mês) totalmente grátis no registo inicial (1 vez por utilizador). Após o término, devem escolher e pagar um plano ativo — Semanal (2 semanas — 1.500 Kz), Mensal (1 mês — 3.000 Kz) ou Trimestral (3 meses — 8.000 Kz) — enviando o comprovativo privado para aprovação do Administrador. Em caso de expiração, o perfil fica oculto das pesquisas públicas e impedido de publicar ou aceitar novos pedidos até à renovação, mantendo 100% intactos os dados, publicações e avaliações.
                 </p>
               </div>
 

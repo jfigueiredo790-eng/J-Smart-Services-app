@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { compressImageFile } from '../utils/imageUtils';
+import { sanitizeMediaUrl } from '../utils/securityUtils';
 import { UserAvatar } from './UserAvatar';
 import { ChatConversation, RequestStatus } from '../types';
 import { 
@@ -696,12 +697,12 @@ export const ChatView: React.FC = () => {
                             </span>
 
                             {/* Foto anexada */}
-                            {Boolean(msg.imageUrl) && (
+                            {Boolean(sanitizeMediaUrl(msg.imageUrl)) && (
                               <div 
-                                onClick={() => setPreviewImage(msg.imageUrl!)}
+                                onClick={() => setPreviewImage(sanitizeMediaUrl(msg.imageUrl))}
                                 className="my-1.5 rounded-xl overflow-hidden border border-slate-700/60 shadow-sm cursor-pointer group relative bg-slate-900"
                               >
-                                <img src={msg.imageUrl!} alt="Anexo" className="w-full max-h-52 object-cover group-hover:scale-105 transition-transform" />
+                                <img src={sanitizeMediaUrl(msg.imageUrl) || ''} alt="Anexo" className="w-full max-h-52 object-cover group-hover:scale-105 transition-transform" />
                                 <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                   <span className="bg-slate-900/90 text-white text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
                                     <Maximize2 className="w-3 h-3 text-emerald-400" /> Ampliar Imagem
@@ -867,7 +868,7 @@ export const ChatView: React.FC = () => {
       </div>
 
       {/* Lightbox Modal para Ampliação de Imagens */}
-      {previewImage && (
+      {sanitizeMediaUrl(previewImage) && (
         <div 
           className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
           onClick={() => setPreviewImage(null)}
@@ -881,7 +882,7 @@ export const ChatView: React.FC = () => {
               <X className="w-6 h-6" />
             </button>
             <img 
-              src={previewImage} 
+              src={sanitizeMediaUrl(previewImage) || ''} 
               alt="Visualização ampliada" 
               className="max-h-[80vh] w-auto max-w-full rounded-2xl object-contain shadow-2xl border border-slate-800"
             />

@@ -1,0 +1,56 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isStorageAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'jfigueiredo790@gmail.com' && request.auth.token.email_verified == true) ||
+        firestore.exists(/databases/ai-studio-jsmartservices-dd54ef3d-8456-4336-a85a-7d7350f4594e/documents/admins/$(request.auth.uid)) ||
+        firestore.exists(/databases/ai-studio-jsmartservices-dd54ef3d-8456-4336-a85a-7d7350f4594e/documents/administradores/$(request.auth.uid)) ||
+        (
+          firestore.exists(/databases/ai-studio-jsmartservices-dd54ef3d-8456-4336-a85a-7d7350f4594e/documents/users/$(request.auth.uid)) &&
+          firestore.get(/databases/ai-studio-jsmartservices-dd54ef3d-8456-4336-a85a-7d7350f4594e/documents/users/$(request.auth.uid)).data.role == 'admin'
+        )
+      );
+    }
+
+    // Comprovativos de pagamento: acesso estritamente privado (apenas o autor do envio e Administrador)
+    match /payment_proofs/{userId}/{allPaths=**} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isStorageAdmin());
+      allow write: if isSignedIn() &&
+        request.auth.uid == userId &&
+        request.resource.size <= 10 * 1024 * 1024 &&
+        (
+          request.resource.contentType.matches('image/.*') ||
+          request.resource.contentType == 'application/pdf'
+        );
+      allow delete: if isStorageAdmin();
+    }
+
+    // Fotos de perfil públicas (apenas utilizadores autenticados, até 10 MB, imagens)
+    match /profile_photos/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() &&
+        request.resource.size <= 10 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+    }
+
+    // Fotos de trabalhos publicados no feed (apenas utilizadores autenticados, até 10 MB, imagens)
+    match /work_photos/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() &&
+        request.resource.size <= 10 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+    }
+
+    // Negar qualquer outro acesso por omissão
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

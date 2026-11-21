@@ -43,7 +43,9 @@ export const isNotificationForUser = (notif: AppNotification, user: User): boole
   // 4. CONTENT KEYWORD PROTECTION FOR CLIENTS
   const lowerContent = (notif.title + ' ' + notif.message).toLowerCase();
   const isProPlanKeyword = 
-    lowerContent.includes('período gratuito de 14 dias para profissionais') ||
+    lowerContent.includes('período gratuito de 30 dias') ||
+    lowerContent.includes('período gratuito de 14 dias') ||
+    lowerContent.includes('período experimental') ||
     lowerContent.includes('plano de profissionais') ||
     lowerContent.includes('assinatura profissional') ||
     lowerContent.includes('renovação de plano profissional') ||

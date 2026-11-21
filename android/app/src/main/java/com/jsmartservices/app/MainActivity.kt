@@ -34,8 +34,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     
-    // URL Principal de Produção no Cloudflare Worker (Backend Unificado)
-    private val appUrl = "https://j-smart-services-app.jfigueiredo790.workers.dev"
+    // URL Principal Oficial de Produção
+    private val appUrl = "https://jsmartservices.com"
 
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var cameraImageUri: Uri? = null
@@ -91,7 +91,7 @@ class MainActivity : AppCompatActivity() {
         val webView = binding.webView
         val settings = webView.settings
 
-        // 1. Recursos essenciais para SPA React + Vite
+        // 1. Recursos essenciais e hardening para SPA React + Vite
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
@@ -101,6 +101,12 @@ class MainActivity : AppCompatActivity() {
         settings.setSupportZoom(false)
         settings.builtInZoomControls = false
         settings.displayZoomControls = false
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
+        settings.setSupportMultipleWindows(false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            settings.safeBrowsingEnabled = true
+        }
 
         // 2. Cache e Desempenho
         settings.cacheMode = if (isNetworkAvailable()) WebSettings.LOAD_DEFAULT else WebSettings.LOAD_CACHE_ELSE_NETWORK
@@ -181,32 +187,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleExternalUrls(url: String): Boolean {
-        // Redirecionar esquemas nativos: WhatsApp, Telefone, Email, Maps
-        if (url.startsWith("tel:") || url.startsWith("mailto:") || url.startsWith("sms:") ||
-            url.startsWith("whatsapp:") || url.startsWith("https://wa.me/") || url.startsWith("https://api.whatsapp.com/")) {
-            try {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                startActivity(intent)
-                return true
-            } catch (e: ActivityNotFoundException) {
-                Toast.makeText(this, "Nenhuma aplicação compatível encontrada", Toast.LENGTH_SHORT).show()
-                return true
-            }
+        val parsed = try {
+            Uri.parse(url)
+        } catch (e: Exception) {
+            return true
         }
 
-        // Manter navegação interna dentro do Cloudflare Worker
-        if (url.contains("workers.dev") || url.contains("jsmartservices")) {
+        val scheme = parsed.scheme?.lowercase() ?: return true
+        val host = parsed.host?.lowercase() ?: ""
+
+        // Manter navegação interna apenas no domínio oficial HTTPS de produção
+        if (scheme == "https" && (host == "jsmartservices.com" || host == "www.jsmartservices.com")) {
             return false
         }
 
-        // Links externos abrem no browser padrão do sistema
-        return try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            startActivity(intent)
-            true
-        } catch (e: Exception) {
-            false
+        // Redirecionar apenas esquemas seguros explícitos: Telefone, Email, SMS, WhatsApp
+        val isAllowedExternalScheme = scheme in setOf("tel", "mailto", "sms", "whatsapp")
+        val isAllowedWhatsAppHttps = scheme == "https" && (host == "wa.me" || host == "api.whatsapp.com")
+
+        if (isAllowedExternalScheme || isAllowedWhatsAppHttps || scheme == "https") {
+            return try {
+                val intent = Intent(Intent.ACTION_VIEW, parsed)
+                startActivity(intent)
+                true
+            } catch (e: ActivityNotFoundException) {
+                Toast.makeText(this, "Nenhuma aplicação compatível encontrada", Toast.LENGTH_SHORT).show()
+                true
+            }
         }
+
+        // Bloquear file://, content://, javascript:, intent:// ou esquemas não autorizados
+        return true
     }
 
     private fun openFileChooserIntent(fileChooserParams: WebChromeClient.FileChooserParams?) {

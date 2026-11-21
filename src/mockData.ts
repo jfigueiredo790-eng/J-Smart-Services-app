@@ -938,7 +938,6 @@ export const DEFAULT_ADMIN_USER: User = {
   province: 'Icolo e Bengo',
   city: 'Icolo e Bengo',
   documentType: 'Bilhete de Identidade',
-  documentNumber: '003921845LA041',
   avatar: '',
   verified: true,
   ownerId: 'user-admin-1',

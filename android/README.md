@@ -5,7 +5,7 @@ Este diretório contém o projeto **Android Nativo em Kotlin / Android Studio** 
 ---
 
 ## 🎯 Arquitetura e Integração Unificada:
-1. **Backend Principal:** O app conecta-se diretamente ao Cloudflare Worker em `https://j-smart-services-app.jfigueiredo790.workers.dev`.
+1. **Backend e Domínio Oficial:** O app conecta-se diretamente ao domínio oficial `https://jsmartservices.com`.
 2. **Base de Dados Única:** Utiliza a mesma base de dados do Cloud Firestore (`ai-studio-jsmartservices-dd54ef3d-8456-4336-a85a-7d7350f4594e`).
 3. **Contas Unificadas:** Qualquer conta criada no site (Cliente, Profissional, Administrador) faz login imediatamente no aplicativo Android com a mesma palavra-passe e permissões.
 4. **Sem Duplicações:** Não há bases de dados locais ou duplicadas. Todas as fotos, conversas, orçamentos e transações de carteira sincronizam em tempo real.

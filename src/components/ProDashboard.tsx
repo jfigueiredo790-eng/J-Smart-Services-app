@@ -20,12 +20,12 @@ import {
   ShieldCheck,
   MessageSquare
 } from 'lucide-react';
-import { getProPlanStatus, PLAN_PRICES } from '../utils/planUtils';
+import { ActivePaidPlanKey, getProPlanStatus, ORDERED_PAID_PLANS, getPlanDisplayInfo } from '../utils/planUtils';
 
 export const ProDashboard: React.FC = () => {
-  const { currentUser, userRole, requests, updateUserProfile, changeProPlan, subscribeToPlan, setActiveTab } = useApp();
+  const { currentUser, userRole, requests, walletTransactions, updateUserProfile, setActiveTab } = useApp();
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [selectedPlanKey, setSelectedPlanKey] = useState<'plan_7d' | 'plan_14d' | 'plan_30d' | null>(null);
+  const [selectedPlanKey, setSelectedPlanKey] = useState<ActivePaidPlanKey | null>(null);
 
   const proRequests = requests.filter(r => r.professionalId === currentUser.id || r.status === 'pendente' || r.status === 'novamente_disponivel');
 
@@ -38,6 +38,15 @@ export const ProDashboard: React.FC = () => {
   const isAvailable = (currentUser as any).status !== 'ocupado';
 
   const planStatus = getProPlanStatus(currentUser);
+  const formatDatePt = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('pt-AO') : '—');
+
+  const myRecentPlanTransactions = walletTransactions
+    .filter(tx => tx.userId === currentUser.id && tx.type === 'payment')
+    .slice(0, 3);
+  const latestPendingPlanTx = myRecentPlanTransactions.find(tx => tx.status === 'pendente');
+  const latestRejectedPlanTx = !latestPendingPlanTx
+    ? myRecentPlanTransactions.find(tx => tx.status === 'rejeitado')
+    : undefined;
 
   const toggleAvailability = () => {
     updateUserProfile({
@@ -45,7 +54,7 @@ export const ProDashboard: React.FC = () => {
     });
   };
 
-  const handleSubscribeClick = (planKey: 'plan_7d' | 'plan_14d' | 'plan_30d') => {
+  const handleSubscribeClick = (planKey: ActivePaidPlanKey) => {
     if (userRole === 'admin') {
       setFeedback({ type: 'success', message: 'Como Administrador, tem acesso total ilimitado sem necessidade de pagamento de planos.' });
       setTimeout(() => setFeedback(null), 6000);
@@ -173,7 +182,7 @@ export const ProDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Trial Countdown Alert Banner (When Subscriptions Active) */}
+      {/* Trial Countdown Alert Banner */}
       {!planStatus.isPromotionalPhase && planStatus.isTrial && planStatus.isActive && (
         <div className={`p-5 rounded-3xl shadow-lg border text-white transition-all ${
           planStatus.alertStage === '24_hours'
@@ -190,35 +199,41 @@ export const ProDashboard: React.FC = () => {
                 <Clock className="w-6 h-6 animate-pulse" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   {planStatus.alertStage === '24_hours' && (
                     <span className="bg-rose-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-md uppercase tracking-wider animate-bounce">
-                      ⚠️ Faltam 24 Horas
+                      ⚠️ Faltam menos de 24 Horas
                     </span>
                   )}
                   {planStatus.alertStage === '3_days' && (
                     <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-md uppercase tracking-wider">
-                      ⚠️ Faltam 3 Dias
+                      ⚠️ Faltam {planStatus.daysRemaining} Dias
                     </span>
                   )}
                   {planStatus.alertStage === '7_days' && (
                     <span className="bg-teal-300 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-md uppercase tracking-wider">
-                      🔔 Faltam 7 Dias
+                      🔔 Faltam {planStatus.daysRemaining} Dias
                     </span>
                   )}
                   {planStatus.alertStage === 'normal' && (
-                    <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider">
+                    <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-md uppercase tracking-wider">
                       Período Experimental Activo
                     </span>
                   )}
-                  <span className="text-emerald-200 text-xs font-bold">14 Dias Grátis</span>
+                  <span className="text-emerald-200 text-xs font-bold">
+                    {planStatus.trialDurationDays === 30 ? '30 Dias (1 Mês) Grátis' : `${planStatus.trialDurationDays || 30} Dias Grátis`}
+                  </span>
                 </div>
 
                 <h3 className="text-lg font-black text-white mt-1">
                   {planStatus.message}
                 </h3>
-                <p className="text-xs text-emerald-100/90 mt-0.5 leading-relaxed">
-                  Pode receber pedidos de clientes, conversar no chat, aceitar trabalhos e concluir serviços sem qualquer custo.
+                <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] font-bold text-emerald-100">
+                  <span>📅 Início: {formatDatePt(planStatus.startedAtIso)}</span>
+                  <span>⏳ Término: {formatDatePt(planStatus.expiresAtIso)}</span>
+                </div>
+                <p className="text-xs text-emerald-100/90 mt-1 leading-relaxed">
+                  Pode publicar serviços no feed, receber pedidos de clientes, conversar no chat e concluir trabalhos gratuitamente durante este período.
                 </p>
               </div>
             </div>
@@ -234,6 +249,51 @@ export const ProDashboard: React.FC = () => {
         </div>
       )}
 
+      {/* Pending / Rejected Payment Review Banner (Private to Owner) */}
+      {latestPendingPlanTx && (
+        <div className="bg-amber-50 border-2 border-amber-300 rounded-3xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <Clock className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <p className="font-black text-amber-950">
+                ⏳ Pagamento em Validação: {getPlanDisplayInfo(latestPendingPlanTx.planId).label} ({latestPendingPlanTx.amountKz.toLocaleString('pt-AO')} Kz)
+              </p>
+              <p className="text-amber-800 mt-0.5">
+                O seu comprovativo ({latestPendingPlanTx.proofFileName || 'anexado'}) foi recebido com privacidade e aguarda aprovação do Administrador.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('wallet')}
+            className="text-xs font-extrabold text-amber-900 bg-white border border-amber-300 px-3 py-1.5 rounded-xl shrink-0"
+          >
+            Ver na Carteira
+          </button>
+        </div>
+      )}
+
+      {latestRejectedPlanTx && planStatus.isExpired && (
+        <div className="bg-rose-50 border-2 border-rose-300 rounded-3xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <p className="font-black text-rose-950">
+                ❌ Último Comprovativo Rejeitado ({latestRejectedPlanTx.amountKz.toLocaleString('pt-AO')} Kz)
+              </p>
+              <p className="text-rose-800 mt-0.5">
+                Motivo: {latestRejectedPlanTx.rejectionReason || 'Comprovativo não verificado.'} Pode submeter um novo comprovativo abaixo.
+              </p>
+            </div>
+          </div>
+          <a
+            href="#planos-subscricao"
+            className="text-xs font-extrabold text-white bg-rose-600 px-3 py-1.5 rounded-xl shrink-0"
+          >
+            Reenviar Comprovativo
+          </a>
+        </div>
+      )}
+
       {/* Plan Expired Alert Banner (Trial or Paid Plan) */}
       {planStatus.isExpired && (
         <div className="bg-gradient-to-r from-rose-900 via-slate-900 to-slate-950 text-white p-6 rounded-3xl shadow-xl border-2 border-rose-500/50 space-y-4">
@@ -244,13 +304,19 @@ export const ProDashboard: React.FC = () => {
               </div>
               <div>
                 <span className="bg-rose-950 text-rose-200 text-[10px] font-black px-2.5 py-0.5 rounded-md uppercase tracking-wider border border-rose-500/40">
-                  🔒 Assinatura Expirada — Renovação Necessária
+                  🔒 Subscrição Necessária — Acesso Profissional Pausado
                 </span>
                 <h3 className="text-lg font-black text-white mt-1">
-                  O seu período de acesso profissional expirou. Escolha um novo plano para reativar o seu acesso.
+                  {planStatus.message}
                 </h3>
+                {(planStatus.startedAtIso || planStatus.expiresAtIso) && (
+                  <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] font-bold text-rose-200">
+                    {planStatus.startedAtIso && <span>📅 Início anterior: {formatDatePt(planStatus.startedAtIso)}</span>}
+                    {planStatus.expiresAtIso && <span>⏳ Expirou em: {formatDatePt(planStatus.expiresAtIso)}</span>}
+                  </div>
+                )}
                 <p className="text-xs text-rose-200/90 mt-1 leading-relaxed">
-                  As funcionalidades profissionais estão temporariamente suspensas até à confirmação do pagamento de um novo plano.
+                  Enquanto não renovar o plano, a conta fica oculta nas pesquisas públicas e impedida de publicar no feed ou aceitar novos pedidos.
                 </p>
               </div>
             </div>
@@ -272,7 +338,7 @@ export const ProDashboard: React.FC = () => {
                 ✓ Os seus dados e histórico estão 100% seguros
               </p>
               <p className="text-slate-300 leading-relaxed text-[11px]">
-                A sua conta, perfil profissional, fotos de portfólio, avaliações acumuladas e histórico de serviços prestados <strong>NÃO foram apagados</strong>. Basta escolher um dos planos abaixo (Semanal, Quinzenal ou Mensal) e efetuar o pagamento para desbloquear instantaneamente a sua conta.
+                A sua conta, perfil profissional, publicações, avaliações acumuladas, conversas e histórico de serviços <strong>NÃO foram apagados</strong>. Escolha um dos planos abaixo (Semanal — 2 semanas, Mensal — 1 mês ou Trimestral — 3 meses) e envie o comprovativo para reativar.
               </p>
             </div>
           </div>
@@ -282,7 +348,7 @@ export const ProDashboard: React.FC = () => {
       {/* Active Paid Plan Banner */}
       {!planStatus.isTrial && planStatus.isActive && (
         <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 rounded-3xl shadow-lg border border-indigo-500/30">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
                 <Zap className="w-6 h-6" />
@@ -294,10 +360,14 @@ export const ProDashboard: React.FC = () => {
                 <h3 className="text-base font-black text-white mt-0.5">
                   {planStatus.message}
                 </h3>
+                <div className="flex flex-wrap gap-3 mt-1 text-[11px] font-semibold text-indigo-200">
+                  {planStatus.startedAtIso && <span>📅 Início: {formatDatePt(planStatus.startedAtIso)}</span>}
+                  {planStatus.expiresAtIso && <span>⏳ Validade até: {formatDatePt(planStatus.expiresAtIso)}</span>}
+                </div>
               </div>
             </div>
 
-            <a href="#planos-subscricao" className="text-xs font-bold text-indigo-300 hover:text-white underline">
+            <a href="#planos-subscricao" className="text-xs font-bold text-indigo-300 hover:text-white underline shrink-0">
               Renovar Plano
             </a>
           </div>
@@ -345,17 +415,9 @@ export const ProDashboard: React.FC = () => {
             <div className="flex items-center gap-2">
               <Crown className="w-5 h-5 text-amber-500" />
               <h3 className="font-extrabold text-slate-900 text-base">Planos de Subscrição</h3>
-              {planStatus.isPromotionalPhase && (
-                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-emerald-200">
-                  ★ Fase de Crescimento (100% Gratuito)
-                </span>
-              )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              {planStatus.isPromotionalPhase 
-                ? '100% gratuito durante a fase de crescimento. A activação das subscrições será anunciada posteriormente.'
-                : 'Registo gratuito + 14 dias de teste. Escolha o seu plano para continuar a trabalhar na plataforma J Smart.'
-              }
+              Novos profissionais têm <strong>30 dias (1 mês) totalmente grátis</strong>. Escolha um dos 3 planos oficiais e envie o comprovativo para aprovação.
             </p>
           </div>
 
@@ -367,144 +429,109 @@ export const ProDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* 3 Subscription Options */}
+        {/* 3 Official Subscription Plans */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          
-          {/* 🟢 Plano Semanal (7 Dias) */}
-          <div className="bg-slate-50 hover:bg-emerald-50/40 border-2 border-emerald-200 rounded-3xl p-5 flex flex-col justify-between space-y-4 transition-all relative">
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
-                  📅 Plano Semanal
-                </span>
-                <span className="text-xs text-emerald-700 font-bold">7 Dias</span>
+          {ORDERED_PAID_PLANS.map((plan) => {
+            const isFeatured = plan.key === 'plan_90d';
+            const isMid = plan.key === 'plan_30d';
+
+            return (
+              <div
+                key={plan.key}
+                className={`rounded-3xl p-5 flex flex-col justify-between space-y-4 transition-all relative border-2 ${
+                  isFeatured
+                    ? 'bg-slate-900 text-white border-purple-500 shadow-xl'
+                    : isMid
+                    ? 'bg-slate-50 hover:bg-blue-50/40 border-blue-200'
+                    : 'bg-slate-50 hover:bg-emerald-50/40 border-emerald-200'
+                }`}
+              >
+                {isFeatured && (
+                  <div className="absolute -top-3 right-4 bg-purple-500 text-white font-black text-[10px] px-3 py-0.5 rounded-full uppercase tracking-wider shadow-md">
+                    ★ Maior Poupança
+                  </div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider ${
+                        isFeatured
+                          ? 'bg-purple-900/80 text-purple-300 border border-purple-700'
+                          : isMid
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-emerald-100 text-emerald-800'
+                      }`}
+                    >
+                      📅 {plan.fullLabel}
+                    </span>
+                    <span
+                      className={`text-xs font-bold ${
+                        isFeatured ? 'text-purple-300' : isMid ? 'text-blue-700' : 'text-emerald-700'
+                      }`}
+                    >
+                      {plan.durationLabel}
+                    </span>
+                  </div>
+
+                  <h4 className={`text-lg font-black mt-3 ${isFeatured ? 'text-white' : 'text-slate-900'}`}>
+                    {plan.fullLabel}
+                  </h4>
+                  <p className={`text-xs mt-1 ${isFeatured ? 'text-slate-400' : 'text-slate-500'}`}>
+                    {plan.key === 'plan_14d'
+                      ? 'Acesso completo por 2 semanas para captar clientes.'
+                      : plan.key === 'plan_30d'
+                      ? 'Subscrição mensal equilibrada para trabalho contínuo.'
+                      : '3 meses completos com máxima economia e destaque.'}
+                  </p>
+
+                  <div className={`mt-4 pt-3 border-t ${isFeatured ? 'border-slate-800' : isMid ? 'border-blue-100' : 'border-emerald-100'}`}>
+                    <span className={`text-2xl font-black ${isFeatured ? 'text-amber-400' : 'text-slate-900'}`}>
+                      {plan.priceStr}
+                    </span>
+                    <span className={`text-xs font-medium ${isFeatured ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {' '}/ {plan.durationLabel}
+                    </span>
+                  </div>
+
+                  <ul className={`mt-4 space-y-2 text-xs ${isFeatured ? 'text-slate-300' : 'text-slate-600'}`}>
+                    <li className="flex items-center gap-2">
+                      <CheckCircle2 className={`w-4 h-4 shrink-0 ${isFeatured ? 'text-amber-400' : isMid ? 'text-blue-600' : 'text-emerald-600'}`} />
+                      <span>Aparecer nas pesquisas de clientes</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <CheckCircle2 className={`w-4 h-4 shrink-0 ${isFeatured ? 'text-amber-400' : isMid ? 'text-blue-600' : 'text-emerald-600'}`} />
+                      <span>Publicar trabalhos no feed &amp; conversar no chat</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <CheckCircle2 className={`w-4 h-4 shrink-0 ${isFeatured ? 'text-amber-400' : isMid ? 'text-blue-600' : 'text-emerald-600'}`} />
+                      <span>Aceitar e concluir pedidos (0% comissão)</span>
+                    </li>
+                    {isFeatured && (
+                      <li className="flex items-center gap-2 font-bold text-amber-300">
+                        <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+                        <span>Economize 1.000 Kz nos 3 meses</span>
+                      </li>
+                    )}
+                  </ul>
+                </div>
+
+                <button
+                  onClick={() => handleSubscribeClick(plan.key)}
+                  className={`w-full py-3 text-white font-extrabold text-xs rounded-2xl transition-all shadow-md flex items-center justify-center gap-1.5 ${
+                    isFeatured
+                      ? 'bg-purple-600 hover:bg-purple-500 shadow-purple-600/30'
+                      : isMid
+                      ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
+                      : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                  }`}
+                >
+                  {isFeatured && <Sparkles className="w-4 h-4 text-amber-300" />}
+                  <span>Escolher {plan.fullLabel} ({plan.priceStr})</span>
+                </button>
               </div>
-
-              <h4 className="text-lg font-black text-slate-900 mt-3">Plano Semanal</h4>
-              <p className="text-xs text-slate-500 mt-1">Ideal para utilização de curta duração.</p>
-
-              <div className="mt-4 pt-3 border-t border-emerald-100">
-                <span className="text-2xl font-black text-slate-900">1.500 Kz</span>
-                <span className="text-xs text-slate-500 font-medium"> / 7 dias</span>
-              </div>
-
-              <ul className="mt-4 space-y-2 text-xs text-slate-600">
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Receber pedidos de clientes</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Conversar no chat e dar orçamentos</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Aceitar e concluir serviços</span>
-                </li>
-              </ul>
-            </div>
-
-            <button
-              onClick={() => handleSubscribeClick('plan_7d')}
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-2xl transition-all shadow-md shadow-emerald-600/20"
-            >
-              Ativar Plano Semanal (1.500 Kz)
-            </button>
-          </div>
-
-          {/* 🔵 Plano Quinzenal (14 Dias) */}
-          <div className="bg-slate-50 hover:bg-blue-50/40 border-2 border-blue-200 rounded-3xl p-5 flex flex-col justify-between space-y-4 transition-all relative">
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="bg-blue-100 text-blue-800 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
-                  📅 Plano Quinzenal
-                </span>
-                <span className="text-xs text-blue-700 font-bold">14 Dias</span>
-              </div>
-
-              <h4 className="text-lg font-black text-slate-900 mt-3">Plano Quinzenal</h4>
-              <p className="text-xs text-slate-500 mt-1">Opção intermédia com melhor planeamento.</p>
-
-              <div className="mt-4 pt-3 border-t border-blue-100">
-                <span className="text-2xl font-black text-slate-900">3.000 Kz</span>
-                <span className="text-xs text-slate-500 font-medium"> / 14 dias</span>
-              </div>
-
-              <ul className="mt-4 space-y-2 text-xs text-slate-600">
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>Receber pedidos de clientes</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>Conversar no chat e dar orçamentos</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>Aceitar e concluir serviços</span>
-                </li>
-              </ul>
-            </div>
-
-            <button
-              onClick={() => handleSubscribeClick('plan_14d')}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-2xl transition-all shadow-md shadow-blue-600/20"
-            >
-              Ativar Plano Quinzenal (3.000 Kz)
-            </button>
-          </div>
-
-          {/* 🟣 Plano Mensal (30 Dias) */}
-          <div className="bg-slate-900 text-white border-2 border-purple-500 rounded-3xl p-5 flex flex-col justify-between space-y-4 transition-all relative shadow-xl">
-            <div className="absolute -top-3 right-4 bg-purple-500 text-white font-black text-[10px] px-3 py-0.5 rounded-full uppercase tracking-wider shadow-md">
-              ★ Melhor Custo-Benefício
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="bg-purple-900/80 text-purple-300 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider border border-purple-700">
-                  📅 Plano Mensal
-                </span>
-                <span className="text-xs text-purple-300 font-bold">30 Dias</span>
-              </div>
-
-              <h4 className="text-lg font-black text-white mt-3">Plano Mensal</h4>
-              <p className="text-xs text-slate-400 mt-1">Melhor custo-benefício para profissionais ativos.</p>
-
-              <div className="mt-4 pt-3 border-t border-slate-800">
-                <span className="text-2xl font-black text-amber-400">5.000 Kz</span>
-                <span className="text-xs text-slate-400 font-medium"> / 30 dias</span>
-              </div>
-
-              <ul className="mt-4 space-y-2 text-xs text-slate-300">
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Receber pedidos de clientes</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Conversar no chat e dar orçamentos</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Aceitar e concluir serviços</span>
-                </li>
-                <li className="flex items-center gap-2 font-bold text-amber-300">
-                  <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
-                  <span>Maior destaque e prioridade nas pesquisas</span>
-                </li>
-              </ul>
-            </div>
-
-            <button
-              onClick={() => handleSubscribeClick('plan_30d')}
-              className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs rounded-2xl transition-all shadow-md shadow-purple-600/30 flex items-center justify-center gap-1.5"
-            >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>Ativar Plano Mensal (5.000 Kz)</span>
-            </button>
-          </div>
-
+            );
+          })}
         </div>
 
       </div>
@@ -523,7 +550,7 @@ export const ProDashboard: React.FC = () => {
               A sua assinatura ou período gratuito terminou.
             </h4>
             <p className="text-xs text-rose-800 max-w-md mx-auto leading-relaxed">
-              Para ver os detalhes dos clientes, enviar propostas e aceitar novos pedidos, escolha e ative um dos planos acima (Semanal, Quinzenal ou Mensal).
+              Para ver os detalhes dos clientes, publicar no feed e aceitar novos pedidos, escolha e ative um dos planos acima (Semanal — 2 semanas, Mensal — 1 mês ou Trimestral — 3 meses).
             </p>
             <a 
               href="#planos-subscricao"
@@ -552,7 +579,7 @@ export const ProDashboard: React.FC = () => {
           onClose={() => setSelectedPlanKey(null)}
           onSuccess={() => {
             setSelectedPlanKey(null);
-            setFeedback({ type: 'success', message: 'Solicitação de ativação do pacote enviada com sucesso! Aguarde a confirmação do comprovativo no WhatsApp.' });
+            setFeedback({ type: 'success', message: 'Comprovativo enviado com sucesso! O seu pagamento aguarda aprovação do Administrador para ativar o plano.' });
             setTimeout(() => setFeedback(null), 8000);
           }}
         />

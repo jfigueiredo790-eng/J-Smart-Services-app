@@ -7,7 +7,7 @@ export type RequestStatus = 'pendente' | 'novamente_disponivel' | 'aceito' | 'em
 
 export type UrgencyLevel = 'Normal' | 'Urgente' | 'Agendado';
 
-export type ProSubscriptionPlan = 'free_trial' | 'plan_7d' | 'plan_14d' | 'plan_30d';
+export type ProSubscriptionPlan = 'free_trial' | 'plan_14d' | 'plan_30d' | 'plan_90d' | 'plan_7d';
 
 export interface WorkFeedPost {
   id: string;
@@ -76,6 +76,10 @@ export interface User {
   createdAt: string;
   updatedAt?: string;
   trialStartDate?: string;
+  trialEndsAt?: string;
+  trialDurationDays?: number;
+  trialStartServerTimestamp?: unknown;
+  trialClaimedHash?: string;
   subscriptionPlan?: ProSubscriptionPlan;
   planStartedAt?: string;
   planExpiresAt?: string;
@@ -104,6 +108,9 @@ export interface ProfessionalProfile extends User {
   plan?: 'gratuito' | 'pro_destaque';
   planActivatedAt?: string;
   trialStartDate?: string;
+  trialEndsAt?: string;
+  trialDurationDays?: number;
+  trialStartServerTimestamp?: unknown;
   subscriptionPlan?: ProSubscriptionPlan;
   planStartedAt?: string;
   planExpiresAt?: string;
@@ -133,7 +140,7 @@ export interface ServiceRequest {
   clientId: string;
   clientName: string;
   clientAvatar: string;
-  clientPhone: string;
+  clientPhone?: string;
   professionalId?: string;
   professionalName?: string;
   professionalAvatar?: string;
@@ -289,6 +296,11 @@ export interface WalletTransaction {
   proofFileSize?: number;
   proofNote?: string;
   rejectionReason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  planDurationDays?: number;
+  subscriptionStartedAt?: string;
+  subscriptionExpiresAt?: string;
   status: 'concluido' | 'pendente' | 'rejeitado';
   createdAt: string;
   updatedAt?: string;
@@ -325,7 +337,6 @@ export interface PlatformSettings {
   adminIban?: string;
   adminProvince?: string;
   adminCity?: string;
-  adminPin?: string; // Default 'admin123'
 }
 
 export const ANGOLA_PROVINCES = [

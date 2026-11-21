@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import { useApp } from '../context/AppContext';
-import { DEFAULT_ADMIN_USER } from '../mockData';
 import { BrandLogo } from './BrandLogo';
+import { stripSensitiveFields } from '../utils/securityUtils';
+import { User } from '../types';
 import { 
   ShieldCheck, 
   Lock, 
   Mail, 
-  Phone, 
   ArrowRight, 
   AlertCircle, 
   ArrowLeft,
-  KeyRound,
   CheckCircle2,
   Building2,
   ShieldAlert
@@ -23,11 +25,8 @@ interface AdminLoginPageProps {
 export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
   const { 
     loginUser, 
-    platformSettings, 
-    allUsers, 
     setActiveTab, 
-    setIsLoggedIn,
-    loginUserWithCredentialsAsync
+    setIsLoggedIn
   } = useApp();
 
   const [adminIdentifier, setAdminIdentifier] = useState('');
@@ -41,82 +40,69 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
     setError('');
     setSuccessMsg('');
 
-    const inputTrimmed = adminIdentifier.trim();
+    const emailTrimmed = adminIdentifier.trim().toLowerCase();
     const passTrimmed = adminPassword.trim();
 
-    if (!inputTrimmed) {
-      setError('Por favor introduza o e-mail ou telefone de administrador.');
+    if (!emailTrimmed || !emailTrimmed.includes('@')) {
+      setError('Por segurança, introduza um e-mail de administrador válido.');
       return;
     }
-    if (!passTrimmed) {
-      setError('Por favor introduza a palavra-passe ou PIN de administrador.');
+    if (!passTrimmed || passTrimmed.length < 6) {
+      setError('A palavra-passe de administrador deve conter pelo menos 6 caracteres.');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const cleanInputDigits = inputTrimmed.replace(/\D/g, '');
-      const correctPin = platformSettings.adminPin || 'admin123';
-      const defaultAdminEmail = (DEFAULT_ADMIN_USER.email || 'jfigueiredo790@gmail.com').toLowerCase();
-      const defaultAdminPhoneDigits = (DEFAULT_ADMIN_USER.phone || '956011985').replace(/\D/g, '');
+      const cred = await signInWithEmailAndPassword(auth, emailTrimmed, passTrimmed);
+      const fbUser = cred.user;
 
-      // Check if input matches default admin or any user with role === 'admin'
-      const isDefaultAdminIdentifier = 
-        inputTrimmed.toLowerCase() === defaultAdminEmail ||
-        inputTrimmed.toLowerCase().includes('admin') ||
-        (cleanInputDigits.length >= 6 && defaultAdminPhoneDigits.endsWith(cleanInputDigits));
+      const [userSnap, adminSnap] = await Promise.all([
+        getDoc(doc(db, 'users', fbUser.uid)),
+        getDoc(doc(db, 'admins', fbUser.uid)).catch(() => null)
+      ]);
 
-      // Find in all registered users
-      const foundAdminUser = allUsers.find(u => u.role === 'admin' && (
-        (u.email && u.email.toLowerCase() === inputTrimmed.toLowerCase()) ||
-        (u.phone && u.phone.replace(/\D/g, '').endsWith(cleanInputDigits))
-      ));
+      const userData = userSnap.exists() ? (stripSensitiveFields({ id: userSnap.id, ...userSnap.data() }) as User) : null;
+      const isBootstrapAdmin = fbUser.emailVerified === true && fbUser.email?.toLowerCase() === 'jfigueiredo790@gmail.com';
+      const hasAdminRecord = (adminSnap && adminSnap.exists()) || userData?.role === 'admin' || isBootstrapAdmin;
 
-      // Validate password / PIN
-      let isValidAdmin = false;
-      let adminUserObj = foundAdminUser || DEFAULT_ADMIN_USER;
-
-      if (isDefaultAdminIdentifier) {
-        if (
-          passTrimmed === correctPin || 
-          passTrimmed === '123456' || 
-          passTrimmed === 'admin123' ||
-          passTrimmed === DEFAULT_ADMIN_USER.password
-        ) {
-          isValidAdmin = true;
-        }
-      } else if (foundAdminUser) {
-        if (
-          foundAdminUser.password === passTrimmed || 
-          passTrimmed === correctPin || 
-          passTrimmed === '123456'
-        ) {
-          isValidAdmin = true;
-        }
+      if (!hasAdminRecord) {
+        await signOut(auth);
+        setError('Acesso Recusado: Esta conta não possui privilégios de administrador verificados.');
+        return;
       }
 
-      // Also try credentials async login fallback
-      if (!isValidAdmin) {
-        const asyncRes = await loginUserWithCredentialsAsync(inputTrimmed, passTrimmed, 'admin');
-        if (asyncRes.success) {
-          isValidAdmin = true;
-        }
+      if (userData?.isDeleted || userData?.blocked || userData?.status === 'bloqueado') {
+        await signOut(auth);
+        setError('Acesso Recusado: Conta administrativa suspensa ou desativada.');
+        return;
       }
 
-      if (isValidAdmin) {
-        setSuccessMsg('Acesso concedido. A abrir o Painel Administrativo...');
-        setTimeout(() => {
-          loginUser(adminUserObj, 'admin');
-          setIsLoggedIn(true);
-          setActiveTab('admin');
-        }, 600);
-      } else {
-        setError('Acesso Recusado: Credenciais ou palavra-passe incorretas para acesso administrativo.');
-      }
-    } catch (err) {
-      console.error('Erro no login administrativo:', err);
-      setError('Erro ao validar o acesso administrativo. Verifique a sua ligação.');
+      const adminUserObj: User = userData
+        ? { ...userData, role: 'admin' }
+        : {
+            id: fbUser.uid,
+            name: fbUser.displayName || 'Administrador J Smart',
+            email: fbUser.email || emailTrimmed,
+            phone: '',
+            role: 'admin',
+            adminSubRole: 'super_admin',
+            province: 'Icolo e Bengo',
+            avatar: fbUser.photoURL || '',
+            verified: true,
+            createdAt: new Date().toISOString()
+          };
+
+      setSuccessMsg('Acesso concedido. A abrir o Painel Administrativo...');
+      setTimeout(() => {
+        loginUser(adminUserObj, 'admin');
+        setIsLoggedIn(true);
+        setActiveTab('admin');
+      }, 400);
+    } catch (err: any) {
+      console.error('Erro no login administrativo:', err?.code || err);
+      setError('Acesso Recusado: E-mail ou palavra-passe incorretos.');
     } finally {
       setIsSubmitting(false);
     }

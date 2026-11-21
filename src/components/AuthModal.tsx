@@ -89,10 +89,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
   const [authError, setAuthError] = useState('');
   const [successInfo, setSuccessInfo] = useState('');
 
-  // Forgot Password fields
-  const [forgotIdentifier, setForgotIdentifier] = useState('');
-  const [forgotSent, setForgotSent] = useState(false);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,8 +112,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
     setSuccessInfo('');
 
     if (mode === 'login') {
-      if (!phone.trim()) {
-        setAuthError('Por favor introduza o seu número de telefone.');
+      if (!email.trim() || !email.includes('@')) {
+        setAuthError('Por favor introduza o e-mail da sua conta (ex: nome@gmail.com).');
         return;
       }
       if (!password) {
@@ -129,8 +125,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
       const emergencyLoginTimer = setTimeout(() => setIsSubmitting(false), 7000);
 
       try {
-        // Validates credentials and automatically switches to role (Client -> Home, Pro -> ProDashboard, Admin -> AdminDashboard)
-        const res = await loginUserWithCredentialsAsync(phone, password, role);
+        // Validates credentials via Firebase Auth and routes by verified role
+        const res = await loginUserWithCredentialsAsync(email.trim(), password, role);
         clearTimeout(emergencyLoginTimer);
 
         if (res.success) {
@@ -138,7 +134,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         } else {
           setAuthError(res.message);
         }
-      } catch (err: any) {
+      } catch {
         clearTimeout(emergencyLoginTimer);
         setAuthError('Ocorreu um erro ao iniciar sessão. Por favor verifique a sua ligação e tente novamente.');
       } finally {
@@ -208,7 +204,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         email: email.trim(),
         phone: formattedPhone,
         gender,
-        password: password.trim(),
         role: targetRole,
         accountType,
         province,
@@ -233,23 +228,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         } else {
           setAuthError(res.message);
         }
-      } catch (err: any) {
+      } catch {
         clearTimeout(emergencyRegTimer);
         setAuthError('Ocorreu um erro no registo. Por favor tente novamente.');
       } finally {
         setIsSubmitting(false);
       }
-    } else if (mode === 'forgot_password') {
-      if (!forgotIdentifier.trim()) {
-        setAuthError('Por favor introduza o seu número de telefone ou e-mail cadastrado.');
-        return;
-      }
-      setIsSubmitting(true);
-      setTimeout(() => {
-        setIsSubmitting(false);
-        setForgotSent(true);
-        setSuccessInfo('Instruções de recuperação enviadas. Também pode entrar em contacto com o suporte oficial.');
-      }, 800);
     }
   };
 
@@ -261,8 +245,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
         onSuccessReturnToLogin={(recoveredId) => {
           setShowRecoveryModal(false);
           setMode('login');
-          if (recoveredId) {
-            setPhone(recoveredId.replace('+244', '').trim());
+          if (recoveredId && recoveredId.includes('@')) {
+            setEmail(recoveredId.trim());
           }
         }}
       />
@@ -337,23 +321,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
             {/* ==================== LOGIN MODE ==================== */}
             {mode === 'login' && (
               <>
-                {/* Telefone */}
+                {/* E-mail de Acesso */}
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Número de telefone *</span>
-                    </label>
-                    <span className="text-[10px] text-emerald-600 font-extrabold">🇦🇴 +244</span>
-                  </div>
+                  <label className="text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>E-mail da conta *</span>
+                  </label>
                   <div className="relative">
-                    <span className="absolute left-3.5 top-3 text-xs font-bold text-slate-400">+244</span>
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                     <input 
-                      type="tel" 
-                      value={phone} 
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="923 111 222" 
-                      className="w-full text-xs p-3 pl-14 rounded-xl border border-slate-200 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-slate-50/50"
+                      type="email" 
+                      value={email} 
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="seu@email.com" 
+                      className="w-full text-xs p-3 pl-10 rounded-xl border border-slate-200 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-slate-50/50"
                       required
                     />
                   </div>
@@ -368,7 +349,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                       className="text-[11px] text-slate-500 hover:text-emerald-700 font-bold transition-colors flex items-center gap-1"
                     >
                       <HelpCircle className="w-3 h-3 text-slate-400" />
-                      <span>Esqueci o número de telefone</span>
+                      <span>Recuperar acesso à conta</span>
                     </button>
                   </div>
                 </div>
@@ -733,10 +714,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                   <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-[11px] text-emerald-900 font-bold space-y-1">
                     <div className="flex items-center gap-1.5 text-emerald-700 font-black">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                      <span>Aprovação Automática & 14 Dias de Teste Grátis</span>
+                      <span>Aprovação Automática &amp; 30 Dias (1 Mês) Totalmente Grátis</span>
                     </div>
                     <p className="text-slate-600 text-[10px] font-medium leading-relaxed">
-                      O seu perfil de profissional ficará ativo imediatamente em Angola assim que concluir o registo.
+                      O seu perfil profissional fica ativo imediatamente com 30 dias (1 mês) gratuitos a partir da criação da conta (1 período experimental gratuito por utilizador).
                     </p>
                   </div>
                 )}

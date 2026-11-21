@@ -21,8 +21,10 @@ import { RulesAndCodeModal } from './components/RulesAndCodeModal';
 import { WorkFeedView } from './components/WorkFeedView';
 import { SubscriptionExpiredModal } from './components/SubscriptionExpiredModal';
 import { BlockedAccountModal } from './components/BlockedAccountModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { ANGOLA_PROVINCES, ProfessionalProfile, ServiceCategory } from './types';
 import { getProPlanStatus } from './utils/planUtils';
+import { OFFICIAL_APP_URL, buildShareUrl, enforceCanonicalDomain } from './config/domain';
 import { 
   Search, 
   Sparkles, 
@@ -82,13 +84,22 @@ function MainContent() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [preSelectedProForReq, setPreSelectedProForReq] = useState<ProfessionalProfile | null>(null);
   const [subModalCategory, setSubModalCategory] = useState<ServiceCategory | null>(null);
+  const [roleNoticeBanner, setRoleNoticeBanner] = useState<string | null>(null);
+  const [deepLinkProId, setDeepLinkProId] = useState<string | null>(null);
 
-  // Auto-detect shared referral/invite registration link
+  // Enforce canonical domain (www.jsmartservices.com -> https://jsmartservices.com) and detect shared/deep links
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
+      enforceCanonicalDomain();
+
       const checkParams = () => {
         const params = new URLSearchParams(window.location.search);
         const hash = window.location.hash || '';
+        const tabParam = params.get('tab');
+        const categoryParam = params.get('category');
+        const proParam = params.get('pro');
+        const postParam = params.get('post');
+
         if (
           params.get('admin') === 'true' || 
           params.get('page') === 'admin' || 
@@ -98,6 +109,7 @@ function MainContent() {
         } else if (
           params.get('register') === 'true' || 
           params.get('mode') === 'register' || 
+          params.get('login') === 'true' ||
           params.get('ref') || 
           params.get('invite') || 
           params.get('reg') === 'true' || 
@@ -105,12 +117,38 @@ function MainContent() {
         ) {
           setShowAuthModal(true);
         }
+
+        if (postParam) {
+          setActiveTab('feed');
+        } else if (
+          tabParam &&
+          ['home', 'categories', 'search', 'feed', 'requests', 'chat', 'profile', 'wallet', 'pro_dashboard'].includes(tabParam)
+        ) {
+          setActiveTab(tabParam as any);
+        } else if (categoryParam) {
+          setSelectedCategory(categoryParam);
+          setActiveTab('search');
+        }
+
+        if (proParam) {
+          setDeepLinkProId(proParam);
+        }
       };
       checkParams();
       window.addEventListener('popstate', checkParams);
       return () => window.removeEventListener('popstate', checkParams);
     }
   }, []);
+
+  // Open shared professional profile deep link once professionals are loaded
+  React.useEffect(() => {
+    if (!deepLinkProId || professionals.length === 0) return;
+    const matched = professionals.find(p => p.id === deepLinkProId);
+    if (matched) {
+      setSelectedPro(matched);
+      setDeepLinkProId(null);
+    }
+  }, [deepLinkProId, professionals, setSelectedPro]);
 
   // Filter professionals (Capítulo 7 - Sistema de Correspondência + Modo de Disponibilidade)
   const filteredPros = professionals
@@ -193,7 +231,8 @@ function MainContent() {
         }
         return;
       }
-      alert('Atenção: Apenas utilizadores no Modo Cliente podem criar e enviar pedidos de serviços. Os profissionais utilizam a plataforma para receber pedidos e divulgar trabalhos.');
+      setRoleNoticeBanner('Apenas utilizadores no Modo Cliente podem criar e enviar pedidos de serviços. Os profissionais utilizam a plataforma para receber pedidos e divulgar trabalhos.');
+      setTimeout(() => setRoleNoticeBanner(null), 5000);
       return;
     }
     setPreSelectedProForReq(pro || null);
@@ -231,6 +270,14 @@ function MainContent() {
             >
               Ligar
             </button>
+          </div>
+        )}
+
+        {/* Role notice banner */}
+        {roleNoticeBanner && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 text-amber-900 text-xs font-medium flex items-center justify-between gap-2">
+            <span>{roleNoticeBanner}</span>
+            <button onClick={() => setRoleNoticeBanner(null)} className="text-amber-700 font-bold shrink-0">Fechar</button>
           </div>
         )}
 
@@ -352,7 +399,7 @@ function MainContent() {
                 <div className="flex flex-col sm:flex-row gap-2 pt-1">
                   <a
                     href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                      '🔧 Precisas de um serviço ou de um técnico? Entra na J Smart Services, procura o serviço que precisas e encontra profissionais para te ajudar.\n\n👉 Acede agora:\nhttps://j-smart-services-app.jfigueiredo790.workers.dev'
+                      `🔧 Precisas de um serviço ou de um técnico? Entra na J Smart Services, procura o serviço que precisas e encontra profissionais para te ajudar.\n\n👉 Acede agora:\n${OFFICIAL_APP_URL}`
                     )}`}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -364,7 +411,7 @@ function MainContent() {
 
                   <a
                     href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                      '💼 Tens uma profissão e queres divulgar e prestar os teus serviços? Junta-te à J Smart Services e encontra clientes que procuram pelos teus serviços.\n\n👉 Cadastra-te aqui:\nhttps://j-smart-services-app.jfigueiredo790.workers.dev'
+                      `💼 Tens uma profissão e queres divulgar e prestar os teus serviços? Junta-te à J Smart Services e encontra clientes que procuram pelos teus serviços.\n\n👉 Cadastra-te aqui:\n${buildShareUrl({ register: 'true' })}`
                     )}`}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -833,8 +880,10 @@ function MainContent() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <MainContent />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <MainContent />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

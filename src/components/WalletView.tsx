@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+import { sanitizeMediaUrl, openSafePdfProof } from '../utils/securityUtils';
 import { 
   Wallet, 
   ArrowUpRight, 
@@ -290,8 +291,8 @@ export const WalletView: React.FC = () => {
         <div>
           <h4 className="font-extrabold text-slate-900 text-xs">Para que serve a Carteira do Profissional?</h4>
           <ul className="text-xs text-slate-700 mt-1 space-y-1 list-disc list-inside">
-            <li><strong>Ver os planos adquiridos:</strong> Plano Semanal (7 dias), Quinzenal (14 dias) e Mensal (30 dias).</li>
-            <li><strong>Histórico de pagamentos:</strong> Consulte todos os recibos e comprovativos dos seus planos.</li>
+            <li><strong>Ver os planos disponíveis:</strong> Plano Semanal (2 semanas — 1.500 Kz), Plano Mensal (1 mês — 3.000 Kz) e Plano Trimestral (3 meses — 8.000 Kz).</li>
+            <li><strong>Histórico de pagamentos:</strong> Consulte apenas os seus próprios recibos, comprovativos privados e estados de validação.</li>
             <li><strong>Aviso de Política:</strong> Os valores pagos para a ativação dos pacotes/planos não são sujeitos a devolução ou reembolso.</li>
           </ul>
         </div>
@@ -496,7 +497,7 @@ export const WalletView: React.FC = () => {
                       </div>
                     ) : (
                       <div className="relative rounded-lg overflow-hidden border border-slate-200 max-h-32 flex items-center justify-center bg-white">
-                        <img src={depositProofImage} alt="Comprovativo Deposit" className="max-h-32 object-contain" />
+                        <img src={sanitizeMediaUrl(depositProofImage) || ''} alt="Comprovativo Deposit" className="max-h-32 object-contain" />
                         <button
                           type="button"
                           onClick={() => {
@@ -566,17 +567,18 @@ export const WalletView: React.FC = () => {
                 <div className="text-center p-6 space-y-3">
                   <FileText className="w-12 h-12 text-rose-600 mx-auto" />
                   <p className="font-extrabold text-slate-900 text-sm">Documento PDF</p>
-                  <a
-                    href={viewProofUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-xl inline-block"
+                  <button
+                    type="button"
+                    onClick={() => openSafePdfProof(viewProofUrl, 'Comprovativo_Pagamento.pdf')}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl inline-block"
                   >
                     Abrir Documento PDF
-                  </a>
+                  </button>
                 </div>
+              ) : sanitizeMediaUrl(viewProofUrl) ? (
+                <img src={sanitizeMediaUrl(viewProofUrl) || ''} alt="Comprovativo Completo" className="max-h-[60vh] object-contain rounded-lg shadow" />
               ) : (
-                <img src={viewProofUrl} alt="Comprovativo Completo" className="max-h-[60vh] object-contain rounded-lg shadow" />
+                <p className="text-xs text-rose-600 font-bold p-4">URL de comprovativo bloqueada por segurança.</p>
               )}
             </div>
             <button

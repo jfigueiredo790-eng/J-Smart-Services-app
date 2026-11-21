@@ -42,6 +42,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
   const [isConfirmingCancel, setIsConfirmingCancel] = useState(false);
   const [isConfirmingRelease, setIsConfirmingRelease] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [chatNotice, setChatNotice] = useState<string | null>(null);
 
   const isAdmin = currentUser.role === 'admin';
   const isClient = currentUser.role === 'cliente';
@@ -118,9 +119,11 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
   const handleOpenChat = () => {
     const check = canChatInRequest(request, currentUser.id, currentUser.role);
     if (!check.allowed && !isAdmin) {
-      alert(check.reason);
+      setChatNotice(check.reason);
+      setTimeout(() => setChatNotice(null), 5000);
       return;
     }
+    setChatNotice(null);
     setActiveChatRequestId(request.id);
     setActiveTab('chat');
   };
@@ -153,6 +156,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
 
   return (
     <div id={`request-card-${request.id}`} className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition-all space-y-4">
+      {chatNotice && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 flex items-center gap-2 text-xs text-amber-900 font-medium">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>{chatNotice}</span>
+        </div>
+      )}
       
       {/* Top Banner for "Novamente Disponível" */}
       {request.status === 'novamente_disponivel' && (

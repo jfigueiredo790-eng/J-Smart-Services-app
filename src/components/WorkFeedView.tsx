@@ -4,6 +4,8 @@ import { WorkFeedPost, ProfessionalProfile } from '../types';
 import { getProPlanStatus, validateProAction } from '../utils/planUtils';
 import { rankWorkFeedPosts, formatPostDateFriendly } from '../utils/feedAlgorithm';
 import { compressImageFile, uploadWorkPostImageToStorage } from '../utils/imageUtils';
+import { sanitizeMediaUrl } from '../utils/securityUtils';
+import { buildShareUrl, shareOfficialLink } from '../config/domain';
 import { UserAvatar } from './UserAvatar';
 import { 
   Heart, 
@@ -30,7 +32,8 @@ import {
   Check,
   Loader2,
   RefreshCw,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Share2
 } from 'lucide-react';
 
 const AVAILABLE_REACTIONS = [
@@ -89,11 +92,14 @@ const FeedPostMediaItem: React.FC<{ post: WorkFeedPost }> = ({ post }) => {
     setRetryAttempt(prev => prev + 1);
   };
 
+  const safeRawMediaUrl = useMemo(() => sanitizeMediaUrl(post.mediaUrl), [post.mediaUrl]);
+
   if (post.mediaType === 'video') {
+    if (!safeRawMediaUrl) return null;
     return (
       <div className="relative bg-slate-950 max-h-[500px] flex items-center justify-center overflow-hidden">
         <video
-          src={post.mediaUrl}
+          src={safeRawMediaUrl}
           controls
           className="w-full max-h-[500px] object-contain"
         />
@@ -101,7 +107,7 @@ const FeedPostMediaItem: React.FC<{ post: WorkFeedPost }> = ({ post }) => {
     );
   }
 
-  if (imageError || !post.mediaUrl) {
+  if (imageError || !safeRawMediaUrl) {
     return (
       <div className="w-full min-h-[220px] bg-slate-900 border-y border-slate-800 flex flex-col items-center justify-center text-slate-300 p-6 text-center select-none">
         <div className="w-12 h-12 rounded-2xl bg-emerald-950/80 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-2 shadow-lg">
@@ -110,7 +116,7 @@ const FeedPostMediaItem: React.FC<{ post: WorkFeedPost }> = ({ post }) => {
         <span className="text-xs font-bold text-white max-w-sm line-clamp-1">{post.title || post.categoryName || 'Serviço Realizado'}</span>
         <span className="text-[11px] text-slate-400 mt-0.5">Registo de trabalho por {post.professionalName}</span>
         
-        {post.mediaUrl && (
+        {safeRawMediaUrl && (
           <button
             onClick={handleManualRetry}
             className="mt-3 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
@@ -125,12 +131,12 @@ const FeedPostMediaItem: React.FC<{ post: WorkFeedPost }> = ({ post }) => {
 
   // Generate URL with cache-busting query parameter during retry attempts
   const computedMediaUrl = (() => {
-    if (!post.mediaUrl) return '';
-    if (retryAttempt > 0 && !post.mediaUrl.startsWith('data:')) {
-      const sep = post.mediaUrl.includes('?') ? '&' : '?';
-      return `${post.mediaUrl}${sep}_r=${retryAttempt}`;
+    if (!safeRawMediaUrl) return '';
+    if (retryAttempt > 0 && !safeRawMediaUrl.startsWith('data:')) {
+      const sep = safeRawMediaUrl.includes('?') ? '&' : '?';
+      return `${safeRawMediaUrl}${sep}_r=${retryAttempt}`;
     }
-    return post.mediaUrl;
+    return safeRawMediaUrl;
   })();
 
   return (
@@ -228,6 +234,7 @@ export const WorkFeedView: React.FC = () => {
   const [editCustomPreview, setEditCustomPreview] = useState<string | null>(null);
   const [isEditUploading, setIsEditUploading] = useState(false);
   const [editFeedback, setEditFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [copiedPostId, setCopiedPostId] = useState<string | null>(null);
 
   const currentUserPlan = getProPlanStatus(currentUser);
   const isPro = currentUser.role === 'profissional' || currentUser.role === 'admin';
@@ -245,6 +252,20 @@ export const WorkFeedView: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Scroll to shared post if ?post=<id> is present in URL
+  useEffect(() => {
+    if (typeof window === 'undefined' || workFeedPosts.length === 0) return;
+    const postId = new URLSearchParams(window.location.search).get('post');
+    if (!postId) return;
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`work-feed-post-${postId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [workFeedPosts.length]);
 
   // Algoritmo de Organização do Feed: Recência + Relevância + Interações + Qualidade
   // Preserva integralmente as publicações reais anteriores com a sua data original.
@@ -937,8 +958,33 @@ export const WorkFeedView: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Grupo de Ações do Profissional (Ver Perfil & Contactar) */}
+                    {/* Grupo de Ações do Profissional (Partilhar, Ver Perfil & Contactar) */}
                     <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                      {/* Partilhar Publicação com Domínio Oficial */}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const shareUrl = buildShareUrl({ tab: 'feed', post: post.id });
+                          const res = await shareOfficialLink({
+                            title: post.title || `Trabalho de ${post.professionalName} — J Smart Services`,
+                            text: `Veja este trabalho de ${post.professionalName} na J Smart Services:`,
+                            url: shareUrl,
+                          });
+                          if (res === 'copied') {
+                            setCopiedPostId(post.id);
+                            setTimeout(() => setCopiedPostId(prev => (prev === post.id ? null : prev)), 2500);
+                          }
+                        }}
+                        className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1 shrink-0 active:scale-95"
+                        title="Partilhar publicação"
+                      >
+                        {copiedPostId === post.id ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        ) : (
+                          <Share2 className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                        )}
+                      </button>
+
                       {/* Ver Perfil do Profissional */}
                       <button
                         onClick={() => {

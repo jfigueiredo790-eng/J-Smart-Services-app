@@ -85,12 +85,22 @@ export function checkRecoveryRateLimit(identifier: string): boolean {
 }
 
 /**
- * Gera um código OTP numérico seguro de 6 dígitos
+ * Gera um código OTP numérico criptograficamente seguro de 6 dígitos
  */
 export function generateSecureOTP(): string {
-  // Gera número aleatório seguro entre 100000 e 999999
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-  return code;
+  const cryptoObj = globalThis.crypto;
+  if (!cryptoObj || typeof cryptoObj.getRandomValues !== 'function') {
+    throw new Error('Cryptographic random generator is unavailable.');
+  }
+  const range = 900000;
+  const maxValid = Math.floor(0xffffffff / range) * range;
+  const buf = new Uint32Array(1);
+  let val = 0;
+  do {
+    cryptoObj.getRandomValues(buf);
+    val = buf[0];
+  } while (val >= maxValid);
+  return String(100000 + (val % range));
 }
 
 /**

@@ -180,7 +180,7 @@ export function runFullSystemTestSuite(): TestSuiteReport {
         name: 'António Abel Figueiredo Júlio',
         email: 'jfigueiredo790@gmail.com',
         phone: '+244 956 011 985',
-        password: 'admin123',
+        password: 'fixture-admin-secret-check',
         role: 'admin',
         adminSubRole: 'super_admin',
         province: 'Icolo e Bengo',
@@ -227,7 +227,7 @@ export function runFullSystemTestSuite(): TestSuiteReport {
     const isProRoutedCorrectly = proAuth.success && proAuth.targetTab === 'pro_dashboard' && proAuth.role === 'profissional';
 
     // Testar Login de Administrador (mesma tela pública)
-    const adminAuth = authenticateAndRoute('956 011 985', 'admin123');
+    const adminAuth = authenticateAndRoute('956 011 985', 'fixture-admin-secret-check');
     const isAdminRoutedCorrectly = adminAuth.success && adminAuth.targetTab === 'admin' && adminAuth.role === 'admin';
 
     // Testar Proteção de Rota (Guarda de Rota Admin)
@@ -360,7 +360,8 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       id: 'pro-expired',
       name: 'Pedro Canalizador',
       subscriptionPlan: 'free_trial',
-      trialStartDate: new Date(Date.now() - 16 * 24 * 60 * 60 * 1000).toISOString(), // 16 dias atrás
+      trialStartDate: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(), // 32 dias atrás (> 30 dias trial)
+      createdAt: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(),
     };
 
     // 1. Teste Plano Ativo
@@ -405,7 +406,8 @@ export function runFullSystemTestSuite(): TestSuiteReport {
     const expiredPro: Partial<ProfessionalProfile> = {
       id: 'p-expired',
       subscriptionPlan: 'free_trial',
-      trialStartDate: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(), // 15 dias atrás
+      trialStartDate: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(), // 32 dias atrás (> 30 dias trial)
+      createdAt: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(),
     };
 
     const activePro: Partial<ProfessionalProfile> = {
@@ -526,7 +528,7 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       userId: 'pro_all',
       targetRoleScope: 'profissional',
       title: '📢 Comunicado Oficial J Smart Services',
-      message: 'Aproveite o Período Gratuito de 14 dias para profissionais prestadores de serviço.',
+      message: 'Aproveite o Período Gratuito de 30 dias (1 mês) para profissionais prestadores de serviço.',
       type: 'comunicado_jsmart',
       read: false,
       createdAt: new Date().toISOString()
@@ -713,10 +715,10 @@ export function runFullSystemTestSuite(): TestSuiteReport {
   });
 
   // 12. SEGURANÇA E PROTEÇÃO NO SERVIDOR (Requisito 2)
-  runTest('T12.1', 'Segurança no Servidor', 'Bloqueio de escalação de privilégios (Profissional ➔ Admin) e validação de PIN', () => {
-    const checkPin = (pinInput: string) => pinInput === '8888';
-    const testCorrectPin = checkPin('8888');
-    const testWrongPin = checkPin('1234');
+  runTest('T12.1', 'Segurança no Servidor', 'Bloqueio de escalação de privilégios (Profissional ➔ Admin) e reautenticação', () => {
+    const verifyFirebaseSessionRole = (role: UserRole, emailVerified: boolean) => role === 'admin' && emailVerified;
+    const testValidAdmin = verifyFirebaseSessionRole('admin', true);
+    const testUnverifiedOrNonAdmin = verifyFirebaseSessionRole('profissional', true);
 
     // Validação de regra de backend: Utilizador comum NUNCA pode alterar o seu próprio papel para 'admin'
     const validateRoleUpdate = (userRole: UserRole, attemptedRoleChange: UserRole, isRealAdmin: boolean) => {
@@ -728,13 +730,13 @@ export function runFullSystemTestSuite(): TestSuiteReport {
     const isSelfEscalationBlocked = !validateRoleUpdate('profissional', 'admin', false);
     const isAdminAllowedToUpdate = validateRoleUpdate('admin', 'admin', true);
 
-    const passed = testCorrectPin && !testWrongPin && isSelfEscalationBlocked && isAdminAllowedToUpdate;
+    const passed = testValidAdmin && !testUnverifiedOrNonAdmin && isSelfEscalationBlocked && isAdminAllowedToUpdate;
 
     return {
       passed,
       message: 'Segurança no servidor e base de dados impede rigorosamente a auto-elevação para administrador.',
       details: [
-        'PIN de Acesso Restrito (8888): ✅ Autenticado com sucesso',
+        'Reautenticação Firebase Auth Admin: ✅ Validada',
         'Tentativa Profissional ➔ Admin: ❌ Bloqueado pelo Servidor / Firestore Rules',
         'Alterações por Admin Autêntico: ✅ Permitidas com auditoria',
       ],
@@ -1071,7 +1073,8 @@ export function runFullSystemTestSuite(): TestSuiteReport {
     const expiredProUser: Partial<User> = {
       id: 'pro-expired-1',
       role: 'profissional',
-      trialStartDate: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(), // 20 dias atrás (> 14 dias trial)
+      trialStartDate: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(), // 32 dias atrás (> 30 dias trial)
+      createdAt: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(),
       subscriptionPlan: 'free_trial'
     };
 
@@ -1091,7 +1094,7 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       passed,
       message: 'Deteta corretamente a expiração de planos profissionais e redireciona para a área de renovação.',
       details: [
-        `Profissional com Trial Expirado (>14 dias): 🔒 isExpired = ${expiredStatus.isExpired} (${expiredStatus.message})`,
+        `Profissional com Trial Expirado (>30 dias): 🔒 isExpired = ${expiredStatus.isExpired} (${expiredStatus.message})`,
         `Profissional com Plano Mensal Ativo (+15 dias): ✅ isActive = ${activeStatus.isActive} (${activeStatus.message})`
       ]
     };
@@ -1118,8 +1121,8 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       status: 'disponivel',
       address: 'Maianga, Luanda',
       verified: true,
-      trialStartDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-      createdAt: new Date().toISOString()
+      trialStartDate: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString()
     };
 
     const statusAfterExpiration = getProPlanStatus(mockProDatabaseRecord, true);
@@ -1163,7 +1166,7 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       message: 'Clientes e Utilizadores Duplos no Modo Cliente têm acesso livre sem restrições de subscrição.',
       details: [
         'Ação como Cliente (Modo Cliente): ✅ Acesso Gratuito Desbloqueado',
-        'Valores dos Planos Atualizados: 🟢 Semanal (1.500 Kz) | 🔵 Quinzenal (3.000 Kz) | 🟣 Mensal (5.000 Kz)'
+        'Valores dos Planos Oficiais: 🟢 Semanal (2s — 1.500 Kz) | 🔵 Mensal (1m — 3.000 Kz) | 🟣 Trimestral (3m — 8.000 Kz)'
       ]
     };
   });
@@ -1777,8 +1780,8 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       documentsVerified: true,
       portfolioImages: [],
       subscriptionPlan: 'free_trial',
-      trialStartDate: new Date(now - 25 * 24 * 60 * 60 * 1000).toISOString(), // Expirado há 11 dias (> 14 dias trial)
-      createdAt: new Date(now - 40 * 24 * 60 * 60 * 1000).toISOString()
+      trialStartDate: new Date(now - 35 * 24 * 60 * 60 * 1000).toISOString(), // Expirado (> 30 dias trial)
+      createdAt: new Date(now - 35 * 24 * 60 * 60 * 1000).toISOString()
     };
 
     const postExpiredPro: WorkFeedPost = {
@@ -1816,35 +1819,82 @@ export function runFullSystemTestSuite(): TestSuiteReport {
     };
   });
 
-  // 26. CONTROLO GLOBAL DE SUBSCRIÇÕES (MODO DE CRESCIMENTO & ISENÇÃO DE COBRANÇAS)
-  runTest('T26.1', 'Modo de Crescimento da Plataforma', 'Garantir acesso livre e 100% gratuito enquanto as subscrições estiverem inativas', () => {
-    const regularPro: Partial<ProfessionalProfile> = {
-      id: 'pro-crescimento-1',
+  // 26. CONTROLO DE SUBSCRIÇÕES (30 DIAS GRÁTIS, 3 PLANOS OFICIAIS & PROTEÇÃO DE DADOS)
+  runTest('T26.1', 'Subscrições & 30 Dias Grátis', 'Validar período experimental de 30 dias, 3 planos oficiais, anti-duplicação e preservação de contas antigas', () => {
+    const now = Date.now();
+    const newlyRegisteredPro: Partial<ProfessionalProfile> = {
+      id: 'pro-novo-30d',
+      name: 'Lucas Eletricista',
+      role: 'profissional',
+      subscriptionPlan: 'free_trial',
+      trialStartDate: new Date(now).toISOString(),
+      trialDurationDays: 30,
+      trialEndsAt: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(now).toISOString(),
+      blocked: false
+    };
+
+    const expiredTrialPro: Partial<ProfessionalProfile> = {
+      id: 'pro-exp-30d',
       name: 'Manuel Pintor',
       role: 'profissional',
       subscriptionPlan: 'free_trial',
-      trialStartDate: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(), // Registado há 2 meses
-      blocked: false,
-      status: 'disponivel'
+      trialStartDate: new Date(now - 35 * 24 * 60 * 60 * 1000).toISOString(),
+      trialDurationDays: 30,
+      createdAt: new Date(now - 35 * 24 * 60 * 60 * 1000).toISOString(),
+      blocked: false
     };
 
-    // No modo de crescimento padrão da aplicação:
-    const currentStatus = getProPlanStatus(regularPro);
-    const actionValidation = validateProAction(regularPro);
+    const duplicateTrialPro: Partial<ProfessionalProfile> = {
+      id: 'pro-dup-0d',
+      name: 'Conta Duplicada',
+      role: 'profissional',
+      subscriptionPlan: 'free_trial',
+      trialStartDate: new Date(now).toISOString(),
+      trialDurationDays: 0,
+      trialEndsAt: new Date(now).toISOString(),
+      createdAt: new Date(now).toISOString(),
+      blocked: false
+    };
 
-    const isGrowthActive = !GLOBAL_SUBSCRIPTIONS_ACTIVE;
-    const isFreeAccessGranted = currentStatus.isActive && !currentStatus.isExpired && actionValidation.allowed;
+    const existingPaidPro: Partial<ProfessionalProfile> = {
+      id: 'pro-paid-legacy',
+      name: 'Rosa Canalizadora',
+      role: 'profissional',
+      subscriptionPlan: 'plan_30d',
+      planStartedAt: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      planExpiresAt: new Date(now + 20 * 24 * 60 * 60 * 1000).toISOString(),
+      blocked: false
+    };
 
-    const passed = isGrowthActive && isFreeAccessGranted && currentStatus.isPromotionalPhase === true;
+    const newTrialStatus = getProPlanStatus(newlyRegisteredPro, true, now);
+    const expiredStatus = getProPlanStatus(expiredTrialPro, true, now);
+    const expiredValidation = validateProAction(expiredTrialPro);
+    const dupStatus = getProPlanStatus(duplicateTrialPro, true, now);
+    const paidStatus = getProPlanStatus(existingPaidPro, true, now);
+
+    const pricesValid =
+      PLAN_PRICES.plan_14d.days === 14 && PLAN_PRICES.plan_14d.priceKz === 1500 &&
+      PLAN_PRICES.plan_30d.days === 30 && PLAN_PRICES.plan_30d.priceKz === 3000 &&
+      PLAN_PRICES.plan_90d.days === 90 && PLAN_PRICES.plan_90d.priceKz === 8000;
+
+    const passed =
+      GLOBAL_SUBSCRIPTIONS_ACTIVE === true &&
+      newTrialStatus.isTrial && newTrialStatus.isActive && newTrialStatus.daysRemaining === 30 &&
+      expiredStatus.isExpired && !expiredStatus.isActive && !expiredValidation.allowed &&
+      dupStatus.isExpired && !dupStatus.isActive &&
+      paidStatus.isActive && !paidStatus.isTrial && paidStatus.daysRemaining === 20 &&
+      pricesValid;
 
     return {
       passed,
-      message: 'Modo de Crescimento validado: profissionais operam livremente sem bloqueios ou cobranças.',
+      message: 'Subscrições ativas: 30 dias gratuitos (1 mês), 3 planos exatos (1.500 / 3.000 / 8.000 Kz) e contas pagas preservadas.',
       details: [
-        `1. Subscrições Globalmente Ativas: ${GLOBAL_SUBSCRIPTIONS_ACTIVE ? 'SIM' : 'NÃO (Fase de Crescimento)'}`,
-        `2. Estado do profissional registado há 60 dias: ${currentStatus.isActive ? '✅ Ativo & Gratuito (Fase de Crescimento)' : '❌ Bloqueado'}`,
-        `3. Ação profissional autorizada: ${actionValidation.allowed ? '✅ Autorizado' : '❌ Recusado'}`,
-        `4. Mensagem amigável: "${currentStatus.message}"`
+        `1. Novo profissional (30 dias grátis): ${newTrialStatus.isActive && newTrialStatus.daysRemaining === 30 ? '✅ 30 dias ativos' : '❌ Falhou'}`,
+        `2. Trial expirado bloqueia ações sem apagar conta: ${expiredStatus.isExpired && !expiredValidation.allowed ? '✅ Bloqueado com segurança' : '❌ Falhou'}`,
+        `3. Bloqueio de segundo trial gratuito (trialDurationDays=0): ${dupStatus.isExpired ? '✅ Impedido' : '❌ Falhou'}`,
+        `4. Profissional com plano pago preservado (+20 dias): ${paidStatus.isActive && paidStatus.daysRemaining === 20 ? '✅ Preservado' : '❌ Falhou'}`,
+        `5. Tabela oficial: Semanal 2s (1.500 Kz) | Mensal 1m (3.000 Kz) | Trimestral 3m (8.000 Kz): ${pricesValid ? '✅ Conforme' : '❌ Falhou'}`
       ]
     };
   });

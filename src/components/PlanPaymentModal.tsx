@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { isSafeExternalUrl } from '../utils/securityUtils';
+import { uploadPaymentProofToStorage } from '../utils/imageUtils';
+import { ActivePaidPlanKey, PLAN_PRICES } from '../utils/planUtils';
 import { 
   X, 
   CheckCircle2, 
@@ -15,11 +18,12 @@ import {
   Send,
   Trash2,
   RefreshCw,
-  FileCheck
+  FileCheck,
+  Lock
 } from 'lucide-react';
 
 interface PlanPaymentModalProps {
-  planKey: 'plan_7d' | 'plan_14d' | 'plan_30d';
+  planKey: ActivePaidPlanKey;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -40,11 +44,13 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
   const [proofNote, setProofNote] = useState<string>('');
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  const selectedPlanMeta = PLAN_PRICES[planKey];
   const planDetails = {
-    plan_7d: { name: 'Plano Semanal (7 Dias)', priceKz: 1500, priceStr: '1.500 Kz', period: '7 Dias' },
-    plan_14d: { name: 'Plano Quinzenal (14 Dias)', priceKz: 3000, priceStr: '3.000 Kz', period: '14 Dias' },
-    plan_30d: { name: 'Plano Mensal (30 Dias)', priceKz: 5000, priceStr: '5.000 Kz', period: '30 Dias' },
-  }[planKey];
+    name: `${selectedPlanMeta.fullLabel} (${selectedPlanMeta.durationLabel})`,
+    priceKz: selectedPlanMeta.priceKz,
+    priceStr: selectedPlanMeta.priceStr,
+    period: `${selectedPlanMeta.durationLabel} (${selectedPlanMeta.days} dias)`
+  };
 
   const adminPhone = platformSettings?.adminPhoneExpress || '956011985';
   const formattedAdminPhone = '+244 956 011 985';
@@ -68,10 +74,8 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Reset previous errors
     setUploadError(null);
 
-    // Validate size (max 10MB)
     const MAX_SIZE_BYTES = 10 * 1024 * 1024;
     if (file.size > MAX_SIZE_BYTES) {
       setUploadError('O ficheiro selecionado ultrapassa o limite de 10MB. Por favor escolha um ficheiro menor.');
@@ -94,7 +98,6 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
     setProofFileSizeStr(formatFileSize(file.size));
     setProofFileType(isPdf ? 'pdf' : 'image');
 
-    // Read file as Data URL for local preview and transmission
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
@@ -125,7 +128,7 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
     `• IBAN / Nº: ${paymentMethod === 'express' ? adminPhone : ibanNumber}\n` +
     `• Profissional: ${currentUser.name}\n` +
     `• Telefone: ${currentUser.phone}\n` +
-    `• E-mail: ${currentUser.email}\n` +
+    `• E-mail: ${currentUser.email || 'Sem e-mail associado'}\n` +
     `• Ficheiro Comprovativo: ${proofFileName || 'Anexado'}\n` +
     `• Referência/Nota: ${proofNote || 'Comprovativo oficial anexado'}\n\n` +
     `Solicito a verificação e ativação do meu pacote na plataforma.`
@@ -133,8 +136,7 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
 
   const whatsappUrl = `https://wa.me/244956011985?text=${whatsappMessage}`;
 
-  const handleSubmit = () => {
-    // Strict Validation: SEM FICHEIRO = SEM ENVIO
+  const handleSubmit = async () => {
     if (!proofPreviewUrl || !selectedFile) {
       setUploadError('⚠️ É obrigatório selecionar um ficheiro real de comprovativo (imagem ou PDF) do seu dispositivo antes de submeter.');
       return;
@@ -143,15 +145,22 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
     setIsSubmitting(true);
     setUploadError(null);
 
-    setTimeout(() => {
-      const res = submitPaymentWithProof({
+    try {
+      const uploadOutcome = await uploadPaymentProofToStorage(selectedFile, currentUser.id);
+      if (!uploadOutcome.success || !uploadOutcome.url) {
+        setIsSubmitting(false);
+        setUploadError(uploadOutcome.error || 'Erro ao preparar o comprovativo para envio seguro.');
+        return;
+      }
+
+      const res = await submitPaymentWithProof({
         amountKz: planDetails.priceKz,
         type: 'payment',
         description: `Ativação de ${planDetails.name}`,
         paymentMethod: paymentMethod === 'express' ? 'Multicaixa Express (956011985)' : 'Transferência IBAN (Banco BCI)',
-        proofUrl: proofPreviewUrl,
+        proofUrl: uploadOutcome.url,
         proofFileName: proofFileName,
-        proofFileType: proofFileType || 'image',
+        proofFileType: uploadOutcome.fileType,
         proofFileSize: selectedFile.size,
         proofNote: proofNote || `Comprovativo (${proofFileName}) enviado para ${planDetails.name}`,
         planId: planKey
@@ -163,23 +172,32 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
         setSubmitted(true);
         setTimeout(() => {
           onSuccess();
-        }, 3000);
+        }, 2500);
       } else {
         setUploadError(res.message);
       }
-    }, 800);
+    } catch {
+      setIsSubmitting(false);
+      setUploadError('Erro inesperado ao enviar o comprovativo. Verifique a sua ligação e tente novamente.');
+    }
   };
 
   const handleCombinedSubmitAndWhatsApp = () => {
-    // Strict Validation: SEM FICHEIRO = SEM ENVIO
     if (!proofPreviewUrl || !selectedFile) {
       setUploadError('⚠️ É obrigatório selecionar um ficheiro real de comprovativo (imagem ou PDF) do seu dispositivo antes de enviar.');
       return;
     }
 
-    // Open WhatsApp with populated message
-    window.open(whatsappUrl, '_blank');
-    handleSubmit();
+    if (isSafeExternalUrl(whatsappUrl)) {
+      const link = document.createElement('a');
+      link.href = whatsappUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+    void handleSubmit();
   };
 
   return (
@@ -338,6 +356,10 @@ export const PlanPaymentModal: React.FC<PlanPaymentModalProps> = ({ planKey, onC
                   </h4>
                   <p className="text-slate-700 text-[11px] mt-0.5 leading-relaxed">
                     Selecione o ficheiro do comprovativo no seu dispositivo (<strong>Foto JPG, PNG, WEBP</strong> ou <strong>Documento PDF</strong>).
+                  </p>
+                  <p className="text-[10px] text-emerald-800 font-bold mt-1 flex items-center gap-1">
+                    <Lock className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span>Privacidade garantida: o comprovativo fica visível apenas para si e para o Administrador.</span>
                   </p>
                 </div>
               </div>

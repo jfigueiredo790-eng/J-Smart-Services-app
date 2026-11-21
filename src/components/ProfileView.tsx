@@ -98,6 +98,24 @@ export const ProfileView: React.FC = () => {
     setEmail(currentUser.email);
     setProvince(currentUser.province || 'Luanda');
     setDocumentNumber(currentUser.documentNumber || '');
+    if (currentUser.accountType) {
+      setAccountType(currentUser.accountType);
+    }
+    if ('bio' in currentUser && typeof (currentUser as any).bio === 'string') {
+      setBio((currentUser as any).bio);
+    }
+    if ('hourlyRateKz' in currentUser && typeof (currentUser as any).hourlyRateKz === 'number') {
+      setHourlyRateKz((currentUser as any).hourlyRateKz);
+    }
+    if ('experienceYears' in currentUser) {
+      const exp = Number((currentUser as any).experienceYears);
+      if (!Number.isNaN(exp) && exp >= 0) {
+        setExperienceYears(exp);
+      }
+    }
+    if ('categories' in currentUser && Array.isArray((currentUser as any).categories)) {
+      setSelectedCategories((currentUser as any).categories);
+    }
     if (currentUser.avatar) {
       setAvatar(currentUser.avatar);
     }
@@ -300,17 +318,12 @@ export const ProfileView: React.FC = () => {
                       <span>{userRole === 'cliente' ? 'Mudar para Modo Profissional' : 'Mudar para Modo Cliente'}</span>
                     </button>
                   ) : (
-                    <button
-                      onClick={() => {
-                        updateUserProfile({ accountType: 'duplo' });
-                        switchRole(userRole === 'cliente' ? 'profissional' : 'cliente');
-                      }}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-md"
-                      title="Ativar Conta Dupla (Cliente + Profissional)"
+                    <span
+                      className="bg-slate-800 text-slate-300 font-bold px-3.5 py-2 rounded-xl text-[11px] border border-slate-700"
+                      title="Alterações do tipo de conta são efetuadas pela Administração"
                     >
-                      <ArrowRightLeft className="w-3.5 h-3.5" />
-                      <span>Ativar Conta Dupla</span>
-                    </button>
+                      Conta {currentUser.accountType === 'profissional' ? 'Profissional' : 'Cliente'}
+                    </span>
                   )}
 
                   <button

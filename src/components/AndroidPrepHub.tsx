@@ -54,21 +54,21 @@ export const AndroidPrepHub: React.FC = () => {
   const googleServicesJsonSnippet = `{
   "project_info": {
     "project_number": "74296749343",
-    "project_id": "ai-studio-jsmartservices",
-    "storage_bucket": "ai-studio-jsmartservices.appspot.com"
+    "project_id": "tuned-xray-hxctm",
+    "storage_bucket": "tuned-xray-hxctm.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
         "mobilesdk_app_id": "1:74296749343:android:jsmartservices",
         "android_client_info": {
-          "package_name": "com.jsmartservices.angola"
+          "package_name": "com.jsmartservices.app"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSy_JSmartServices_UnifiedKey"
+          "current_key": "<PREENCHER_DA_CONSOLA_FIREBASE_REAL>"
         }
       ],
       "services": {
@@ -106,7 +106,7 @@ dependencies {
               <span>Arquitetura Híbrida Web + Android Pronta</span>
             </div>
             <div className="text-xs text-slate-400 font-mono bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
-              Backend Worker: <span className="text-emerald-400 font-bold">j-smart-services-app.jfigueiredo790.workers.dev</span>
+              Domínio Oficial: <span className="text-emerald-400 font-bold">https://jsmartservices.com</span>
             </div>
           </div>
 
@@ -115,7 +115,7 @@ dependencies {
           </h2>
 
           <p className="text-slate-300 text-sm leading-relaxed max-w-3xl">
-            A plataforma <strong className="text-emerald-400">J Smart Services</strong> está totalmente preparada com um **projeto Android nativo em Kotlin na pasta <code className="text-emerald-300 font-mono">/android</code>**, ligado diretamente ao seu backend do Cloudflare Worker e ao Cloud Firestore.
+            A plataforma <strong className="text-emerald-400">J Smart Services</strong> está totalmente preparada com um **projeto Android nativo em Kotlin na pasta <code className="text-emerald-300 font-mono">/android</code>**, ligado diretamente ao domínio oficial <span className="text-emerald-300 font-semibold">https://jsmartservices.com</span> e ao Cloud Firestore.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">

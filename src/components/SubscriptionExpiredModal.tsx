@@ -3,6 +3,8 @@ import { useApp } from '../context/AppContext';
 import { PlanPaymentModal } from './PlanPaymentModal';
 import { AlertTriangle, Lock, Sparkles, X, CheckCircle2, Crown, ShieldCheck } from 'lucide-react';
 
+import { ActivePaidPlanKey, ORDERED_PAID_PLANS } from '../utils/planUtils';
+
 interface SubscriptionExpiredModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -17,7 +19,7 @@ export const SubscriptionExpiredModal: React.FC<SubscriptionExpiredModalProps> =
   customMessage
 }) => {
   const { setActiveTab } = useApp();
-  const [selectedPlan, setSelectedPlan] = useState<'plan_7d' | 'plan_14d' | 'plan_30d' | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<ActivePaidPlanKey | null>(null);
 
   if (!isOpen) return null;
 
@@ -48,11 +50,11 @@ export const SubscriptionExpiredModal: React.FC<SubscriptionExpiredModalProps> =
             </span>
 
             <h3 className="text-base sm:text-lg font-black text-slate-900 leading-snug">
-              {customTitle || 'O seu período gratuito terminou.'}
+              {customTitle || 'O seu período gratuito ou subscrição terminou.'}
             </h3>
 
             <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-medium bg-amber-50/80 border border-amber-200 p-3.5 rounded-2xl">
-              {customMessage || 'O seu período gratuito terminou. Para continuar a aceitar pedidos e utilizar todas as funcionalidades profissionais, escolha um plano e efetue o pagamento.'}
+              {customMessage || 'Para continuar a publicar serviços, aparecer nas pesquisas e aceitar novos pedidos de clientes, escolha um plano abaixo, efetue o pagamento e envie o comprovativo para validação.'}
             </p>
           </div>
 
@@ -64,47 +66,45 @@ export const SubscriptionExpiredModal: React.FC<SubscriptionExpiredModalProps> =
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {/* 7 Days */}
-              <button
-                onClick={() => setSelectedPlan('plan_7d')}
-                className="p-3 bg-slate-50 hover:bg-emerald-50 border-2 border-emerald-200 hover:border-emerald-500 rounded-2xl text-left transition-all group flex flex-col justify-between"
-              >
-                <div>
-                  <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md uppercase">7 Dias</span>
-                  <p className="text-xs font-bold text-slate-900 mt-1">Semanal</p>
-                </div>
-                <div className="mt-2">
-                  <p className="text-sm font-black text-slate-900">1.500 Kz</p>
-                </div>
-              </button>
-
-              {/* 14 Days */}
-              <button
-                onClick={() => setSelectedPlan('plan_14d')}
-                className="p-3 bg-slate-50 hover:bg-blue-50 border-2 border-blue-200 hover:border-blue-500 rounded-2xl text-left transition-all group flex flex-col justify-between"
-              >
-                <div>
-                  <span className="text-[10px] font-black text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md uppercase">14 Dias</span>
-                  <p className="text-xs font-bold text-slate-900 mt-1">Quinzenal</p>
-                </div>
-                <div className="mt-2">
-                  <p className="text-sm font-black text-slate-900">3.000 Kz</p>
-                </div>
-              </button>
-
-              {/* 30 Days */}
-              <button
-                onClick={() => setSelectedPlan('plan_30d')}
-                className="p-3 bg-slate-900 hover:bg-purple-950 text-white border-2 border-purple-500 rounded-2xl text-left transition-all group flex flex-col justify-between shadow-md"
-              >
-                <div>
-                  <span className="text-[10px] font-black text-purple-300 bg-purple-900/80 px-2 py-0.5 rounded-md uppercase border border-purple-700">★ 30 Dias</span>
-                  <p className="text-xs font-bold text-white mt-1">Mensal</p>
-                </div>
-                <div className="mt-2">
-                  <p className="text-sm font-black text-amber-400">5.000 Kz</p>
-                </div>
-              </button>
+              {ORDERED_PAID_PLANS.map((plan) => {
+                const isFeatured = plan.key === 'plan_90d';
+                const isMid = plan.key === 'plan_30d';
+                return (
+                  <button
+                    key={plan.key}
+                    onClick={() => setSelectedPlan(plan.key)}
+                    className={`p-3 rounded-2xl text-left transition-all group flex flex-col justify-between border-2 ${
+                      isFeatured
+                        ? 'bg-slate-900 hover:bg-purple-950 text-white border-purple-500 shadow-md'
+                        : isMid
+                        ? 'bg-slate-50 hover:bg-blue-50 border-blue-200 hover:border-blue-500'
+                        : 'bg-slate-50 hover:bg-emerald-50 border-emerald-200 hover:border-emerald-500'
+                    }`}
+                  >
+                    <div>
+                      <span
+                        className={`text-[10px] font-black px-2 py-0.5 rounded-md uppercase ${
+                          isFeatured
+                            ? 'text-purple-300 bg-purple-900/80 border border-purple-700'
+                            : isMid
+                            ? 'text-blue-800 bg-blue-100'
+                            : 'text-emerald-800 bg-emerald-100'
+                        }`}
+                      >
+                        {isFeatured ? `★ ${plan.durationLabel}` : plan.durationLabel}
+                      </span>
+                      <p className={`text-xs font-bold mt-1 ${isFeatured ? 'text-white' : 'text-slate-900'}`}>
+                        {plan.label}
+                      </p>
+                    </div>
+                    <div className="mt-2">
+                      <p className={`text-sm font-black ${isFeatured ? 'text-amber-400' : 'text-slate-900'}`}>
+                        {plan.priceStr}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

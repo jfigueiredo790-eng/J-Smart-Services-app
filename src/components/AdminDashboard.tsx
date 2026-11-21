@@ -3,6 +3,8 @@ import { useApp, isFictitiousOrInvalidUser } from '../context/AppContext';
 import { AndroidPrepHub } from './AndroidPrepHub';
 import { UserAvatar } from './UserAvatar';
 import { AdminCategoryManager } from './AdminCategoryManager';
+import { sanitizeMediaUrl, openSafePdfProof } from '../utils/securityUtils';
+import { buildShareUrl } from '../config/domain';
 import { 
   ShieldCheck, 
   Users, 
@@ -41,7 +43,7 @@ import {
 } from 'lucide-react';
 import { ANGOLA_PROVINCES, User } from '../types';
 
-import { getProPlanStatus } from '../utils/planUtils';
+import { getProPlanStatus, getPlanDisplayInfo, ORDERED_PAID_PLANS } from '../utils/planUtils';
 
 export const AdminDashboard: React.FC = () => {
   const { 
@@ -136,7 +138,9 @@ export const AdminDashboard: React.FC = () => {
     }
   }, [codeOfConductRules]);
   const [testResults, setTestResults] = useState<{ success: boolean; totalTests: number; passedTests: number; logResults: { step: string; status: 'pass' | 'fail'; message: string }[] } | null>(null);
-  const [proPlanFilter, setProPlanFilter] = useState<'all' | 'active_paid' | 'trial' | 'expired'>('all');
+  const [proPlanFilter, setProPlanFilter] = useState<'all' | 'active_paid' | 'trial' | 'trial_ended' | 'expired'>('all');
+  const [proPlanSearch, setProPlanSearch] = useState<string>('');
+  const [verifiedValidityMap, setVerifiedValidityMap] = useState<Record<string, string>>({});
 
   // Master Registered Users Filter State
   const [regRoleFilter, setRegRoleFilter] = useState<'all' | 'cliente' | 'profissional' | 'duplo' | 'admin'>('all');
@@ -149,6 +153,8 @@ export const AdminDashboard: React.FC = () => {
   const [rejectionReasonInput, setRejectionReasonInput] = useState<string>('');
   const [viewingProofTx, setViewingProofTx] = useState<any | null>(null);
   const [approvalActionMsg, setApprovalActionMsg] = useState<string | null>(null);
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'pending' | 'with_proof' | 'approved' | 'rejected'>('all');
+  const [paymentSearch, setPaymentSearch] = useState<string>('');
 
   // Search in users
   const [userSearch, setUserSearch] = useState('');
@@ -176,7 +182,19 @@ export const AdminDashboard: React.FC = () => {
   const [ibanInput, setIbanInput] = useState(platformSettings.adminIban || 'AO06 0005 0000 6605 5740 1019 7');
   const [provinceInput, setProvinceInput] = useState(platformSettings.adminProvince || 'Icolo e Bengo');
   const [cityInput, setCityInput] = useState(platformSettings.adminCity || 'Centralidade do Sequele');
-  const [adminPinInput, setAdminPinInput] = useState(platformSettings.adminPin || 'admin123');
+
+  useEffect(() => {
+    setCommissionRateInput(String(platformSettings.commissionRatePercent || 10));
+    setCompanyNameInput(platformSettings.companyName || 'J smart services');
+    setHolderNameInput(platformSettings.adminHolderName || 'António Abel Figueiredo Júlio');
+    setEmailInput(platformSettings.adminEmail || 'jfigueiredo790@gmail.com');
+    setWhatsappInput(platformSettings.adminPhoneWhatsapp || '956011985');
+    setExpressInput(platformSettings.adminPhoneExpress || '956011985');
+    setBankNameInput(platformSettings.adminBankName || 'BCI (Banco de Comércio e Indústria)');
+    setIbanInput(platformSettings.adminIban || 'AO06 0005 0000 6605 5740 1019 7');
+    setProvinceInput(platformSettings.adminProvince || 'Icolo e Bengo');
+    setCityInput(platformSettings.adminCity || 'Centralidade do Sequele');
+  }, [platformSettings]);
 
   const [savedSuccess, setSavedSuccess] = useState(false);
 
@@ -232,8 +250,7 @@ export const AdminDashboard: React.FC = () => {
       adminBankName: bankNameInput,
       adminIban: ibanInput,
       adminProvince: provinceInput,
-      adminCity: cityInput,
-      adminPin: adminPinInput
+      adminCity: cityInput
     });
     if (res.success) {
       setSavedSuccess(true);
@@ -466,7 +483,7 @@ export const AdminDashboard: React.FC = () => {
 
       {/* TAB MASTER: TODOS OS CADASTRADOS NA J SMART SERVICES */}
       {adminTab === 'all_registered' && (() => {
-        const shareUrl = typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('localhost') ? `${window.location.origin}/?register=true` : 'https://j-smart-services-app.jfigueiredo790.workers.dev/?register=true';
+        const shareUrl = buildShareUrl({ register: 'true' });
         const waText = encodeURIComponent('Cadastra-te na plataforma J Smart Services para prestar ou solicitar serviços em Angola: ' + shareUrl);
         const waShareUrl = `https://api.whatsapp.com/send?text=${waText}`;
 
@@ -919,9 +936,34 @@ export const AdminDashboard: React.FC = () => {
 
       {/* TAB 0: APROVAÇÃO DE PAGAMENTOS E COMPROVATIVOS (REQUISITO ADMIN) */}
       {adminTab === 'payments' && (() => {
-        const pendingTxs = walletTransactions.filter(t => t.status === 'pendente');
-        const completedTxs = walletTransactions.filter(t => t.status === 'concluido');
-        const rejectedTxs = walletTransactions.filter(t => t.status === 'rejeitado');
+        const formatDt = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('pt-AO') : '—');
+        const matchesPaymentSearch = (tx: any) => {
+          const q = paymentSearch.trim().toLowerCase();
+          if (!q) return true;
+          const user = allUsers.find(u => u.id === tx.userId);
+          return (
+            (tx.userName || user?.name || '').toLowerCase().includes(q) ||
+            (tx.userPhone || user?.phone || '').toLowerCase().includes(q) ||
+            (tx.description || '').toLowerCase().includes(q) ||
+            (tx.paymentMethod || '').toLowerCase().includes(q)
+          );
+        };
+
+        const pendingTxs = walletTransactions.filter(t => t.status === 'pendente' && matchesPaymentSearch(t));
+        const completedTxs = walletTransactions.filter(t => t.status === 'concluido' && matchesPaymentSearch(t));
+        const rejectedTxs = walletTransactions.filter(t => t.status === 'rejeitado' && matchesPaymentSearch(t));
+        const withProofTxs = walletTransactions.filter(t => Boolean(t.proofUrl) && matchesPaymentSearch(t));
+
+        const historyTxs =
+          paymentFilter === 'approved'
+            ? completedTxs
+            : paymentFilter === 'rejected'
+            ? rejectedTxs
+            : paymentFilter === 'with_proof'
+            ? withProofTxs
+            : paymentFilter === 'pending'
+            ? pendingTxs
+            : walletTransactions.filter(matchesPaymentSearch);
 
         const handleApprove = async (txId: string) => {
           const res = await approvePaymentTransaction(txId);
@@ -931,7 +973,7 @@ export const AdminDashboard: React.FC = () => {
           } else {
             showToast('error', res.message);
           }
-          setTimeout(() => setApprovalActionMsg(null), 3000);
+          setTimeout(() => setApprovalActionMsg(null), 3500);
         };
 
         const handleConfirmReject = async () => {
@@ -945,7 +987,7 @@ export const AdminDashboard: React.FC = () => {
             }
             setRejectingTxId(null);
             setRejectionReasonInput('');
-            setTimeout(() => setApprovalActionMsg(null), 3000);
+            setTimeout(() => setApprovalActionMsg(null), 3500);
           }
         };
 
@@ -955,23 +997,60 @@ export const AdminDashboard: React.FC = () => {
             <div className="bg-slate-900 text-white p-5 rounded-3xl border border-slate-800 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
                 <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 bg-amber-400/10 px-2.5 py-1 rounded-full border border-amber-400/20">
-                  Verificação Manual Obrigatória
+                  Verificação Manual Obrigatória &amp; Privacidade Estrita
                 </span>
                 <h3 className="text-lg font-black text-white mt-1">Aprovação de Pagamentos e Comprovativos</h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Verifique o comprovativo bancário/express anexado antes de aprovar o pacote ou recarga do utilizador.
+                  Comprovativos acessíveis exclusivamente ao próprio utilizador e ao Administrador. Verifique antes de aprovar.
                 </p>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <div className="bg-amber-500/20 border border-amber-500/30 px-3 py-2 rounded-2xl text-center">
                   <span className="text-xs text-amber-300 font-bold block">Pendentes</span>
                   <span className="text-xl font-black text-amber-400">{pendingTxs.length}</span>
+                </div>
+                <div className="bg-sky-500/20 border border-sky-500/30 px-3 py-2 rounded-2xl text-center">
+                  <span className="text-xs text-sky-300 font-bold block">Comprovativos</span>
+                  <span className="text-xl font-black text-sky-300">{withProofTxs.length}</span>
                 </div>
                 <div className="bg-emerald-500/20 border border-emerald-500/30 px-3 py-2 rounded-2xl text-center">
                   <span className="text-xs text-emerald-300 font-bold block">Aprovados</span>
                   <span className="text-xl font-black text-emerald-400">{completedTxs.length}</span>
                 </div>
+              </div>
+            </div>
+
+            {/* Search & Filter Controls */}
+            <div className="bg-white rounded-3xl p-4 border border-slate-200 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
+                <input
+                  type="text"
+                  value={paymentSearch}
+                  onChange={(e) => setPaymentSearch(e.target.value)}
+                  placeholder="Pesquisar por profissional, telefone, plano ou método..."
+                  className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
+                />
+              </div>
+              <div className="flex flex-wrap gap-1.5 text-[11px] font-bold bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                {[
+                  { id: 'all', label: `Todos (${walletTransactions.length})` },
+                  { id: 'pending', label: `Pendentes (${pendingTxs.length})` },
+                  { id: 'with_proof', label: `Comprovativos (${withProofTxs.length})` },
+                  { id: 'approved', label: `Aprovados (${completedTxs.length})` },
+                  { id: 'rejected', label: `Rejeitados (${rejectedTxs.length})` }
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setPaymentFilter(opt.id as any)}
+                    className={`px-2.5 py-1.5 rounded-xl transition-all ${
+                      paymentFilter === opt.id ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -983,199 +1062,243 @@ export const AdminDashboard: React.FC = () => {
             )}
 
             {/* PENDING PAYMENTS LIST */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b pb-3">
-                <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
-                  Pagamentos Aguardando Aprovação do Administrador ({pendingTxs.length})
-                </h3>
-              </div>
-
-              {pendingTxs.length === 0 ? (
-                <div className="p-8 text-center bg-emerald-50/50 rounded-2xl border border-dashed border-emerald-200 space-y-2">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto" />
-                  <p className="font-extrabold text-emerald-950 text-sm">Nenhum pagamento pendente no momento!</p>
-                  <p className="text-xs text-slate-600">
-                    Todos os comprovativos submetidos pelos profissionais e clientes já foram analisados e processados.
-                  </p>
+            {(paymentFilter === 'all' || paymentFilter === 'pending') && (
+              <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b pb-3">
+                  <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
+                    Pagamentos Pendentes Aguardando Aprovação ({pendingTxs.length})
+                  </h3>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {pendingTxs.map((tx) => {
-                    const user = allUsers.find(u => u.id === tx.userId);
-                    const userPhone = tx.userPhone || user?.phone || 'Sem telefone';
-                    const userName = tx.userName || user?.name || 'Profissional / Cliente';
 
-                    return (
-                      <div key={tx.id} className="bg-slate-50 rounded-2xl p-4 border-2 border-amber-200 shadow-sm space-y-3 relative flex flex-col justify-between">
-                        <div>
-                          {/* User info header */}
-                          <div className="flex items-start justify-between border-b border-slate-200 pb-2">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-black text-slate-900 text-sm">{userName}</span>
-                                <span className="text-[10px] bg-slate-200 text-slate-800 font-bold px-2 py-0.5 rounded-md uppercase">
-                                  {tx.userRole || user?.role || 'Profissional'}
-                                </span>
+                {pendingTxs.length === 0 ? (
+                  <div className="p-8 text-center bg-emerald-50/50 rounded-2xl border border-dashed border-emerald-200 space-y-2">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto" />
+                    <p className="font-extrabold text-emerald-950 text-sm">Nenhum pagamento pendente encontrado!</p>
+                    <p className="text-xs text-slate-600">
+                      Todos os comprovativos submetidos correspondentes ao filtro já foram analisados.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {pendingTxs.map((tx) => {
+                      const user = allUsers.find(u => u.id === tx.userId);
+                      const proProfile = professionals.find(p => p.id === tx.userId);
+                      const currentStatus = getProPlanStatus(proProfile || user);
+                      const userPhone = tx.userPhone || user?.phone || 'Sem telefone';
+                      const userName = tx.userName || user?.name || 'Profissional / Cliente';
+                      const planInfo = tx.planId ? getPlanDisplayInfo(tx.planId) : null;
+
+                      return (
+                        <div key={tx.id} className="bg-slate-50 rounded-2xl p-4 border-2 border-amber-200 shadow-sm space-y-3 relative flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-start justify-between border-b border-slate-200 pb-2">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-black text-slate-900 text-sm">{userName}</span>
+                                  <span className="text-[10px] bg-slate-200 text-slate-800 font-bold px-2 py-0.5 rounded-md uppercase">
+                                    {tx.userRole || user?.role || 'Profissional'}
+                                  </span>
+                                </div>
+                                <p className="text-xs font-bold text-emerald-800 mt-0.5 flex items-center gap-1">
+                                  📞 {userPhone}
+                                </p>
                               </div>
-                              <p className="text-xs font-bold text-emerald-800 mt-0.5 flex items-center gap-1">
-                                📞 {userPhone}
-                              </p>
-                            </div>
-                            <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-full">
-                              ⏳ Pendente
-                            </span>
-                          </div>
-
-                          {/* Payment details */}
-                          <div className="mt-3 space-y-1.5 text-xs">
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-500 font-bold">Valor a Validar:</span>
-                              <span className="text-lg font-black text-emerald-700">{tx.amountKz.toLocaleString('pt-AO')} Kz</span>
-                            </div>
-                            <div className="flex items-center justify-between text-slate-700 font-medium">
-                              <span className="text-slate-500">Descrição/Pacote:</span>
-                              <span className="font-extrabold text-slate-900">{tx.description}</span>
-                            </div>
-                            <div className="flex items-center justify-between text-slate-700 font-medium">
-                              <span className="text-slate-500">Método Usado:</span>
-                              <span className="font-bold text-slate-800">{tx.paymentMethod}</span>
-                            </div>
-                            <div className="flex items-center justify-between text-slate-700 font-medium">
-                              <span className="text-slate-500">Data de Envio:</span>
-                              <span className="text-slate-600">{new Date(tx.createdAt).toLocaleString('pt-AO')}</span>
-                            </div>
-                            {tx.proofNote && (
-                              <div className="bg-white p-2 rounded-xl border border-slate-200 text-[11px] text-slate-700 italic mt-1">
-                                💬 <strong>Nota do Utilizador:</strong> "{tx.proofNote}"
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Proof Receipt Image / PDF Card */}
-                          <div className="mt-3 bg-white p-2.5 rounded-xl border border-slate-200 space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
-                                📎 Comprovativo Anexado ({tx.proofFileType === 'pdf' || tx.proofUrl?.startsWith('data:application/pdf') ? 'Documento PDF' : 'Imagem'}):
+                              <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-full">
+                                ⏳ Pendente
                               </span>
-                              {tx.proofFileName && (
-                                <span className="text-[10px] text-slate-400 font-mono break-all text-right">
-                                  {tx.proofFileName}
+                            </div>
+
+                            <div className="mt-3 space-y-1.5 text-xs">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-500 font-bold">Valor Pago:</span>
+                                <span className="text-lg font-black text-emerald-700">{tx.amountKz.toLocaleString('pt-AO')} Kz</span>
+                              </div>
+                              <div className="flex items-center justify-between text-slate-700 font-medium">
+                                <span className="text-slate-500">Plano Escolhido:</span>
+                                <span className="font-extrabold text-slate-900">
+                                  {planInfo ? `${planInfo.label} (${planInfo.durationLabel})` : tx.description}
                                 </span>
+                              </div>
+                              <div className="flex items-center justify-between text-slate-700 font-medium">
+                                <span className="text-slate-500">Método Usado:</span>
+                                <span className="font-bold text-slate-800">{tx.paymentMethod || 'Multicaixa Express / IBAN'}</span>
+                              </div>
+                              <div className="flex items-center justify-between text-slate-700 font-medium">
+                                <span className="text-slate-500">Data de Envio:</span>
+                                <span className="text-slate-600">{new Date(tx.createdAt).toLocaleString('pt-AO')}</span>
+                              </div>
+                              <div className="flex items-center justify-between text-slate-700 font-medium">
+                                <span className="text-slate-500">Validade Atual da Conta:</span>
+                                <span className="text-slate-700 font-bold">
+                                  {formatDt(currentStatus.startedAtIso)} → {formatDt(currentStatus.expiresAtIso)}
+                                </span>
+                              </div>
+                              {tx.proofNote && (
+                                <div className="bg-white p-2 rounded-xl border border-slate-200 text-[11px] text-slate-700 italic mt-1">
+                                  💬 <strong>Nota do Utilizador:</strong> "{tx.proofNote}"
+                                </div>
                               )}
                             </div>
 
-                            {tx.proofUrl ? (
-                              tx.proofFileType === 'pdf' || tx.proofUrl.startsWith('data:application/pdf') || tx.proofFileName?.toLowerCase().endsWith('.pdf') ? (
-                                <div 
-                                  onClick={() => setViewingProofTx(tx)}
-                                  className="cursor-pointer bg-gradient-to-br from-rose-50 to-amber-50 hover:from-rose-100 hover:to-amber-100 p-3 rounded-xl border border-rose-200 flex items-center justify-between transition-all group gap-2"
-                                >
-                                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                                    <div className="w-10 h-10 rounded-lg bg-rose-600 text-white flex items-center justify-center shadow-sm shrink-0">
-                                      <FileText className="w-6 h-6" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <span className="text-[9px] font-black uppercase tracking-wider text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded">
-                                        PDF
-                                      </span>
-                                      <p className="font-extrabold text-slate-900 text-xs mt-0.5 break-all leading-snug">
-                                        {tx.proofFileName || 'Comprovativo_Pagamento.pdf'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <span className="text-xs font-black text-rose-700 bg-white group-hover:bg-rose-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-rose-300 transition-colors shadow-sm">
-                                    Examinar PDF 🔍
+                            {/* Proof Receipt Image / PDF Card */}
+                            <div className="mt-3 bg-white p-2.5 rounded-xl border border-slate-200 space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                                  📎 Comprovativo Anexado ({tx.proofFileType === 'pdf' || tx.proofUrl?.startsWith('data:application/pdf') ? 'Documento PDF' : 'Imagem'}):
+                                </span>
+                                {tx.proofFileName && (
+                                  <span className="text-[10px] text-slate-400 font-mono break-all text-right">
+                                    {tx.proofFileName}
                                   </span>
-                                </div>
-                              ) : (
-                                <div className="relative group cursor-pointer" onClick={() => setViewingProofTx(tx)}>
-                                  <img
-                                    src={tx.proofUrl}
-                                    alt="Comprovativo"
-                                    className="w-full h-36 object-cover rounded-lg border border-slate-200 transition-all group-hover:brightness-90"
-                                  />
-                                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-slate-950/50 transition-all rounded-lg">
-                                    <span className="bg-white text-slate-900 text-xs font-black px-3 py-1.5 rounded-full shadow">
-                                      🔍 Ampliar Comprovativo
+                                )}
+                              </div>
+
+                              {sanitizeMediaUrl(tx.proofUrl, { allowPdfData: true }) ? (
+                                tx.proofFileType === 'pdf' || tx.proofUrl?.startsWith('data:application/pdf') || tx.proofFileName?.toLowerCase().endsWith('.pdf') ? (
+                                  <div 
+                                    onClick={() => setViewingProofTx(tx)}
+                                    className="cursor-pointer bg-gradient-to-br from-rose-50 to-amber-50 hover:from-rose-100 hover:to-amber-100 p-3 rounded-xl border border-rose-200 flex items-center justify-between transition-all group gap-2"
+                                  >
+                                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                                      <div className="w-10 h-10 rounded-lg bg-rose-600 text-white flex items-center justify-center shadow-sm shrink-0">
+                                        <FileText className="w-6 h-6" />
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                        <span className="text-[9px] font-black uppercase tracking-wider text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded">
+                                          PDF
+                                        </span>
+                                        <p className="font-extrabold text-slate-900 text-xs mt-0.5 break-all leading-snug">
+                                          {tx.proofFileName || 'Comprovativo_Pagamento.pdf'}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <span className="text-xs font-black text-rose-700 bg-white group-hover:bg-rose-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-rose-300 transition-colors shadow-sm">
+                                      Examinar PDF 🔍
                                     </span>
                                   </div>
-                                </div>
-                              )
-                            ) : (
-                              <p className="text-xs text-slate-400 italic">Nenhum ficheiro anexado.</p>
+                                ) : (
+                                  <div className="relative group cursor-pointer" onClick={() => setViewingProofTx(tx)}>
+                                    <img
+                                      src={sanitizeMediaUrl(tx.proofUrl) || ''}
+                                      alt="Comprovativo"
+                                      className="w-full h-36 object-cover rounded-lg border border-slate-200 transition-all group-hover:brightness-90"
+                                    />
+                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-slate-950/50 transition-all rounded-lg">
+                                      <span className="bg-white text-slate-900 text-xs font-black px-3 py-1.5 rounded-full shadow">
+                                        🔍 Ampliar Comprovativo
+                                      </span>
+                                    </div>
+                                  </div>
+                                )
+                              ) : (
+                                <p className="text-xs text-slate-400 italic">Nenhum ficheiro anexado.</p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="pt-2 grid grid-cols-2 gap-2 border-t border-slate-200">
+                            <button
+                              onClick={() => setRejectingTxId(tx.id)}
+                              className="w-full bg-rose-100 hover:bg-rose-200 text-rose-800 font-extrabold py-2.5 rounded-xl transition-all text-xs border border-rose-300 flex items-center justify-center gap-1"
+                            >
+                              <span>❌ Rejeitar</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleApprove(tx.id)}
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-2.5 rounded-xl transition-all text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1"
+                            >
+                              <span>✓ Aprovar &amp; Ativar</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* COMPLETE PAYMENT HISTORY & SUBMITTED PROOFS */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-emerald-600" />
+                  Histórico Completo de Pagamentos &amp; Comprovativos ({historyTxs.length})
+                </h3>
+              </div>
+
+              {historyTxs.length === 0 ? (
+                <div className="p-6 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-xs text-slate-500 font-bold">
+                  Nenhum registo de pagamento encontrado para este filtro.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {historyTxs.map((tx) => {
+                    const isApproved = tx.status === 'concluido';
+                    const isPending = tx.status === 'pendente';
+                    const user = allUsers.find(u => u.id === tx.userId);
+                    const proProfile = professionals.find(p => p.id === tx.userId);
+                    const proPlan = getProPlanStatus(proProfile || user);
+                    const planInfo = tx.planId ? getPlanDisplayInfo(tx.planId) : null;
+                    const startLabel = formatDt(tx.subscriptionStartedAt || proPlan.startedAtIso);
+                    const endLabel = formatDt(tx.subscriptionExpiresAt || proPlan.expiresAtIso);
+
+                    return (
+                      <div key={tx.id} className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
+                        <div className="flex items-start gap-3">
+                          <div className={`p-2 rounded-xl shrink-0 ${
+                            isApproved ? 'bg-emerald-100 text-emerald-700' : isPending ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                          }`}>
+                            {isApproved ? <CheckCircle2 className="w-4 h-4" /> : isPending ? <Calendar className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="font-extrabold text-slate-900">
+                              {tx.userName || user?.name || 'Utilizador'} • {planInfo ? `${planInfo.label} (${planInfo.durationLabel})` : tx.description}
+                            </p>
+                            <p className="text-[11px] text-slate-600 font-semibold">
+                              Valor: <strong>{tx.amountKz.toLocaleString('pt-AO')} Kz</strong> • {tx.paymentMethod || 'Multicaixa / IBAN'} • Enviado em {new Date(tx.createdAt).toLocaleString('pt-AO')}
+                            </p>
+                            <p className="text-[10px] text-slate-500 font-bold">
+                              📅 Início Subscrição: {startLabel} • ⏳ Expiração: {endLabel}
+                              {tx.reviewedAt ? ` • Analisado em ${formatDt(tx.reviewedAt)}` : ''}
+                            </p>
+                            {tx.rejectionReason && (
+                              <p className="text-[10px] text-rose-600 font-bold mt-0.5">Motivo Rejeição: {tx.rejectionReason}</p>
                             )}
                           </div>
                         </div>
 
-                        {/* Action Buttons */}
-                        <div className="pt-2 grid grid-cols-2 gap-2 border-t border-slate-200">
-                          <button
-                            onClick={() => setRejectingTxId(tx.id)}
-                            className="w-full bg-rose-100 hover:bg-rose-200 text-rose-800 font-extrabold py-2.5 rounded-xl transition-all text-xs border border-rose-300 flex items-center justify-center gap-1"
-                          >
-                            <span>❌ Rejeitar</span>
-                          </button>
-
-                          <button
-                            onClick={() => handleApprove(tx.id)}
-                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-2.5 rounded-xl transition-all text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1"
-                          >
-                            <span>✓ Aprovar & Ativar</span>
-                          </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {tx.proofUrl && (
+                            <button
+                              onClick={() => setViewingProofTx(tx)}
+                              className="text-[10px] font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 px-2.5 py-1.5 rounded-lg flex items-center gap-1"
+                            >
+                              <FileText className="w-3 h-3 text-emerald-600" />
+                              <span>Ver Comprovativo</span>
+                            </button>
+                          )}
+                          {isPending && (
+                            <button
+                              onClick={() => handleApprove(tx.id)}
+                              className="text-[10px] font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 px-2.5 py-1.5 rounded-lg"
+                            >
+                              ✓ Aprovar
+                            </button>
+                          )}
+                          <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full ${
+                            isApproved ? 'bg-emerald-100 text-emerald-800' : isPending ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'
+                          }`}>
+                            {isApproved ? '✓ Aprovado' : isPending ? '⏳ Pendente' : '❌ Rejeitado'}
+                          </span>
                         </div>
                       </div>
                     );
                   })}
                 </div>
               )}
-            </div>
-
-            {/* HISTORY OF PROCESSED PAYMENTS */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-3">
-              <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
-                <FileText className="w-4 h-4 text-emerald-600" />
-                Histórico de Pagamentos Analisados ({completedTxs.length + rejectedTxs.length})
-              </h3>
-
-              <div className="space-y-2">
-                {[...completedTxs, ...rejectedTxs].map((tx) => {
-                  const isApproved = tx.status === 'concluido';
-                  return (
-                    <div key={tx.id} className="p-3 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-xl shrink-0 ${isApproved ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                          {isApproved ? <CheckCircle2 className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
-                        </div>
-                        <div>
-                          <p className="font-bold text-slate-900">{tx.userName || 'Utilizador'} • {tx.description}</p>
-                          <p className="text-[10px] text-slate-500">
-                            {tx.amountKz.toLocaleString('pt-AO')} Kz • {tx.paymentMethod} • {new Date(tx.createdAt).toLocaleDateString('pt-AO')}
-                          </p>
-                          {tx.rejectionReason && (
-                            <p className="text-[10px] text-rose-600 font-bold mt-0.5">Motivo Rejeição: {tx.rejectionReason}</p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {tx.proofUrl && (
-                          <button
-                            onClick={() => setViewingProofTx(tx)}
-                            className="text-[10px] font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 px-2 py-1 rounded-lg flex items-center gap-1"
-                          >
-                            <FileText className="w-3 h-3 text-emerald-600" />
-                            <span>Ver Comprovativo</span>
-                          </button>
-                        )}
-                        <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full ${isApproved ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                          {isApproved ? '✓ Aprovado' : '❌ Rejeitado'}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
             </div>
           </div>
         );
@@ -1214,22 +1337,23 @@ export const AdminDashboard: React.FC = () => {
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    <a
-                      href={viewingProofTx.proofUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => openSafePdfProof(viewingProofTx.proofUrl, viewingProofTx.proofFileName || 'Comprovativo_Pagamento.pdf')}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2.5 rounded-xl shadow-md flex items-center gap-1.5"
                     >
                       <span>Abrir / Descarregar PDF</span>
-                    </a>
+                    </button>
                   </div>
                 </div>
-              ) : (
+              ) : sanitizeMediaUrl(viewingProofTx.proofUrl) ? (
                 <img 
-                  src={viewingProofTx.proofUrl} 
+                  src={sanitizeMediaUrl(viewingProofTx.proofUrl) || ''} 
                   alt="Comprovativo Zoom" 
                   className="max-h-[55vh] object-contain rounded-lg" 
                 />
+              ) : (
+                <p className="text-xs text-rose-300 font-bold p-4">URL de comprovativo inválida ou bloqueada por segurança.</p>
               )}
             </div>
 
@@ -1331,50 +1455,61 @@ export const AdminDashboard: React.FC = () => {
 
       {/* TAB 1: PAINEL FINANCEIRO */}
       {adminTab === 'financial' && (() => {
+        const formatDt = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('pt-AO') : '—');
         const prosWithStatus = professionals.map(pro => ({
           pro,
           status: getProPlanStatus(pro)
         }));
 
         const trialProsCount = prosWithStatus.filter(p => p.status.isTrial && p.status.isActive).length;
+        const trialEndedCount = prosWithStatus.filter(p => p.status.isTrial && p.status.isExpired).length;
         const activePaidProsCount = prosWithStatus.filter(p => !p.status.isTrial && p.status.isActive).length;
         const expiredProsCount = prosWithStatus.filter(p => p.status.isExpired).length;
+        const expiredPaidCount = prosWithStatus.filter(p => !p.status.isTrial && p.status.isExpired).length;
 
-        const planTransactions = walletTransactions.filter(t => t.type === 'payment' || t.description.toLowerCase().includes('plano'));
-        const totalPlansSold = planTransactions.length;
+        const approvedPlanTransactions = walletTransactions.filter(
+          t => t.status === 'concluido' && (t.type === 'payment' || t.description.toLowerCase().includes('plano'))
+        );
+        const totalPlansSold = approvedPlanTransactions.length;
 
-        const totalPlanRevenueKz = planTransactions.reduce((acc, curr) => acc + curr.amountKz, 0);
+        const totalPlanRevenueKz = approvedPlanTransactions.reduce((acc, curr) => acc + curr.amountKz, 0);
 
-        // Daily, Weekly, Monthly breakdown calculations
         const nowMs = Date.now();
         const oneDayMs = 24 * 60 * 60 * 1000;
         const oneWeekMs = 7 * oneDayMs;
         const oneMonthMs = 30 * oneDayMs;
 
-        const dailyRevenueKz = planTransactions
+        const dailyRevenueKz = approvedPlanTransactions
           .filter(t => {
-            const txTime = t.dateIso ? new Date(t.dateIso).getTime() : nowMs;
+            const txTime = new Date(t.dateIso || t.createdAt).getTime();
             return (nowMs - txTime) <= oneDayMs;
           })
           .reduce((acc, curr) => acc + curr.amountKz, 0);
 
-        const weeklyRevenueKz = planTransactions
+        const weeklyRevenueKz = approvedPlanTransactions
           .filter(t => {
-            const txTime = t.dateIso ? new Date(t.dateIso).getTime() : nowMs;
+            const txTime = new Date(t.dateIso || t.createdAt).getTime();
             return (nowMs - txTime) <= oneWeekMs;
           })
           .reduce((acc, curr) => acc + curr.amountKz, 0);
 
-        const monthlyRevenueKz = planTransactions
+        const monthlyRevenueKz = approvedPlanTransactions
           .filter(t => {
-            const txTime = t.dateIso ? new Date(t.dateIso).getTime() : nowMs;
+            const txTime = new Date(t.dateIso || t.createdAt).getTime();
             return (nowMs - txTime) <= oneMonthMs;
           })
           .reduce((acc, curr) => acc + curr.amountKz, 0);
 
         const filteredProsByPlan = prosWithStatus.filter(item => {
+          const matchesQuery =
+            !proPlanSearch.trim() ||
+            item.pro.name.toLowerCase().includes(proPlanSearch.toLowerCase()) ||
+            (item.pro.phone || '').toLowerCase().includes(proPlanSearch.toLowerCase()) ||
+            (item.pro.email || '').toLowerCase().includes(proPlanSearch.toLowerCase());
+          if (!matchesQuery) return false;
           if (proPlanFilter === 'active_paid') return !item.status.isTrial && item.status.isActive;
           if (proPlanFilter === 'trial') return item.status.isTrial && item.status.isActive;
+          if (proPlanFilter === 'trial_ended') return item.status.isTrial && item.status.isExpired;
           if (proPlanFilter === 'expired') return item.status.isExpired;
           return true;
         });
@@ -1384,37 +1519,37 @@ export const AdminDashboard: React.FC = () => {
             {/* Resumo da Receita da Plataforma */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="bg-gradient-to-br from-emerald-900 via-slate-900 to-teal-950 text-white p-5 rounded-3xl border border-emerald-500/30 shadow-md">
-                <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider block mb-1">Receita Total de Subscrições</span>
+                <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider block mb-1">Receita Aprovada de Subscrições</span>
                 <span className="text-2xl sm:text-3xl font-black text-emerald-400">{totalPlanRevenueKz.toLocaleString('pt-AO')} <span className="text-sm text-white">Kz</span></span>
-                <span className="text-[10px] text-emerald-200/80 block mt-1">Total de {totalPlansSold} plano(s) vendido(s)</span>
+                <span className="text-[10px] text-emerald-200/80 block mt-1">Total de {totalPlansSold} plano(s) aprovado(s)</span>
               </div>
 
               <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
                 <span className="text-xs font-bold text-emerald-700 uppercase block mb-1">Receita Diária (24h)</span>
                 <span className="text-2xl font-black text-slate-900">{dailyRevenueKz.toLocaleString('pt-AO')} <span className="text-xs text-slate-500 font-bold">Kz</span></span>
-                <span className="text-[11px] text-emerald-600 font-bold block mt-1">Acumulado das últimas 24 horas</span>
+                <span className="text-[11px] text-emerald-600 font-bold block mt-1">Pagamentos aprovados nas últimas 24h</span>
               </div>
 
               <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
                 <span className="text-xs font-bold text-teal-700 uppercase block mb-1">Receita Semanal (7d)</span>
                 <span className="text-2xl font-black text-slate-900">{weeklyRevenueKz.toLocaleString('pt-AO')} <span className="text-xs text-slate-500 font-bold">Kz</span></span>
-                <span className="text-[11px] text-teal-600 font-bold block mt-1">Últimos 7 dias de vendas</span>
+                <span className="text-[11px] text-teal-600 font-bold block mt-1">Últimos 7 dias aprovados</span>
               </div>
 
               <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
                 <span className="text-xs font-bold text-indigo-700 uppercase block mb-1">Receita Mensal (30d)</span>
                 <span className="text-2xl font-black text-slate-900">{monthlyRevenueKz.toLocaleString('pt-AO')} <span className="text-xs text-slate-500 font-bold">Kz</span></span>
-                <span className="text-[11px] text-indigo-600 font-bold block mt-1">Últimos 30 dias de vendas</span>
+                <span className="text-[11px] text-indigo-600 font-bold block mt-1">Últimos 30 dias aprovados</span>
               </div>
             </div>
 
             {/* Painel do Estado dos Profissionais */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-emerald-800 uppercase block">Planos Pagos Ativos</span>
+                  <span className="text-xs font-bold text-emerald-800 uppercase block">Subscrições Ativas</span>
                   <span className="text-2xl font-black text-emerald-900">{activePaidProsCount}</span>
-                  <p className="text-[11px] text-emerald-700 mt-0.5">Profissionais a receber clientes</p>
+                  <p className="text-[11px] text-emerald-700 mt-0.5">Planos pagos em vigor</p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black">
                   ✓
@@ -1423,20 +1558,31 @@ export const AdminDashboard: React.FC = () => {
 
               <div className="bg-teal-50 border border-teal-200 p-4 rounded-2xl flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-teal-800 uppercase block">Em Período Gratuito</span>
+                  <span className="text-xs font-bold text-teal-800 uppercase block">Em Teste Grátis (30d)</span>
                   <span className="text-2xl font-black text-teal-900">{trialProsCount}</span>
-                  <p className="text-[11px] text-teal-700 mt-0.5">14 dias de teste grátis ativo</p>
+                  <p className="text-[11px] text-teal-700 mt-0.5">30 dias (1 mês) gratuitos ativos</p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black">
                   🕒
                 </div>
               </div>
 
+              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-amber-800 uppercase block">Teste Terminado</span>
+                  <span className="text-2xl font-black text-amber-900">{trialEndedCount}</span>
+                  <p className="text-[11px] text-amber-700 mt-0.5">Aguardam 1.º plano pago</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center font-black">
+                  ⌛
+                </div>
+              </div>
+
               <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-rose-800 uppercase block">Planos Expirados</span>
+                  <span className="text-xs font-bold text-rose-800 uppercase block">Expirados Total</span>
                   <span className="text-2xl font-black text-rose-900">{expiredProsCount}</span>
-                  <p className="text-[11px] text-rose-700 mt-0.5">Inativos (aguardam renovação)</p>
+                  <p className="text-[11px] text-rose-700 mt-0.5">{expiredPaidCount} pagos expirados • ocultos da pesquisa</p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center font-black">
                   ⚠️
@@ -1446,44 +1592,61 @@ export const AdminDashboard: React.FC = () => {
 
             {/* Tabela de Estado dos Planos dos Profissionais */}
             <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
                     <Users className="w-4 h-4 text-emerald-600" />
-                    Estado de Subscrição dos Profissionais
+                    Gestão de Subscrições dos Profissionais ({professionals.length})
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Confirme quem tem plano ativo, quem está no período gratuito e quem precisa renovar.
+                    Consulte datas de início/expiração, verifique a validade e liberte manualmente um dos 3 planos oficiais.
                   </p>
                 </div>
 
                 {/* Filtros de Estado */}
-                <div className="flex flex-wrap gap-1.5 text-xs font-bold bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                <div className="flex flex-wrap gap-1.5 text-[11px] font-bold bg-slate-100 p-1 rounded-2xl border border-slate-200">
                   <button
                     onClick={() => setProPlanFilter('all')}
-                    className={`px-3 py-1.5 rounded-xl transition-all ${proPlanFilter === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'}`}
                   >
-                    Todos ({professionals.length})
-                  </button>
-                  <button
-                    onClick={() => setProPlanFilter('active_paid')}
-                    className={`px-3 py-1.5 rounded-xl transition-all ${proPlanFilter === 'active_paid' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
-                  >
-                    Pagos ({activePaidProsCount})
+                    Registados ({professionals.length})
                   </button>
                   <button
                     onClick={() => setProPlanFilter('trial')}
-                    className={`px-3 py-1.5 rounded-xl transition-all ${proPlanFilter === 'trial' ? 'bg-teal-700 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'trial' ? 'bg-teal-700 text-white' : 'text-slate-600 hover:text-slate-900'}`}
                   >
-                    Grátis ({trialProsCount})
+                    Em Teste ({trialProsCount})
+                  </button>
+                  <button
+                    onClick={() => setProPlanFilter('trial_ended')}
+                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'trial_ended' ? 'bg-amber-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    Teste Terminado ({trialEndedCount})
+                  </button>
+                  <button
+                    onClick={() => setProPlanFilter('active_paid')}
+                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'active_paid' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    Subscrições Ativas ({activePaidProsCount})
                   </button>
                   <button
                     onClick={() => setProPlanFilter('expired')}
-                    className={`px-3 py-1.5 rounded-xl transition-all ${proPlanFilter === 'expired' ? 'bg-rose-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'expired' ? 'bg-rose-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
                   >
                     Expirados ({expiredProsCount})
                   </button>
                 </div>
+              </div>
+
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
+                <input
+                  type="text"
+                  value={proPlanSearch}
+                  onChange={(e) => setProPlanSearch(e.target.value)}
+                  placeholder="Filtrar profissionais por nome, telefone ou e-mail..."
+                  className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
+                />
               </div>
 
               {filteredProsByPlan.length === 0 ? (
@@ -1492,156 +1655,163 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {filteredProsByPlan.map(({ pro, status }) => (
-                    <div key={pro.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-                      <div className="flex items-center gap-3">
-                        <UserAvatar 
-                          src={pro.avatar || (pro as any).photoURL} 
-                          name={pro.name} 
-                          sizeClassName="w-11 h-11" 
-                          roundedClassName="rounded-xl" 
-                          role="profissional"
-                          className="border border-slate-200" 
-                        />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-bold text-slate-900 text-sm">{pro.name}</h4>
-                            <span className="text-slate-400">•</span>
-                            <span className="text-slate-600 font-semibold">{pro.categoryName || 'Profissional'}</span>
+                  {filteredProsByPlan.map(({ pro, status }) => {
+                    const lastCheckMsg = verifiedValidityMap[pro.id];
+                    return (
+                      <div key={pro.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-3 text-xs">
+                        <div className="flex items-start gap-3">
+                          <UserAvatar 
+                            src={pro.avatar || (pro as any).photoURL} 
+                            name={pro.name} 
+                            sizeClassName="w-11 h-11" 
+                            roundedClassName="rounded-xl" 
+                            role="profissional"
+                            className="border border-slate-200 shrink-0" 
+                          />
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-bold text-slate-900 text-sm">{pro.name}</h4>
+                              <span className="text-slate-400">•</span>
+                              <span className="text-slate-600 font-semibold">{pro.categoryName || 'Profissional'}</span>
+                            </div>
+                            <p className="text-slate-500 mt-0.5">{pro.province} • {pro.email || 'Sem e-mail'} • {pro.phone}</p>
+                            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[10px] font-bold text-slate-600">
+                              <span className="bg-white border border-slate-200 px-2 py-0.5 rounded-md">
+                                📅 Início: {formatDt(status.startedAtIso)}
+                              </span>
+                              <span className="bg-white border border-slate-200 px-2 py-0.5 rounded-md">
+                                ⏳ Expiração: {formatDt(status.expiresAtIso)}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  const nextVal = !pro.experienceVerified;
+                                  verifyProExperience(pro.id, nextVal);
+                                }}
+                                className={`px-2 py-0.5 rounded-md border transition-all flex items-center gap-1 ${
+                                  pro.experienceVerified
+                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200'
+                                    : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                                }`}
+                                title="Clique para alternar a verificação da experiência"
+                              >
+                                {pro.experienceVerified ? '✅ Exp. verificada' : `Exp: ${pro.experienceYears || 0}a (Verificar)`}
+                              </button>
+                            </div>
+                            {lastCheckMsg && (
+                              <p className="text-[10px] text-indigo-700 font-bold mt-1">🔎 {lastCheckMsg}</p>
+                            )}
                           </div>
-                          <p className="text-slate-500 mt-0.5">{pro.province} • {pro.email} • {pro.phone}</p>
-                          <div className="flex flex-wrap items-center gap-2 mt-1">
-                            <span className="text-[10px] font-bold text-slate-700 bg-slate-200 px-2 py-0.5 rounded-md">
-                              Experiência: <strong>{pro.experienceYears || 0} anos</strong>
-                            </span>
-                            <button
-                              onClick={() => {
-                                const nextVal = !pro.experienceVerified;
-                                verifyProExperience(pro.id, nextVal);
-                              }}
-                              className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border transition-all flex items-center gap-1 ${
-                                pro.experienceVerified
-                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200'
-                                  : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-                              }`}
-                              title="Clique para alternar a verificação da experiência"
-                            >
-                              {pro.experienceVerified ? '✅ Experiência verificada' : '⚪ Marcar como Verificada'}
-                            </button>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto justify-between xl:justify-end">
+                          <div className="text-left xl:text-right">
+                            {status.isTrial && status.isActive && (
+                              <>
+                                <span className="bg-teal-100 text-teal-800 border border-teal-300 text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-block">
+                                  🕒 {status.planLabel || 'Teste Grátis'}: {status.daysRemaining}d restantes
+                                </span>
+                                <span className="block text-[10px] text-slate-500 mt-1">Visível nas pesquisas</span>
+                              </>
+                            )}
+                            {!status.isTrial && status.isActive && (
+                              <>
+                                <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-block">
+                                  ✓ {status.planLabel || 'Plano Ativo'} ({status.daysRemaining}d)
+                                </span>
+                                <span className="block text-[10px] text-emerald-600 font-bold mt-1">Subscrição válida</span>
+                              </>
+                            )}
+                            {status.isExpired && (
+                              <>
+                                <span className="bg-rose-100 text-rose-800 border border-rose-300 text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-block">
+                                  ❌ {status.planLabel || 'Expirado'}
+                                </span>
+                                <span className="block text-[10px] text-rose-600 font-bold mt-1">Oculto das pesquisas • aguarda renovação</span>
+                              </>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              const recheck = getProPlanStatus(pro);
+                              const summary = recheck.isActive
+                                ? `Válido (${recheck.planLabel}) até ${formatDt(recheck.expiresAtIso)} (${recheck.daysRemaining} dias restantes).`
+                                : `Expirado em ${formatDt(recheck.expiresAtIso)} (${recheck.planLabel}).`;
+                              setVerifiedValidityMap(prev => ({ ...prev, [pro.id]: summary }));
+                              showToast(recheck.isActive ? 'success' : 'info', `${pro.name}: ${summary}`);
+                            }}
+                            className="bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg"
+                            title="Verificar validade exata da subscrição"
+                          >
+                            Verificar Validade
+                          </button>
+
+                          {/* Admin Direct Package Release Action (3 Official Plans Only) */}
+                          <div className="flex items-center gap-1 shrink-0 pl-2 border-l border-slate-200">
+                            {ORDERED_PAID_PLANS.map((plan) => (
+                              <button
+                                key={plan.key}
+                                onClick={async () => {
+                                  const res = await adminUnlockProPlan(pro.id, plan.key);
+                                  if (res.success) {
+                                    showToast('success', `${plan.fullLabel} (${plan.durationLabel} — ${plan.priceStr}) ativado para ${pro.name}!`);
+                                  } else {
+                                    showToast('error', res.message);
+                                  }
+                                }}
+                                className={`text-white text-[10px] font-extrabold px-2 py-1.5 rounded-lg transition-colors ${
+                                  plan.key === 'plan_90d'
+                                    ? 'bg-purple-600 hover:bg-purple-700'
+                                    : plan.key === 'plan_30d'
+                                    ? 'bg-blue-600 hover:bg-blue-700'
+                                    : 'bg-emerald-600 hover:bg-emerald-700'
+                                }`}
+                                title={`Liberar ${plan.description}`}
+                              >
+                                +{plan.durationLabel} ({plan.priceStr})
+                              </button>
+                            ))}
                           </div>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-                        {status.isTrial && status.isActive && (
-                          <div className="text-right">
-                            <span className="bg-teal-100 text-teal-800 border border-teal-300 text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-block">
-                              🕒 Período Gratuito: Faltam {status.daysRemaining} dias
-                            </span>
-                            <span className="block text-[10px] text-slate-400 mt-1">Acesso completo concedido</span>
-                          </div>
-                        )}
-
-                        {!status.isTrial && status.isActive && (
-                          <div className="text-right">
-                            <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-block">
-                              ✓ {status.message}
-                            </span>
-                            <span className="block text-[10px] text-emerald-600 font-bold mt-1">A receber novos clientes</span>
-                          </div>
-                        )}
-
-                        {status.isExpired && (
-                          <div className="text-right">
-                            <span className="bg-rose-100 text-rose-800 border border-rose-300 text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-block">
-                              ❌ Plano Expirado (Inativo)
-                            </span>
-                            <span className="block text-[10px] text-rose-600 font-bold mt-1">Bloqueado de receber novos clientes</span>
-                          </div>
-                        )}
-
-                        {/* Admin Direct Package Release Action */}
-                        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 shrink-0 pl-2 border-l border-slate-200">
-                          <span className="text-[10px] font-extrabold text-slate-500 block">Liberar Pacote:</span>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={async () => {
-                                const res = await adminUnlockProPlan(pro.id, 'plan_7d');
-                                if (res.success) {
-                                  showToast('success', `Pacote Semanal (7 Dias) liberado para ${pro.name}!`);
-                                } else {
-                                  showToast('error', res.message);
-                                }
-                              }}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-extrabold px-2 py-1 rounded-lg transition-colors"
-                              title="Liberar 7 Dias"
-                            >
-                              +7 Dias
-                            </button>
-                            <button
-                              onClick={async () => {
-                                const res = await adminUnlockProPlan(pro.id, 'plan_14d');
-                                if (res.success) {
-                                  showToast('success', `Pacote Quinzenal (14 Dias) liberado para ${pro.name}!`);
-                                } else {
-                                  showToast('error', res.message);
-                                }
-                              }}
-                              className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold px-2 py-1 rounded-lg transition-colors"
-                              title="Liberar 14 Dias"
-                            >
-                              +14 Dias
-                            </button>
-                            <button
-                              onClick={async () => {
-                                const res = await adminUnlockProPlan(pro.id, 'plan_30d');
-                                if (res.success) {
-                                  showToast('success', `Pacote Mensal (30 Dias) liberado para ${pro.name}!`);
-                                } else {
-                                  showToast('error', res.message);
-                                }
-                              }}
-                              className="bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-extrabold px-2 py-1 rounded-lg transition-colors"
-                              title="Liberar 30 Dias"
-                            >
-                              +30 Dias
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
 
-            {/* Historico de Todos os Pagamentos dos Planos */}
+            {/* Historico de Todos os Pagamentos Aprovados dos Planos */}
             <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
               <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center justify-between">
                 <span className="flex items-center gap-2">
                   <Banknote className="w-4 h-4 text-emerald-600" />
-                  Registo de Pagamentos de Planos da Plataforma
+                  Registo de Pagamentos Aprovados de Planos
                 </span>
-                <span className="text-xs font-bold text-slate-400">Total: {planTransactions.length}</span>
+                <span className="text-xs font-bold text-slate-400">Total: {approvedPlanTransactions.length}</span>
               </h3>
 
-              {planTransactions.length === 0 ? (
+              {approvedPlanTransactions.length === 0 ? (
                 <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                   <Banknote className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                  <p className="text-xs font-bold text-slate-600">Nenhum pagamento de plano registado ainda</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Os pagamentos efetuados pelos profissionais surgirão aqui em tempo real.</p>
+                  <p className="text-xs font-bold text-slate-600">Nenhum pagamento aprovado de plano registado ainda</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Os pagamentos aprovados pelo Administrador surgirão aqui com início e expiração.</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {planTransactions.map(tx => (
+                  {approvedPlanTransactions.map(tx => (
                     <div key={tx.id} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
                       <div className="flex items-center gap-3">
                         <div className="p-2 rounded-xl bg-emerald-100 text-emerald-700">
                           <CheckCircle2 className="w-4 h-4" />
                         </div>
                         <div>
-                          <p className="font-extrabold text-slate-900">{tx.description}</p>
-                          <p className="text-[10px] text-slate-400 mt-0.5">{tx.dateIso ? new Date(tx.dateIso).toLocaleDateString('pt-AO') : 'Hoje'} • Pagamento Aprovado</p>
+                          <p className="font-extrabold text-slate-900">{tx.userName || 'Profissional'} • {tx.description}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            {new Date(tx.dateIso || tx.createdAt).toLocaleDateString('pt-AO')} • Aprovado
+                            {tx.subscriptionStartedAt && tx.subscriptionExpiresAt
+                              ? ` • Validade: ${formatDt(tx.subscriptionStartedAt)} → ${formatDt(tx.subscriptionExpiresAt)}`
+                              : ''}
+                          </p>
                         </div>
                       </div>
 
@@ -2034,10 +2204,10 @@ export const AdminDashboard: React.FC = () => {
                   <span>📅 Cobrança ao Profissional (Planos de Subscrição):</span>
                 </p>
                 <p className="text-[11px] text-slate-600 leading-relaxed">
-                  • <strong>Período de Teste:</strong> 2 semanas (14 dias) 100% gratuitas no registo.<br/>
-                  • 📅 <strong>Plano Semanal:</strong> 1.500 Kz (7 Dias)<br/>
-                  • 📅 <strong>Plano Quinzenal:</strong> 3.000 Kz (14 Dias)<br/>
-                  • 📅 <strong>Plano Mensal:</strong> 5.000 Kz (30 Dias)
+                  • <strong>Período de Teste:</strong> 30 dias (1 mês) 100% gratuitos para novos profissionais (1 vez por utilizador).<br/>
+                  • 📅 <strong>Plano Semanal:</strong> 1.500 Kz (2 semanas / 14 dias)<br/>
+                  • 📅 <strong>Plano Mensal:</strong> 3.000 Kz (1 mês / 30 dias)<br/>
+                  • 📅 <strong>Plano Trimestral:</strong> 8.000 Kz (3 meses / 90 dias)
                 </p>
               </div>
             </div>
@@ -2100,19 +2270,6 @@ export const AdminDashboard: React.FC = () => {
                     className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                     required
                   />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-emerald-800 mb-1">🔒 Senha / PIN do Administrador</label>
-                  <input
-                    type="password"
-                    value={adminPinInput}
-                    onChange={(e) => setAdminPinInput(e.target.value)}
-                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-emerald-300 bg-emerald-50/50 focus:ring-2 focus:ring-emerald-500 focus:outline-none text-slate-900"
-                    placeholder="ex: admin123"
-                    required
-                  />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Defina a palavra-passe para aceder ao painel de controlo</p>
                 </div>
               </div>
             </div>

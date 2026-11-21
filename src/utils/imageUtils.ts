@@ -348,4 +348,104 @@ export const uploadWorkPostImageToStorage = async (
   }
 };
 
+/**
+ * Processes and uploads a private payment proof (image or PDF) to `payment_proofs/{userId}/...`.
+ * Compresses images to keep receipts sharp and compact, attempts Firebase Storage upload,
+ * and falls back safely to a Firestore-compatible Data URL if Storage is unavailable/unconfigured.
+ */
+export const uploadPaymentProofToStorage = async (
+  file: File,
+  userId: string
+): Promise<{ success: boolean; url: string; fileType: 'image' | 'pdf'; storagePath?: string; error?: string }> => {
+  if (!userId) {
+    return { success: false, url: '', fileType: 'image', error: 'Sessão inválida. Inicie sessão novamente.' };
+  }
+
+  const fileExt = file.name.split('.').pop()?.toLowerCase() || '';
+  const fileMime = file.type.toLowerCase();
+  const isPdf = fileMime === 'application/pdf' || fileExt === 'pdf';
+  const isImage = !isPdf && (fileMime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp'].includes(fileExt));
+
+  if (!isPdf && !isImage) {
+    return {
+      success: false,
+      url: '',
+      fileType: 'image',
+      error: 'Formato inválido. Selecione uma imagem (JPG, JPEG, PNG, WEBP) ou documento PDF.'
+    };
+  }
+
+  const cleanUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeBaseName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || (isPdf ? 'comprovativo.pdf' : 'comprovativo.jpg');
+  const timestamp = Date.now();
+  const storagePath = `payment_proofs/${cleanUserId}/${timestamp}_${safeBaseName}`;
+
+  if (isPdf) {
+    // Attempt Firebase Storage upload first for PDFs (especially >700KB)
+    try {
+      const storagePromise = (async () => {
+        const storageRef = ref(storage, storagePath);
+        const uploadResult = await uploadBytes(storageRef, file, { contentType: 'application/pdf' });
+        const downloadUrl = await getDownloadURL(uploadResult.ref);
+        return { success: true as const, url: downloadUrl, fileType: 'pdf' as const, storagePath };
+      })();
+      const timeoutPromise = new Promise<{ success: false }>((res) => setTimeout(() => res({ success: false }), 3500));
+      const outcome = await Promise.race([storagePromise, timeoutPromise]);
+      if (outcome.success) {
+        return outcome;
+      }
+    } catch {
+      // Fallback below for smaller PDFs
+    }
+
+    if (file.size > 700 * 1024) {
+      return {
+        success: false,
+        url: '',
+        fileType: 'pdf',
+        error: 'O ficheiro PDF é demasiado grande para envio direto (>700 KB). Tente um PDF menor ou envie uma captura de ecrã (imagem).'
+      };
+    }
+
+    const dataUrl = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string) || '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+
+    if (!dataUrl.startsWith('data:application/pdf')) {
+      return { success: false, url: '', fileType: 'pdf', error: 'Não foi possível ler o documento PDF.' };
+    }
+    return { success: true, url: dataUrl, fileType: 'pdf' };
+  }
+
+  // Image proof: high legibility compression (1400px max dimension, quality 0.82)
+  const compressedDataUrl = await compressImageFile(file, 1400, 0.82);
+  if (!compressedDataUrl || !compressedDataUrl.startsWith('data:image/')) {
+    return { success: false, url: '', fileType: 'image', error: 'Não foi possível ler a imagem do comprovativo.' };
+  }
+
+  try {
+    const storagePromise = (async () => {
+      const storageRef = ref(storage, storagePath);
+      const uploadResult = await uploadString(storageRef, compressedDataUrl, 'data_url', {
+        contentType: 'image/jpeg'
+      });
+      const downloadUrl = await getDownloadURL(uploadResult.ref);
+      return { success: true as const, url: downloadUrl, fileType: 'image' as const, storagePath };
+    })();
+    const timeoutPromise = new Promise<{ success: false }>((res) => setTimeout(() => res({ success: false }), 2500));
+    const outcome = await Promise.race([storagePromise, timeoutPromise]);
+    if (outcome.success) {
+      return outcome;
+    }
+  } catch {
+    // Safe fallback to compressed Data URL in owner-private Firestore doc
+  }
+
+  return { success: true, url: compressedDataUrl, fileType: 'image' };
+};
+
+
 

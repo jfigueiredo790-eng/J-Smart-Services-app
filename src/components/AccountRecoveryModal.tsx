@@ -67,7 +67,6 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
   const [otpCode, setOtpCode] = useState('');
   const [maskedContact, setMaskedContact] = useState('');
   const [maskedEmail, setMaskedEmail] = useState('');
-  const [devCode, setDevCode] = useState<string | undefined>();
   const [attemptsRemaining, setAttemptsRemaining] = useState<number>(3);
   const [timerSeconds, setTimerSeconds] = useState<number>(600); // 10 minutes
 
@@ -90,7 +89,6 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
     setOtpCode('');
-    setDevCode(undefined);
     setAttemptsRemaining(3);
     setTimerSeconds(600);
   }, [initialType]);
@@ -117,7 +115,6 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
     setOtpCode('');
-    setDevCode(undefined);
     setAttemptsRemaining(3);
     setTimerSeconds(600);
   };
@@ -145,11 +142,12 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
         if (res.success && res.sessionId) {
           setSessionId(res.sessionId);
           setMaskedContact(res.maskedContact || 'seu contacto registado');
-          setDevCode(res.devCode);
           setIsAccountBlocked(!!res.isBlocked);
           setAttemptsRemaining(3);
           setTimerSeconds(600);
           setStep('otp');
+          setSuccessMsg(res.message);
+        } else if (res.success) {
           setSuccessMsg(res.message);
         } else {
           setErrorMsg(res.message);
@@ -174,7 +172,6 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
           setSessionId(res.sessionId);
           setMaskedContact(res.maskedCurrentPhone || 'contacto associado');
           setMaskedEmail(res.maskedEmail || maskEmailAddress(phoneRecoveryEmail));
-          setDevCode(res.devCode);
           setIsAccountBlocked(!!res.isBlocked);
           setAttemptsRemaining(3);
           setTimerSeconds(600);
@@ -238,7 +235,6 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
         clearTimeout(emergencyTimer);
         if (res.success && res.sessionId) {
           setSessionId(res.sessionId);
-          setDevCode(res.devCode);
           setAttemptsRemaining(3);
           setTimerSeconds(600);
           setSuccessMsg('Novo código enviado com sucesso!');
@@ -254,7 +250,6 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
         clearTimeout(emergencyTimer);
         if (res.success && res.sessionId) {
           setSessionId(res.sessionId);
-          setDevCode(res.devCode);
           setAttemptsRemaining(3);
           setTimerSeconds(600);
           setSuccessMsg('Novo código enviado com sucesso!');
@@ -277,8 +272,8 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
     setSuccessMsg('');
 
     if (activeTab === 'password') {
-      if (newPassword.length < 4) {
-        setErrorMsg('A nova palavra-passe deve ter pelo menos 4 caracteres.');
+      if (newPassword.length < 6) {
+        setErrorMsg('A nova palavra-passe deve ter pelo menos 6 caracteres.');
         return;
       }
       if (newPassword !== confirmPassword) {
@@ -582,27 +577,9 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
               </div>
             </div>
 
-            {/* Simulated SMS/Email Notification Badge for Seamless Testing */}
-            {devCode && (
-              <div className="bg-emerald-50 border border-emerald-300 p-3 rounded-2xl text-xs space-y-1.5 animate-pulse">
-                <div className="flex items-center justify-between font-bold text-emerald-950">
-                  <span className="flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Código de Recuperação (Simulador SMS/E-mail):</span>
-                  </span>
-                  <span className="bg-emerald-600 text-white font-mono px-2 py-0.5 rounded-md font-black tracking-widest text-sm">
-                    {devCode}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setOtpCode(devCode)}
-                  className="text-[11px] text-emerald-700 hover:text-emerald-900 font-bold underline"
-                >
-                  ⚡ Clicar para preencher código automaticamente ({devCode})
-                </button>
-              </div>
-            )}
+            <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl text-[11px] text-amber-900 font-medium">
+              Introduza o código de 6 dígitos enviado para o seu contacto registado.
+            </div>
 
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div>
@@ -671,7 +648,7 @@ export const AccountRecoveryModal: React.FC<AccountRecoveryModalProps> = ({
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
                     <Lock className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Nova Palavra-passe * (mín. 4 caracteres)</span>
+                    <span>Nova Palavra-passe * (mín. 6 caracteres)</span>
                   </label>
                   <div className="relative">
                     <input

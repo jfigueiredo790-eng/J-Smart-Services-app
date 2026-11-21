@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { useApp } from '../context/AppContext';
+import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
+import { auth } from '../lib/firebase';
 import { ShieldCheck, Lock, X, ArrowRight, AlertCircle } from 'lucide-react';
 
 interface AdminPinModalProps {
@@ -9,23 +10,37 @@ interface AdminPinModalProps {
 }
 
 export const AdminPinModal: React.FC<AdminPinModalProps> = ({ isOpen, onClose, onSuccess }) => {
-  const { platformSettings } = useApp();
   const [pinInput, setPinInput] = useState('');
   const [error, setError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleVerify = (e: React.FormEvent) => {
+  const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    const correctPin = platformSettings.adminPin || 'admin123';
+    setError('');
 
-    if (pinInput === correctPin) {
-      setError('');
+    const currentFbUser = auth.currentUser;
+    if (!currentFbUser || !currentFbUser.email) {
+      setError('Sessão de administrador não encontrada. Inicie sessão novamente.');
+      return;
+    }
+    if (!pinInput.trim()) {
+      setError('Introduza a sua palavra-passe de administrador.');
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      const cred = EmailAuthProvider.credential(currentFbUser.email, pinInput);
+      await reauthenticateWithCredential(currentFbUser, cred);
       setPinInput('');
       onSuccess();
       onClose();
-    } else {
-      setError('Palavra-passe incorreta. Acesso exclusivo do Administrador.');
+    } catch {
+      setError('Palavra-passe incorreta ou sessão expirada. Acesso exclusivo do Administrador.');
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -56,13 +71,13 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({ isOpen, onClose, o
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
               <Lock className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Digite a Palavra-passe de Admin</span>
+              <span>Confirme a Palavra-passe da Conta Admin</span>
             </label>
             <input
               type="password"
               value={pinInput}
               onChange={(e) => { setPinInput(e.target.value); setError(''); }}
-              placeholder="Sua senha de administrador"
+              placeholder="Introduza a sua palavra-passe"
               className="w-full text-xs font-bold p-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-slate-50 text-slate-900"
               autoFocus
               required
@@ -86,9 +101,10 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({ isOpen, onClose, o
             </button>
             <button
               type="submit"
-              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md transition-all"
+              disabled={isVerifying}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-extrabold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md transition-all"
             >
-              <span>Confirmar</span>
+              <span>{isVerifying ? 'A verificar...' : 'Confirmar'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>

@@ -3,6 +3,7 @@ import { ProfessionalProfile } from '../types';
 import { useApp } from '../context/AppContext';
 import { getProPlanStatus } from '../utils/planUtils';
 import { UserAvatar } from './UserAvatar';
+import { buildShareUrl, shareOfficialLink } from '../config/domain';
 import { 
   X, 
   Star, 
@@ -16,7 +17,9 @@ import {
   MessageSquare,
   Calendar,
   Send,
-  AlertTriangle
+  AlertTriangle,
+  Share2,
+  Check
 } from 'lucide-react';
 
 interface ProfessionalDetailModalProps {
@@ -27,6 +30,20 @@ interface ProfessionalDetailModalProps {
 
 export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = ({ pro, onClose, onRequestService }) => {
   const { reviews, categories, setActiveTab, setActiveChatRequestId, requests, currentUser, switchRole, setIsReviewModalOpen, setReviewingRequestId } = useApp();
+  const [copiedProfileLink, setCopiedProfileLink] = React.useState(false);
+
+  const handleShareProfile = async () => {
+    const url = buildShareUrl({ pro: pro.id });
+    const result = await shareOfficialLink({
+      title: `${pro.name} — J Smart Services`,
+      text: `Veja o perfil profissional de ${pro.name} na J Smart Services:`,
+      url,
+    });
+    if (result === 'copied') {
+      setCopiedProfileLink(true);
+      setTimeout(() => setCopiedProfileLink(false), 2500);
+    }
+  };
 
   const proPlan = getProPlanStatus(pro);
 
@@ -119,12 +136,33 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
             Profissional Ativo em Angola
           </div>
 
-          <button 
-            onClick={onClose}
-            className="p-2 bg-slate-900/60 hover:bg-slate-900 text-white rounded-full transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleShareProfile}
+              className="px-3 py-2 bg-slate-900/60 hover:bg-slate-900 text-white rounded-full transition-colors text-xs font-bold flex items-center gap-1.5"
+              title="Partilhar perfil profissional"
+            >
+              {copiedProfileLink ? (
+                <>
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span>Link copiado</span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Partilhar</span>
+                </>
+              )}
+            </button>
+
+            <button 
+              onClick={onClose}
+              className="p-2 bg-slate-900/60 hover:bg-slate-900 text-white rounded-full transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Profile Info Overlay */}

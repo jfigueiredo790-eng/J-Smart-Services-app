@@ -122,7 +122,7 @@ export const Header: React.FC = () => {
         <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
 
           {/* Dual Account / Mode Quick Switcher */}
-          {(currentUser.accountType === 'duplo' || (!isAdmin && currentUser.role !== 'admin')) && (
+          {isLoggedIn && currentUser.accountType === 'duplo' && !isAdmin && (
             <button
               onClick={() => switchRole(userRole === 'cliente' ? 'profissional' : 'cliente')}
               title={`Está no Modo ${userRole === 'cliente' ? 'Cliente' : 'Profissional'}. Clique para alternar para o Modo ${userRole === 'cliente' ? 'Profissional' : 'Cliente'}.`}

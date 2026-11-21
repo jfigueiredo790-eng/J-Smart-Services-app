@@ -29,22 +29,21 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   private handleSoftReset = () => {
-    // Preserve authentication and crucial accounts while cleaning corrupted UI temporary state
     try {
-      const userKey = 'j_smart_services_data_v6_user';
-      const loggedKey = 'j_smart_services_data_v6_is_logged_in';
-      const savedUser = localStorage.getItem(userKey);
-      const savedLogged = localStorage.getItem(loggedKey);
-
       localStorage.removeItem('j_smart_services_data_v6_audit_logs');
       localStorage.removeItem('j_smart_services_data_v6_reports');
       localStorage.removeItem('j_smart_services_data_v6_recovery_sessions');
-
-      if (savedUser) localStorage.setItem(userKey, savedUser);
-      if (savedLogged) localStorage.setItem(loggedKey, savedLogged);
     } catch {}
     window.location.href = '/';
   };
+
+  private getFriendlyErrorMessage(): string {
+    const raw = this.state.error?.message || '';
+    if (raw.includes('operationType') && raw.includes('authInfo')) {
+      return 'Sem permissão para executar esta operação ou a sua sessão expirou. Inicie sessão novamente e tente de novo.';
+    }
+    return 'Os seus dados e conta permanecem guardados em segurança. Clique abaixo para recarregar e restabelecer a ligação.';
+  }
 
   public render() {
     if ((this as any).state?.hasError) {
@@ -61,7 +60,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 Recuperação de Estabilidade do Sistema
               </p>
               <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                Os seus dados e conta permanecem guardados em segurança. Clique abaixo para recarregar e restabelecer a ligação.
+                {this.getFriendlyErrorMessage()}
               </p>
             </div>
 
