@@ -73,6 +73,7 @@ export const AdminDashboard: React.FC = () => {
     adminUpdateProCategories,
     auditAndFixBuggedCategories,
     migrateLegacyAccountsPhoneIndexAsync,
+    diagnosePhoneLoginAsync,
     sendAdminVerificationEmailAsync,
     setAdminPhonePasswordAsync,
     runAutoTestSuite,
@@ -86,6 +87,9 @@ export const AdminDashboard: React.FC = () => {
 
   const [adminSyncFeedback, setAdminSyncFeedback] = useState<string | null>(null);
   const [isMigratingPhones, setIsMigratingPhones] = useState(false);
+  const [diagPhoneInput, setDiagPhoneInput] = useState('');
+  const [isDiagnosingPhone, setIsDiagnosingPhone] = useState(false);
+  const [phoneDiagResult, setPhoneDiagResult] = useState<Awaited<ReturnType<typeof diagnosePhoneLoginAsync>> | null>(null);
   const [isSendingAdminVerify, setIsSendingAdminVerify] = useState(false);
   const [newAdminPass, setNewAdminPass] = useState('');
   const [confirmAdminPass, setConfirmAdminPass] = useState('');
@@ -2696,6 +2700,102 @@ export const AdminDashboard: React.FC = () => {
                   </button>
                 )}
               </div>
+            </div>
+
+            {/* Diagnóstico em Tempo Real de Qualquer Número de Telefone (Apenas Leitura — Sem Alterar Dados) */}
+            <div className="pt-4 border-t border-slate-100 space-y-3">
+              <div>
+                <p className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
+                  <Search className="w-4 h-4 text-emerald-600" />
+                  <span>Diagnóstico Real de Conta por Telefone (Apenas Leitura)</span>
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Verifique ao vivo se um número angolano (ex.: 923456789 ou +244923456789) já está em <code className="bg-slate-100 px-1 rounded">phone_login_index</code>, qual o e-mail original associado e o estado real da conta no Firestore — sem alterar nenhum dado.
+                </p>
+              </div>
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!diagPhoneInput.trim()) return;
+                  setIsDiagnosingPhone(true);
+                  try {
+                    const res = await diagnosePhoneLoginAsync(diagPhoneInput);
+                    setPhoneDiagResult(res);
+                    if (!res.success) {
+                      showToast('error', res.message);
+                    }
+                  } finally {
+                    setIsDiagnosingPhone(false);
+                  }
+                }}
+                className="flex flex-col sm:flex-row gap-2"
+              >
+                <input
+                  type="tel"
+                  value={diagPhoneInput}
+                  onChange={(e) => setDiagPhoneInput(e.target.value)}
+                  placeholder="Introduza o telefone da utilizadora (ex: 923456789 ou +244923456789)"
+                  className="flex-1 text-xs p-2.5 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={isDiagnosingPhone}
+                  className="bg-slate-900 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all shadow-sm disabled:opacity-60 whitespace-nowrap"
+                >
+                  {isDiagnosingPhone ? 'A diagnosticar...' : 'Diagnosticar Número'}
+                </button>
+              </form>
+
+              {phoneDiagResult && phoneDiagResult.success && (
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-extrabold text-slate-900">
+                      Resultado para {phoneDiagResult.normalizedE164}
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
+                      Índice global: {phoneDiagResult.totalIndexedPhones ?? '?'} telefones indexados / {phoneDiagResult.totalFirestoreAccounts ?? '?'} contas no Firestore
+                    </span>
+                  </div>
+
+                  <div className={`p-3 rounded-xl border font-semibold leading-relaxed ${
+                    phoneDiagResult.diagnosisCode === 'INDEX_OK_CHECK_AUTH_USER'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                      : 'bg-amber-50 border-amber-200 text-amber-950'
+                  }`}>
+                    {phoneDiagResult.diagnosisSummary}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+                    <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-1">
+                      <p className="font-extrabold text-slate-800 uppercase text-[10px]">1. Índice phone_login_index</p>
+                      <p>Estado: <strong className={phoneDiagResult.indexExists ? 'text-emerald-700' : 'text-red-700'}>{phoneDiagResult.indexExists ? 'Indexado' : 'Não encontrado'}</strong></p>
+                      {phoneDiagResult.indexData && (
+                        <>
+                          <p>Modo: <strong>{phoneDiagResult.indexData.authMode}</strong></p>
+                          <p className="break-all">E-mail de autenticação: <strong>{phoneDiagResult.indexData.authEmail}</strong></p>
+                          <p className="break-all">UID associado: <strong>{phoneDiagResult.indexData.uid}</strong></p>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-1">
+                      <p className="font-extrabold text-slate-800 uppercase text-[10px]">2. Registos no Firestore ({phoneDiagResult.matchedRecords?.length || 0})</p>
+                      {phoneDiagResult.matchedRecords && phoneDiagResult.matchedRecords.length > 0 ? (
+                        phoneDiagResult.matchedRecords.map((rec, idx) => (
+                          <div key={`${rec.collection}-${rec.uid}-${idx}`} className="pt-1 border-t first:border-t-0 first:pt-0 border-slate-100 space-y-0.5">
+                            <p><strong>{rec.name}</strong> ({rec.role}) — <code className="bg-slate-100 px-1 rounded">{rec.collection}/{rec.uid}</code></p>
+                            <p>Telefone original: <strong>{rec.phone}</strong> • E-mail: <strong>{rec.email || 'Sem e-mail'}</strong></p>
+                            <p>Tipo de UID: <strong className={rec.looksLikeFirebaseAuthUid ? 'text-emerald-700' : 'text-amber-700'}>{rec.looksLikeFirebaseAuthUid ? 'Formato Firebase Auth' : 'ID Antigo (Pré-Firebase Auth)'}</strong></p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-slate-500">Nenhum registo com este número nas coleções principais.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

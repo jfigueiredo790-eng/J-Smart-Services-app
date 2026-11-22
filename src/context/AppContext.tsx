@@ -277,6 +277,36 @@ interface AppContextType {
     skippedCount: number;
     message: string;
   }>;
+  diagnosePhoneLoginAsync: (phoneInput: string) => Promise<{
+    success: boolean;
+    message: string;
+    normalizedE164?: string;
+    phoneIndexId?: string;
+    indexExists?: boolean;
+    indexData?: {
+      uid: string;
+      authMode: string;
+      authEmail: string;
+      hasRealEmail?: boolean;
+      updatedAt?: string;
+    } | null;
+    matchedRecords?: Array<{
+      collection: string;
+      uid: string;
+      name: string;
+      role: string;
+      phone: string;
+      email: string;
+      blocked: boolean;
+      isDeleted: boolean;
+      createdAt?: string;
+      looksLikeFirebaseAuthUid: boolean;
+    }>;
+    totalIndexedPhones?: number;
+    totalFirestoreAccounts?: number;
+    diagnosisCode?: 'NOT_INDEXED' | 'INDEX_MISMATCH_SYNTHETIC' | 'INDEX_OK_LEGACY_UID_NO_AUTH' | 'INDEX_OK_CHECK_AUTH_USER' | 'NO_FIRESTORE_ACCOUNT' | 'ACCOUNT_BLOCKED_OR_DELETED';
+    diagnosisSummary?: string;
+  }>;
   sendAdminVerificationEmailAsync: () => Promise<{
     success: boolean;
     message: string;
@@ -3897,7 +3927,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 5) Real Firebase Auth verification (fail closed, server-verified scrypt hash; no SMS required)
       let fbUser: any = null;
       let lastAuthErrorCode = '';
-      for (const candidateEmail of candidateAuthEmails) {
+      let primaryAuthErrorCode = '';
+      for (let i = 0; i < candidateAuthEmails.length; i += 1) {
+        const candidateEmail = candidateAuthEmails[i];
         try {
           const credential = await signInWithEmailAndPassword(auth, candidateEmail, passTrimmed);
           fbUser = credential.user;
@@ -3905,6 +3937,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch (authErr: any) {
           const code = authErr?.code || '';
           lastAuthErrorCode = code;
+          // Preserve the first/most informative Firebase error (never let a synthetic fallback hide PASSWORD_LOGIN_DISABLED or wrong-password)
+          if (
+            !primaryAuthErrorCode ||
+            code === 'auth/operation-not-allowed' ||
+            code === 'auth/wrong-password' ||
+            code === 'auth/network-request-failed'
+          ) {
+            primaryAuthErrorCode = code;
+          }
           if (code === 'auth/too-many-requests') {
             return {
               success: false,
@@ -3921,7 +3962,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       if (!fbUser) {
-        if (lastAuthErrorCode === 'auth/operation-not-allowed') {
+        const effectiveErrorCode = primaryAuthErrorCode || lastAuthErrorCode;
+        console.warn('[JSmartAuth] Phone login rejected by Firebase Auth', {
+          code: effectiveErrorCode || 'unknown',
+          hasIndexedMapping,
+          candidatesTried: candidateAuthEmails.length
+        });
+        if (effectiveErrorCode === 'auth/operation-not-allowed') {
           return {
             success: false,
             providerDisabled: true,
@@ -3936,11 +3983,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           suggestLegacyMigration: shouldSuggestMigration,
           message: shouldSuggestMigration
             ? 'Número de telefone ou palavra-passe incorretos. Se criou a sua conta anteriormente com e-mail, associe o seu número abaixo numa única vez.'
-            : (lastAuthErrorCode === 'auth/network-request-failed'
+            : (effectiveErrorCode === 'auth/network-request-failed'
                 ? 'Sem ligação à internet. Verifique a sua rede e tente novamente.'
                 : (isOfficialAdminLoginPhone
                     ? 'A palavra-passe ainda não está associada à conta oficial de administrador ou está incorreta. Entre com "Entrar com Conta Google da Administração" e associe a sua palavra-passe no Painel Admin.'
-                    : 'Número de telefone ou palavra-passe incorretos. Verifique os seus dados ou recupere a palavra-passe.'))
+                    : 'Número de telefone ou palavra-passe incorretos. Verifique os seus dados ou utilize "Esqueci a palavra-passe".'))
         };
       }
 
@@ -4615,6 +4662,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let migratedCount = 0;
       let skippedCount = 0;
       const nowIso = new Date().toISOString();
+      const indexedLegacyEmailPhones = new Set<string>();
 
       for (const [uid, account] of mergedById.entries()) {
         const norm = normalizePhoneNumber(extractRawPhone(account));
@@ -4634,6 +4682,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ? publicEmail.toLowerCase()
           : (phoneToSyntheticAuthEmail(norm.e164) || '');
         const authMode = publicEmail ? 'legacy_email' : 'phone_synthetic';
+
+        // Never overwrite an already-resolved legacy_email mapping for the same phone with a synthetic fallback
+        if (authMode === 'phone_synthetic' && indexedLegacyEmailPhones.has(idxId)) {
+          continue;
+        }
+        if (authMode === 'legacy_email') {
+          indexedLegacyEmailPhones.add(idxId);
+        }
 
         try {
           // Non-destructive index write ONLY: NEVER modifies existing phone string, role, posts, chats, reviews, or balances
@@ -4698,6 +4754,155 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     autoSyncedAdminUidRef.current = firebaseAuthUid;
     migrateLegacyAccountsPhoneIndexAsync().catch(() => {});
   }, [isLoggedIn, currentUser.role, firebaseAuthUid]);
+
+  // Read-only Admin forensic diagnostic for any Angolan phone number (ZERO writes, ZERO password access)
+  const diagnosePhoneLoginAsync = async (phoneInput: string) => {
+    const fbCurrentUser = auth.currentUser;
+    const isVerifiedSuperAdminSession = Boolean(
+      fbCurrentUser?.emailVerified &&
+      (fbCurrentUser.email || '').trim().toLowerCase() === OFFICIAL_ADMIN_EMAIL
+    );
+    if (!fbCurrentUser || (currentUser.role !== 'admin' && !isVerifiedSuperAdminSession)) {
+      return {
+        success: false,
+        message: 'Apenas administradores autenticados podem executar o diagnóstico de telefone.'
+      };
+    }
+
+    const norm = normalizePhoneNumber(phoneInput);
+    if (!norm.isValid) {
+      return {
+        success: false,
+        message: norm.error || INVALID_ANGOLA_PHONE_MESSAGE
+      };
+    }
+
+    const phoneIndexId = await computePhoneIndexId(norm.e164);
+    if (!phoneIndexId) {
+      return {
+        success: false,
+        message: 'Não foi possível calcular o identificador seguro do número.'
+      };
+    }
+
+    try {
+      const [idxSnap, idxListSnap, usersSnap, prosSnap, adminsSnap, adminsPtSnap] = await Promise.allSettled([
+        getDoc(doc(db, 'phone_login_index', phoneIndexId)),
+        getDocs(collection(db, 'phone_login_index')),
+        getDocs(collection(db, 'users')),
+        getDocs(collection(db, 'professionals')),
+        getDocs(collection(db, 'admins')),
+        getDocs(collection(db, 'administradores'))
+      ]);
+
+      const indexExists = idxSnap.status === 'fulfilled' && idxSnap.value.exists();
+      const rawIdx = indexExists ? (idxSnap.value.data() as any) : null;
+      const indexData = rawIdx
+        ? {
+            uid: String(rawIdx.uid || ''),
+            authMode: String(rawIdx.authMode || ''),
+            authEmail: String(rawIdx.authEmail || ''),
+            hasRealEmail: Boolean(rawIdx.hasRealEmail),
+            updatedAt: rawIdx.updatedAt ? String(rawIdx.updatedAt) : undefined
+          }
+        : null;
+
+      const totalIndexedPhones = idxListSnap.status === 'fulfilled' ? idxListSnap.value.size : undefined;
+      const uniqueAccountIds = new Set<string>();
+      const matchedRecords: Array<{
+        collection: string;
+        uid: string;
+        name: string;
+        role: string;
+        phone: string;
+        email: string;
+        blocked: boolean;
+        isDeleted: boolean;
+        createdAt?: string;
+        looksLikeFirebaseAuthUid: boolean;
+      }> = [];
+
+      const scanCollection = (colName: string, res: PromiseSettledResult<any>) => {
+        if (res.status !== 'fulfilled') return;
+        res.value.forEach((docSnap: any) => {
+          const raw = stripSensitiveFields(docSnap.data() || {});
+          const uid = String(docSnap.id);
+          if (!isFictitiousOrInvalidUser({ id: uid, ...raw })) {
+            uniqueAccountIds.add(uid);
+          }
+          const phoneFields = [raw.phone, raw.phoneE164, raw.phoneNumber, raw.telefone, raw.whatsapp].filter(
+            (v): v is string => typeof v === 'string' && v.trim().length > 0
+          );
+          const isMatch = phoneFields.some(p => areSamePhoneNumber(p, norm.e164));
+          if (isMatch) {
+            const looksLikeFirebaseAuthUid = /^[A-Za-z0-9]{20,36}$/.test(uid) && !uid.includes('-') && !uid.includes('_');
+            matchedRecords.push({
+              collection: colName,
+              uid,
+              name: String(raw.name || 'Sem nome'),
+              role: String(raw.role || (colName === 'professionals' ? 'profissional' : 'cliente')),
+              phone: phoneFields[0] || '',
+              email: getPublicUserEmail(raw.email) || '',
+              blocked: raw.blocked === true || raw.status === 'bloqueado' || raw.accountStatus === 'BLOCKED',
+              isDeleted: raw.isDeleted === true || raw.status === 'deleted',
+              createdAt: raw.createdAt ? String(raw.createdAt) : undefined,
+              looksLikeFirebaseAuthUid
+            });
+          }
+        });
+      };
+
+      scanCollection('users', usersSnap);
+      scanCollection('professionals', prosSnap);
+      scanCollection('admins', adminsSnap);
+      scanCollection('administradores', adminsPtSnap);
+
+      const primaryRecord = matchedRecords.find(r => r.email) || matchedRecords[0] || null;
+      const hasBlockedOrDeleted = matchedRecords.some(r => r.blocked || r.isDeleted);
+
+      let diagnosisCode: 'NOT_INDEXED' | 'INDEX_MISMATCH_SYNTHETIC' | 'INDEX_OK_LEGACY_UID_NO_AUTH' | 'INDEX_OK_CHECK_AUTH_USER' | 'NO_FIRESTORE_ACCOUNT' | 'ACCOUNT_BLOCKED_OR_DELETED';
+      let diagnosisSummary = '';
+
+      if (matchedRecords.length === 0 && !indexExists) {
+        diagnosisCode = 'NO_FIRESTORE_ACCOUNT';
+        diagnosisSummary = `Nenhum registo encontrado no Firestore (users/professionals/admins) nem em phone_login_index para ${norm.e164}. Confirme se a conta foi criada neste mesmo projeto ou com outro número.`;
+      } else if (hasBlockedOrDeleted) {
+        diagnosisCode = 'ACCOUNT_BLOCKED_OR_DELETED';
+        diagnosisSummary = 'A conta existe na base de dados, mas encontra-se marcada como bloqueada ou eliminada.';
+      } else if (!indexExists) {
+        diagnosisCode = 'NOT_INDEXED';
+        diagnosisSummary = `A conta existe no Firestore (${primaryRecord?.collection}/${primaryRecord?.uid}), mas este número ainda NÃO está em phone_login_index. Clique em "Sincronizar Telefones de Contas Antigas" para indexar sem alterar dados.`;
+      } else if (primaryRecord?.email && indexData?.authEmail?.toLowerCase() !== primaryRecord.email.toLowerCase()) {
+        diagnosisCode = 'INDEX_MISMATCH_SYNTHETIC';
+        diagnosisSummary = `O índice phone_login_index aponta para "${indexData?.authEmail}" mas o e-mail original no Firestore é "${primaryRecord.email}". Clique em "Sincronizar Telefones de Contas Antigas" para corrigir o mapeamento.`;
+      } else if (primaryRecord && !primaryRecord.looksLikeFirebaseAuthUid) {
+        diagnosisCode = 'INDEX_OK_LEGACY_UID_NO_AUTH';
+        diagnosisSummary = `O número está corretamente indexado para "${indexData?.authEmail}", MAS o UID desta conta no Firestore ("${primaryRecord.uid}") é um ID antigo pré-Firebase Auth (criado quando Email/Password estava desativado). Por isso o Firebase Authentication devolve INVALID_LOGIN_CREDENTIALS — esta conta ainda não existe na tabela de utilizadores do Firebase Authentication (verifique em Firebase Console → Authentication → Users se "${indexData?.authEmail}" aparece listado).`;
+      } else {
+        diagnosisCode = 'INDEX_OK_CHECK_AUTH_USER';
+        diagnosisSummary = `O índice phone_login_index está corretamente associado a "${indexData?.authEmail}" (UID: ${indexData?.uid}). Se o login continua a devolver "Número de telefone ou palavra-passe incorretos", o Firebase Authentication está a devolver INVALID_LOGIN_CREDENTIALS porque: (a) "${indexData?.authEmail}" ainda não existe em Firebase Console → Authentication → Users (conta antiga pré-Firebase Auth), ou (b) a conta só tem login Google sem palavra-passe, ou (c) a palavra-passe introduzida difere da guardada no Firebase Auth.`;
+      }
+
+      return {
+        success: true,
+        message: 'Diagnóstico concluído (apenas leitura — nenhum dado foi alterado).',
+        normalizedE164: norm.e164,
+        phoneIndexId,
+        indexExists,
+        indexData,
+        matchedRecords,
+        totalIndexedPhones,
+        totalFirestoreAccounts: uniqueAccountIds.size,
+        diagnosisCode,
+        diagnosisSummary
+      };
+    } catch {
+      return {
+        success: false,
+        message: 'Não foi possível ler o diagnóstico em tempo real do Firestore. Verifique a ligação e as permissões administrativas.'
+      };
+    }
+  };
 
   const sendAdminVerificationEmailAsync = async (): Promise<{ success: boolean; message: string }> => {
     if (!auth.currentUser) {
@@ -6213,6 +6418,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       requestPhoneRecoveryVerificationAsync,
       updateRecoveredPhoneNumberAsync,
       migrateLegacyAccountsPhoneIndexAsync,
+      diagnosePhoneLoginAsync,
       sendAdminVerificationEmailAsync,
       changeProPlan,
       subscribeToPlan,
