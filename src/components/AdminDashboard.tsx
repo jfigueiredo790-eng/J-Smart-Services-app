@@ -22,6 +22,7 @@ import {
   Plus,
   SlidersHorizontal,
   Ban,
+  Lock,
   Unlock,
   Flag,
   Save,
