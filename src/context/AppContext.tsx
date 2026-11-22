@@ -65,6 +65,7 @@ import {
   GoogleAuthProvider,
   EmailAuthProvider,
   signInWithPopup,
+  reauthenticateWithPopup,
   linkWithCredential,
   updatePassword,
   signOut,
@@ -4252,14 +4253,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, message: 'A sessão atual do administrador não possui e-mail associado.' };
     }
 
-    try {
+    const applyPasswordToCurrentUser = async () => {
+      if (!auth.currentUser) throw new Error('NO_CURRENT_USER');
       const hasPasswordProvider = auth.currentUser.providerData.some(p => p.providerId === 'password');
       if (hasPasswordProvider) {
         await updatePassword(auth.currentUser, cleanPassword);
-      } else {
+        return;
+      }
+      try {
         const cred = EmailAuthProvider.credential(adminEmail, cleanPassword);
         await linkWithCredential(auth.currentUser, cred);
+      } catch (linkErr: any) {
+        if (linkErr?.code === 'auth/provider-already-linked' || linkErr?.code === 'auth/email-already-in-use') {
+          await updatePassword(auth.currentUser, cleanPassword);
+        } else {
+          throw linkErr;
+        }
       }
+    };
+
+    try {
+      try {
+        await applyPasswordToCurrentUser();
+      } catch (firstErr: any) {
+        if (firstErr?.code === 'auth/requires-recent-login' && auth.currentUser) {
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          await reauthenticateWithPopup(auth.currentUser, provider);
+          await applyPasswordToCurrentUser();
+        } else {
+          throw firstErr;
+        }
+      }
+
+      await auth.currentUser.reload().catch(() => {});
 
       const nowIso = new Date().toISOString();
       for (const adminCanonDigits of OFFICIAL_ADMIN_PHONES_CANONICAL) {

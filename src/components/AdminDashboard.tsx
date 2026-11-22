@@ -359,6 +359,32 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* Aviso direto quando a conta Google do Administrador ainda não tem palavra-passe associada no Firebase */}
+      {auth.currentUser && !auth.currentUser.providerData.some(p => p.providerId === 'password') && adminTab !== 'audit' && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-amber-100 rounded-xl text-amber-700 shrink-0 mt-0.5">
+              <Lock className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs font-extrabold text-amber-950">
+                Palavra-passe de entrada por telefone (+244924835279) ainda não configurada no Firebase
+              </p>
+              <p className="text-[11px] text-amber-900 mt-0.5 leading-relaxed">
+                A sua conta entrou com Google, mas ainda não tem palavra-passe registada no Firebase Authentication. Defina-a agora para poder entrar diretamente com <strong>924835279</strong> e a sua palavra-passe.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAdminTab('audit')}
+            className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all shrink-0 shadow-sm"
+          >
+            Definir Palavra-passe Agora
+          </button>
+        </div>
+      )}
+
       {/* Admin Navigation Tabs */}
       <div className="flex overflow-x-auto gap-2 p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-bold">
         {/* TAB MASTER: TODOS OS CADASTRADOS NA J SMART SERVICES */}
