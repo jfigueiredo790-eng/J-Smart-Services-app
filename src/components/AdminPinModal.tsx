@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
-import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
+import {
+  EmailAuthProvider,
+  GoogleAuthProvider,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup
+} from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { ShieldCheck, Lock, X, ArrowRight, AlertCircle } from 'lucide-react';
 
@@ -16,11 +21,18 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({ isOpen, onClose, o
 
   if (!isOpen) return null;
 
+  const currentFbUser = auth.currentUser;
+  const hasPasswordProvider = Boolean(
+    currentFbUser?.providerData.some(p => p.providerId === 'password')
+  );
+  const hasGoogleProvider = Boolean(
+    currentFbUser?.providerData.some(p => p.providerId === 'google.com')
+  );
+
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    const currentFbUser = auth.currentUser;
     if (!currentFbUser || !currentFbUser.email) {
       setError('Sessão de administrador não encontrada. Inicie sessão novamente.');
       return;
@@ -38,7 +50,27 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({ isOpen, onClose, o
       onSuccess();
       onClose();
     } catch {
-      setError('Palavra-passe incorreta ou sessão expirada. Acesso exclusivo do Administrador.');
+      setError('Palavra-passe incorreta ou sessão expirada. Se entrou com Google, utilize o botão de confirmação Google abaixo.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleGoogleReauth = async () => {
+    setError('');
+    if (!currentFbUser) {
+      setError('Sessão de administrador não encontrada. Inicie sessão novamente.');
+      return;
+    }
+    setIsVerifying(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      await reauthenticateWithPopup(currentFbUser, provider);
+      setPinInput('');
+      onSuccess();
+      onClose();
+    } catch {
+      setError('Não foi possível confirmar a identidade com Google. Tente novamente.');
     } finally {
       setIsVerifying(false);
     }
@@ -67,48 +99,73 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({ isOpen, onClose, o
           </button>
         </div>
 
-        <form onSubmit={handleVerify} className="space-y-3 pt-1">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-              <Lock className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Confirme a Palavra-passe da Conta Admin</span>
-            </label>
-            <input
-              type="password"
-              value={pinInput}
-              onChange={(e) => { setPinInput(e.target.value); setError(''); }}
-              placeholder="Introduza a sua palavra-passe"
-              className="w-full text-xs font-bold p-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-slate-50 text-slate-900"
-              autoFocus
-              required
-            />
-          </div>
-
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-2.5 rounded-xl flex items-center gap-2 font-medium">
-              <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
-              <span>{error}</span>
+        {hasPasswordProvider && (
+          <form onSubmit={handleVerify} className="space-y-3 pt-1">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Confirme a Palavra-passe da Conta Admin</span>
+              </label>
+              <input
+                type="password"
+                value={pinInput}
+                onChange={(e) => { setPinInput(e.target.value); setError(''); }}
+                placeholder="Introduza a sua palavra-passe"
+                className="w-full text-xs font-bold p-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-slate-50 text-slate-900"
+                autoFocus
+                required
+              />
             </div>
-          )}
 
-          <div className="flex gap-2 pt-2">
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => { setError(''); setPinInput(''); onClose(); }}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold py-2.5 rounded-xl text-xs transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isVerifying}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-extrabold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md transition-all"
+              >
+                <span>{isVerifying ? 'A verificar...' : 'Confirmar'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </form>
+        )}
+
+        {(hasGoogleProvider || !hasPasswordProvider) && (
+          <div className="space-y-2.5 pt-1">
             <button
               type="button"
-              onClick={() => { setError(''); setPinInput(''); onClose(); }}
-              className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold py-2.5 rounded-xl text-xs transition-all"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
+              onClick={handleGoogleReauth}
               disabled={isVerifying}
-              className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-extrabold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md transition-all"
+              className="w-full bg-slate-900 hover:bg-emerald-700 disabled:opacity-60 text-white font-extrabold py-3 rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all"
             >
-              <span>{isVerifying ? 'A verificar...' : 'Confirmar'}</span>
-              <ArrowRight className="w-4 h-4" />
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>{isVerifying ? 'A confirmar...' : 'Confirmar com Conta Google da Administração'}</span>
             </button>
+            {!hasPasswordProvider && (
+              <button
+                type="button"
+                onClick={() => { setError(''); setPinInput(''); onClose(); }}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold py-2.5 rounded-xl text-xs transition-all"
+              >
+                Cancelar
+              </button>
+            )}
           </div>
-        </form>
+        )}
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-2.5 rounded-xl flex items-center gap-2 font-medium">
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+            <span>{error}</span>
+          </div>
+        )}
 
       </div>
     </div>

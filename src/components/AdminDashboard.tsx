@@ -73,6 +73,7 @@ export const AdminDashboard: React.FC = () => {
     auditAndFixBuggedCategories,
     migrateLegacyAccountsPhoneIndexAsync,
     sendAdminVerificationEmailAsync,
+    setAdminPhonePasswordAsync,
     runAutoTestSuite,
     codeOfConductRules,
     updateCodeOfConductRules,
@@ -85,6 +86,10 @@ export const AdminDashboard: React.FC = () => {
   const [adminSyncFeedback, setAdminSyncFeedback] = useState<string | null>(null);
   const [isMigratingPhones, setIsMigratingPhones] = useState(false);
   const [isSendingAdminVerify, setIsSendingAdminVerify] = useState(false);
+  const [newAdminPass, setNewAdminPass] = useState('');
+  const [confirmAdminPass, setConfirmAdminPass] = useState('');
+  const [showNewAdminPass, setShowNewAdminPass] = useState(false);
+  const [isSavingAdminPass, setIsSavingAdminPass] = useState(false);
 
   const handleAdminSync = async () => {
     if (isSyncing) return;
@@ -2665,6 +2670,85 @@ export const AdminDashboard: React.FC = () => {
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Card de Ativação / Alteração da Palavra-passe de Login por Telefone do Administrador */}
+          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Lock className="w-5 h-5 text-emerald-600" />
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Palavra-passe de Acesso Administrativo por Telefone (+244924835279 / +244956011985)
+                </h3>
+              </div>
+              <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                Associe ou atualize uma palavra-passe segura diretamente na sua conta oficial autenticada para poder entrar também com o seu telefone (<strong>+244924835279</strong> ou <strong>+244956011985</strong>) sem perder privilégios nem duplicar a conta.
+              </p>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (newAdminPass.trim().length < 6) {
+                  showToast('error', 'A palavra-passe deve conter pelo menos 6 caracteres.');
+                  return;
+                }
+                if (newAdminPass !== confirmAdminPass) {
+                  showToast('error', 'As palavras-passe introduzidas não coincidem.');
+                  return;
+                }
+                setIsSavingAdminPass(true);
+                try {
+                  const res = await setAdminPhonePasswordAsync(newAdminPass);
+                  showToast(res.success ? 'success' : 'error', res.message, 6000);
+                  if (res.success) {
+                    setNewAdminPass('');
+                    setConfirmAdminPass('');
+                  }
+                } finally {
+                  setIsSavingAdminPass(false);
+                }
+              }}
+              className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end"
+            >
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Nova Palavra-passe (mín. 6 caracteres)</label>
+                <input
+                  type={showNewAdminPass ? 'text' : 'password'}
+                  value={newAdminPass}
+                  onChange={(e) => setNewAdminPass(e.target.value)}
+                  placeholder="Introduza a nova palavra-passe"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Confirmar Palavra-passe</label>
+                <input
+                  type={showNewAdminPass ? 'text' : 'password'}
+                  value={confirmAdminPass}
+                  onChange={(e) => setConfirmAdminPass(e.target.value)}
+                  placeholder="Repita a palavra-passe"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  required
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewAdminPass(!showNewAdminPass)}
+                  className="px-3 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold"
+                >
+                  {showNewAdminPass ? 'Ocultar' : 'Mostrar'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingAdminPass}
+                  className="flex-1 bg-slate-900 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all shadow-sm disabled:opacity-60"
+                >
+                  {isSavingAdminPass ? 'A guardar...' : 'Guardar Palavra-passe'}
+                </button>
+              </div>
+            </form>
           </div>
 
           {/* Card de Auditoria & Correção de Áreas de Atuação */}

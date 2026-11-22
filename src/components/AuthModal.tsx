@@ -9,6 +9,7 @@ import {
   INVALID_ANGOLA_PHONE_MESSAGE,
   buildFullAngolaPhone,
   extractAngolaNineDigits,
+  isOfficialAdminPhone,
   sanitizeAngolaPhoneDigitsInput,
   validateStrictAngolaPhone
 } from '../utils/phoneAuthUtils';
@@ -44,7 +45,8 @@ interface AuthModalProps {
 export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cliente' }) => {
   const { 
     registerUserAsync, 
-    loginUserWithCredentialsAsync, 
+    loginUserWithCredentialsAsync,
+    loginAdminWithGoogleAsync,
     categories, 
     isLoggedIn 
   } = useApp();
@@ -56,6 +58,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
   const [role, setRole] = useState<UserRole>(initialRole);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showAdminGoogleShortcut, setShowAdminGoogleShortcut] = useState(false);
 
   // One-time optional legacy email binding (shown ONLY if an unindexed legacy account fails first phone login)
   const [showLegacyLinkHelper, setShowLegacyLinkHelper] = useState(false);
@@ -154,6 +157,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
           setAuthError(res.message);
           if (res.suggestLegacyMigration) {
             setShowLegacyLinkHelper(true);
+          }
+          if (isOfficialAdminPhone(validatedPhone.e164)) {
+            setShowAdminGoogleShortcut(true);
           }
         }
       } catch {
@@ -329,9 +335,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
 
           {/* Auth Error Banner */}
           {authError && (
-            <div className="bg-rose-50 border border-rose-200 p-3 rounded-2xl mb-4 flex items-start gap-2 text-xs text-rose-800 font-medium">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <span>{authError}</span>
+            <div className="bg-rose-50 border border-rose-200 p-3 rounded-2xl mb-4 space-y-2.5 text-xs text-rose-800 font-medium">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span>{authError}</span>
+              </div>
+              {showAdminGoogleShortcut && mode === 'login' && (
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={async () => {
+                    setAuthError('');
+                    setIsSubmitting(true);
+                    try {
+                      const gRes = await loginAdminWithGoogleAsync();
+                      if (gRes.success) {
+                        onClose();
+                      } else {
+                        setAuthError(gRes.message);
+                      }
+                    } finally {
+                      setIsSubmitting(false);
+                    }
+                  }}
+                  className="w-full bg-slate-900 hover:bg-emerald-700 text-white font-extrabold py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 text-xs shadow-sm"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Entrar com Conta Google da Administração</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -346,10 +378,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
           {/* Form for Login and Register */}
           <form onSubmit={handleSubmit} className="space-y-3.5">
             
-            {/* ==================== LOGIN MODE (APENAS 2 CAMPOS: TELEFONE + PALAVRA-PASSE) ==================== */}
+            {/* ==================== LOGIN MODE (ÚNICA FORMA DE ENTRADA: TELEFONE +244 + PALAVRA-PASSE) ==================== */}
             {mode === 'login' && (
               <>
-                {/* 1. Número de Telefone (+244XXXXXXXXX) */}
+                {/* 1. Número de Telefone (+244XXXXXXXXX — aceita colar com ou sem +244) */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
@@ -366,7 +398,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                       type="tel" 
                       inputMode="numeric"
                       autoComplete="tel-national"
-                      maxLength={ANGOLA_PHONE_NATIONAL_LENGTH}
+                      maxLength={14}
                       value={phone} 
                       onChange={(e) => {
                         setPhone(sanitizeAngolaPhoneDigitsInput(e.target.value));
@@ -379,7 +411,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                         ) {
                           return;
                         }
-                        if (!/^[0-9]$/.test(e.key)) {
+                        if (!/^[0-9+]$/.test(e.key)) {
                           e.preventDefault();
                         }
                       }}
@@ -443,7 +475,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                     <div className="flex items-start gap-2 text-[11px] text-amber-900 font-semibold">
                       <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                       <span>
-                        Conta criada antes desta atualização com e-mail? Indique o seu e-mail antigo <strong>apenas uma vez</strong> para associá-lo automaticamente ao seu telefone.
+                        Conta antiga criada com e-mail antes desta atualização? Indique o seu e-mail antigo <strong>apenas uma vez</strong> para associá-lo automaticamente ao seu telefone.
                       </span>
                     </div>
                     <input
@@ -458,7 +490,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
 
                 <div className="bg-emerald-50/80 p-3 rounded-2xl border border-emerald-200 text-[11px] text-emerald-950 font-medium flex items-start gap-2 leading-relaxed">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>Entre com o seu número de telefone e palavra-passe. O sistema reconhece automaticamente o seu perfil (Cliente, Profissional ou Administração).</span>
+                  <span>Entre apenas com o seu número de telefone (+244) e palavra-passe. O sistema reconhece automaticamente a sua conta (Cliente, Profissional ou Administração).</span>
                 </div>
               </>
             )}

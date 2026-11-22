@@ -69,6 +69,19 @@ function isSafeHttpsGatewayUrl(rawUrl: string): boolean {
   }
 }
 
+function getOptionalSmsGatewayConfig(): {
+  configured: boolean;
+  providerUrl: string;
+  apiKey: string;
+  senderId: string;
+} {
+  const providerUrl = process.env.SMS_PROVIDER_URL?.trim() || "";
+  const apiKey = process.env.SMS_API_KEY?.trim() || "";
+  const senderId = process.env.SMS_SENDER_ID?.trim() || "JSmart";
+  const configured = Boolean(providerUrl && apiKey && isSafeHttpsGatewayUrl(providerUrl));
+  return { configured, providerUrl, apiKey, senderId };
+}
+
 function hashOtpScrypt(code: string, salt: string): string {
   return crypto.scryptSync(code, salt, 32).toString("hex");
 }
@@ -195,11 +208,9 @@ async function startServer() {
       return;
     }
 
-    const smsProviderUrl = process.env.SMS_PROVIDER_URL?.trim() || "";
-    const smsApiKey = process.env.SMS_API_KEY?.trim() || "";
-    const smsSenderId = process.env.SMS_SENDER_ID?.trim() || "JSmart";
+    const smsConfig = getOptionalSmsGatewayConfig();
 
-    if (smsProviderUrl && smsApiKey && isSafeHttpsGatewayUrl(smsProviderUrl)) {
+    if (smsConfig.configured) {
       const otpCode = String(crypto.randomInt(100000, 1000000));
       const salt = crypto.randomBytes(16).toString("hex");
       const sessionId = `rec_${crypto.randomBytes(16).toString("hex")}`;
@@ -214,15 +225,15 @@ async function startServer() {
       });
 
       try {
-        const smsRes = await fetch(smsProviderUrl, {
+        const smsRes = await fetch(smsConfig.providerUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${smsApiKey}`
+            Authorization: `Bearer ${smsConfig.apiKey}`
           },
           body: JSON.stringify({
             to: parsedPhone.e164,
-            from: smsSenderId,
+            from: smsConfig.senderId,
             message: `J Smart Services: o seu código de verificação é ${otpCode}. Válido por 10 minutos.`
           })
         });
@@ -324,10 +335,13 @@ async function startServer() {
       supportPhoneWhatsapp: "+244956011985",
       supportPhoneExpress: "+244956011985",
       authPrimaryIdentifier: "phone",
+      authSupportedIdentifiers: ["phone"],
       phoneCountryCode: "+244",
       phoneNationalDigits: 9,
       phoneFormat: "+244XXXXXXXXX",
       emailOptionalOnSignup: true,
+      smsVerificationRequiredForLogin: false,
+      smsProviderConfigured: getOptionalSmsGatewayConfig().configured,
       defaultCommissionPercent: 0,
       freeTrialDays: 30,
       proPlanMonthlyPriceKz: 3000,

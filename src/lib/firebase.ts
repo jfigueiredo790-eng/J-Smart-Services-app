@@ -4,9 +4,11 @@ import {
   initializeFirestore,
   getFirestore,
   enableNetwork,
+  disableNetwork,
   doc,
   getDocFromServer,
-  type Firestore
+  type Firestore,
+  type FirestoreSettings
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -17,15 +19,25 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 // Initialize Firebase Auth
 export const auth = getAuth(app);
 
-// Initialize Firestore with auto-detect long-polling (uses native Fetch/WebChannel streams first,
-// automatically falling back to long-polling only if a proxy blocks streaming).
+// Initialize Firestore with forced long-polling in browsers so mobile carrier proxies,
+// Android WebViews, and preview proxies never buffer open WebChannel streams indefinitely
+// (which causes the "Backend didn't respond within 10 seconds" timeout).
 const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+const isBrowser = typeof window !== 'undefined';
 
 function createFirestoreInstance(): Firestore {
-  const settings = {
-    experimentalAutoDetectLongPolling: true,
-    ignoreUndefinedProperties: true
-  };
+  const settings: FirestoreSettings = isBrowser
+    ? {
+        experimentalForceLongPolling: true,
+        experimentalLongPollingOptions: {
+          timeoutSeconds: 20
+        },
+        ignoreUndefinedProperties: true
+      }
+    : {
+        ignoreUndefinedProperties: true
+      };
+
   try {
     return dbId
       ? initializeFirestore(app, settings, dbId)
@@ -40,11 +52,31 @@ export const db: Firestore = createFirestoreInstance();
 // Initialize Firebase Storage
 export const storage = getStorage(app);
 
-// Automatically re-enable Firestore network when the device regains connectivity
-if (typeof window !== 'undefined') {
+// Keep Firestore network state synchronized with real browser online/offline & mobile resume events
+if (isBrowser) {
+  let hiddenAt = 0;
+
+  window.addEventListener('offline', () => {
+    disableNetwork(db).catch(() => {});
+  });
+
   window.addEventListener('online', () => {
     enableNetwork(db).catch(() => {});
   });
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+      } else if (document.visibilityState === 'visible') {
+        const wasHiddenLong = hiddenAt > 0 && Date.now() - hiddenAt > 30_000;
+        hiddenAt = 0;
+        if (navigator.onLine !== false && wasHiddenLong) {
+          enableNetwork(db).catch(() => {});
+        }
+      }
+    });
+  }
 }
 
 // Validate connection to Firestore without emitting false configuration errors on transient mobile offline drops
@@ -67,11 +99,13 @@ export async function testConnection(retryOnTransient = true): Promise<boolean> 
 
     const isTransientOffline =
       code === 'unavailable' ||
+      code === 'deadline-exceeded' ||
       message.includes('the client is offline') ||
-      message.includes('Could not reach Cloud Firestore backend');
+      message.includes('Could not reach Cloud Firestore backend') ||
+      message.includes("Backend didn't respond");
 
     if (isTransientOffline && retryOnTransient) {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 2000));
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         return false;
       }
@@ -87,10 +121,12 @@ export async function testConnection(retryOnTransient = true): Promise<boolean> 
 }
 
 // Defer initial connection probe slightly so browser networking settles cleanly after boot
-if (typeof window !== 'undefined') {
+if (isBrowser) {
   setTimeout(() => {
-    testConnection().catch(() => {});
-  }, 500);
+    if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+      testConnection().catch(() => {});
+    }
+  }, 800);
 }
 
 export default app;

@@ -204,6 +204,18 @@ export function isSyntheticPhoneAuthEmail(email?: string | null): boolean {
 }
 
 /**
+ * Validates a real user-facing email address for login or optional signup
+ * (explicitly rejecting internal synthetic phone-auth identifiers).
+ */
+export function isValidLoginEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed || trimmed.length > 200) return false;
+  if (isSyntheticPhoneAuthEmail(trimmed)) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+}
+
+/**
  * Returns a clean user-facing email (hiding synthetic phone auth identifiers).
  */
 export function getPublicUserEmail(email?: string | null): string {

@@ -42,12 +42,14 @@ import {
   normalizePhoneNumber,
   phoneToSyntheticAuthEmail,
   isSyntheticPhoneAuthEmail,
+  isValidLoginEmail,
   getPublicUserEmail,
   computePhoneIndexId,
   areSamePhoneNumber,
   isOfficialAdminPhone,
   OFFICIAL_ADMIN_EMAIL,
-  OFFICIAL_ADMIN_PRIMARY_PHONE_DISPLAY
+  OFFICIAL_ADMIN_PRIMARY_PHONE_DISPLAY,
+  OFFICIAL_ADMIN_PHONES_CANONICAL
 } from '../utils/phoneAuthUtils';
 import { CATEGORIES, DEFAULT_ADMIN_USER, MOCK_USERS, MOCK_PROFESSIONALS, MOCK_WORK_FEED_POSTS } from '../mockData';
 import { safeStorageGet, safeStorageSet, safeStorageRemove, sanitizeFeedPostsForStorage } from '../utils/storageUtils';
@@ -60,6 +62,11 @@ import {
   signInWithEmailAndPassword, 
   sendPasswordResetEmail,
   sendEmailVerification,
+  GoogleAuthProvider,
+  EmailAuthProvider,
+  signInWithPopup,
+  linkWithCredential,
+  updatePassword,
   signOut,
   onAuthStateChanged 
 } from 'firebase/auth';
@@ -218,6 +225,17 @@ interface AppContextType {
     role?: UserRole;
     suggestLegacyMigration?: boolean;
     needsAdminEmailVerification?: boolean;
+    providerDisabled?: boolean;
+  }>;
+  loginAdminWithGoogleAsync: () => Promise<{
+    success: boolean;
+    message: string;
+    role?: UserRole;
+  }>;
+  setAdminPhonePasswordAsync: (newPassword: string) => Promise<{
+    success: boolean;
+    message: string;
+    providerDisabled?: boolean;
   }>;
   
   // Account Access Recovery Methods (Phone-first)
@@ -524,6 +542,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const pendingWriteIdsRef = useRef<Set<string>>(new Set());
   const deletedIdsRef = useRef<Set<string>>(new Set());
   const forceSyncRef = useRef<(() => Promise<{ success: boolean; message: string }>) | null>(null);
+  const autoSyncedAdminUidRef = useRef<string | null>(null);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -1280,6 +1299,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (phoneForIndex) {
               syncPhoneIndexSilently(phoneForIndex);
             }
+            if (verifiedAdmin && fbEmailLower === OFFICIAL_ADMIN_EMAIL) {
+              for (const adminCanonDigits of OFFICIAL_ADMIN_PHONES_CANONICAL) {
+                syncPhoneIndexSilently(`+${adminCanonDigits}`);
+              }
+            }
           }
         } else if (isSuperAdminEmail || isAdminDoc || fbEmailLower === OFFICIAL_ADMIN_EMAIL) {
           const adminUser = stripSensitiveFields({
@@ -1297,7 +1321,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             return merged;
           });
           setIsLoggedIn(true);
-          syncPhoneIndexSilently(OFFICIAL_ADMIN_PRIMARY_PHONE_DISPLAY);
+          for (const adminCanonDigits of OFFICIAL_ADMIN_PHONES_CANONICAL) {
+            syncPhoneIndexSilently(`+${adminCanonDigits}`);
+          }
         }
       } catch (authErr) {
         logFirestoreWarning(authErr, OperationType.GET, `users/${fbUser.uid}`);
@@ -3456,8 +3482,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       const rawOptionalEmail = (userData.email || '').trim();
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (rawOptionalEmail && !emailRegex.test(rawOptionalEmail)) {
+      if (rawOptionalEmail && !isValidLoginEmail(rawOptionalEmail)) {
         return {
           success: false,
           message: 'O endereço de e-mail opcional introduzido é inválido. Corrija-o ou deixe o campo em branco.'
@@ -3505,20 +3530,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
 
-      // 1. Fail-closed Firebase Authentication registration using deterministic synthetic phone identifier
-      // Passwords are NEVER stored in Firestore or localStorage — Firebase Auth hashes them server-side (scrypt).
+      // 1. Fail-closed Firebase Authentication registration.
+      // Email is strictly optional: if supplied, use it so the user can sign in with EITHER phone (+244) OR email;
+      // if omitted, use the deterministic synthetic phone identifier so phone + password works without email or SMS.
+      const primaryAuthEmail = cleanOptionalEmail || syntheticAuthEmail;
       let firebaseUid = '';
       try {
-        const userCredential = await createUserWithEmailAndPassword(auth, syntheticAuthEmail, cleanPassword);
+        const userCredential = await createUserWithEmailAndPassword(auth, primaryAuthEmail, cleanPassword);
         firebaseUid = userCredential.user.uid;
       } catch (authErr: any) {
         if (authErr?.code === 'auth/email-already-in-use') {
           return {
             success: false,
-            message: 'Este número de telefone já está registado na J Smart Services. Por favor inicie sessão ou recupere a sua palavra-passe.'
+            message: cleanOptionalEmail
+              ? 'Este e-mail ou número de telefone já está registado na J Smart Services. Por favor inicie sessão ou recupere a sua palavra-passe.'
+              : 'Este número de telefone já está registado na J Smart Services. Por favor inicie sessão ou recupere a sua palavra-passe.'
           };
         } else if (authErr?.code === 'auth/weak-password') {
           return { success: false, message: 'Palavra-passe demasiado fraca. Utilize pelo menos 6 caracteres.' };
+        } else if (authErr?.code === 'auth/operation-not-allowed') {
+          return {
+            success: false,
+            message: 'O registo por telefone e palavra-passe requer que o método "E-mail/Palavra-passe" esteja ativado na Consola do Firebase (Authentication > Sign-in method).'
+          };
         } else {
           return {
             success: false,
@@ -3673,8 +3707,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         doc(db, 'phone_login_index', phoneIndexId),
         {
           uid: firebaseUid,
-          authMode: 'phone_synthetic',
-          authEmail: syntheticAuthEmail,
+          authMode: cleanOptionalEmail ? 'legacy_email' : 'phone_synthetic',
+          authEmail: primaryAuthEmail,
           hasRealEmail: Boolean(cleanOptionalEmail),
           updatedAt: nowIso
         },
@@ -3795,9 +3829,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     role?: UserRole;
     suggestLegacyMigration?: boolean;
     needsAdminEmailVerification?: boolean;
+    providerDisabled?: boolean;
   }> => {
     try {
-      const normalizedPhone = validateStrictAngolaPhone(phoneInput);
+      // Single login method: Angolan phone number (+244 + 9 digits, accepted with or without +244) + password
+      const normalizedPhone = normalizePhoneNumber(phoneInput);
       const passTrimmed = (passInput || '').trim();
 
       if (!normalizedPhone.isValid) {
@@ -3817,7 +3853,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const phoneIndexId = await computePhoneIndexId(normalizedPhone.e164);
       const syntheticEmail = phoneToSyntheticAuthEmail(normalizedPhone.e164);
 
-      // Build ordered list of Firebase Auth login identifiers for this phone (zero enumeration of other users)
+      // Build ordered list of Firebase Auth login identifiers for this phone (zero enumeration, no SMS required)
       const candidateAuthEmails: string[] = [];
       const addCandidate = (emailCandidate?: string | null) => {
         const clean = (emailCandidate || '').trim().toLowerCase();
@@ -3826,12 +3862,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       };
 
-      // 1) One-time legacy migration email (only if user explicitly supplied it to bind an old email account to this phone)
+      // 1) One-time legacy migration email (only if an unindexed old email account supplies it once to link)
       if (options?.legacyEmail) {
         addCandidate(options.legacyEmail);
       }
 
-      // 2) Privacy-preserving hashed phone_login_index lookup (no raw phone stored, no collection listing)
+      // 2) Privacy-preserving hashed phone_login_index lookup (resolves legacy email OR phone-native accounts)
       let hasIndexedMapping = false;
       if (phoneIndexId) {
         try {
@@ -3857,7 +3893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addCandidate(OFFICIAL_ADMIN_EMAIL);
       }
 
-      // 5) Real Firebase Auth verification (fail closed, server-verified scrypt hash)
+      // 5) Real Firebase Auth verification (fail closed, server-verified scrypt hash; no SMS required)
       let fbUser: any = null;
       let lastAuthErrorCode = '';
       for (const candidateEmail of candidateAuthEmails) {
@@ -3884,6 +3920,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       if (!fbUser) {
+        if (lastAuthErrorCode === 'auth/operation-not-allowed') {
+          return {
+            success: false,
+            providerDisabled: true,
+            message: isOfficialAdminLoginPhone
+              ? 'O login por telefone e palavra-passe está bloqueado no servidor Firebase (PASSWORD_LOGIN_DISABLED) porque o provedor "Email/Password" ainda está desativado na Consola do Firebase. Entre agora usando "Entrar com Conta Google da Administração" e ative "Email/Password" no Firebase Console.'
+              : 'O início de sessão por telefone e palavra-passe está temporariamente desativado na configuração do Firebase Authentication (Email/Password desativado). O administrador precisa de ativar este método na Consola do Firebase.'
+          };
+        }
         const shouldSuggestMigration = !hasIndexedMapping && !options?.legacyEmail && !isOfficialAdminLoginPhone;
         return {
           success: false,
@@ -3892,7 +3937,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ? 'Número de telefone ou palavra-passe incorretos. Se criou a sua conta anteriormente com e-mail, associe o seu número abaixo numa única vez.'
             : (lastAuthErrorCode === 'auth/network-request-failed'
                 ? 'Sem ligação à internet. Verifique a sua rede e tente novamente.'
-                : 'Número de telefone ou palavra-passe incorretos. Verifique os seus dados ou recupere a palavra-passe.')
+                : (isOfficialAdminLoginPhone
+                    ? 'A palavra-passe ainda não está associada à conta oficial de administrador ou está incorreta. Entre com "Entrar com Conta Google da Administração" e associe a sua palavra-passe no Painel Admin.'
+                    : 'Número de telefone ou palavra-passe incorretos. Verifique os seus dados ou recupere a palavra-passe.'))
         };
       }
 
@@ -3925,7 +3972,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const persistedPhone = userDocData?.phone || proDocData?.phone || normalizedPhone.e164;
       const normalizedStoredPhone = normalizePhoneNumber(persistedPhone);
       const finalE164Phone = normalizedStoredPhone.isValid ? normalizedStoredPhone.e164 : normalizedPhone.e164;
-      const finalDisplayPhone = finalE164Phone;
+      const finalDisplayPhone = persistedPhone || finalE164Phone;
 
       const baseProfile: User = stripSensitiveFields({
         ...(proDocData || {}),
@@ -3975,7 +4022,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         adminSubRole: finalRole === 'admin' ? (baseProfile.adminSubRole || 'super_admin') : baseProfile.adminSubRole
       });
 
-      // 7. Non-destructive background sync of normalized phone + phone_login_index for future phone-only logins
+      // 7. Non-destructive background sync of phone_login_index (never alters existing phone or user data)
       const nowIso = new Date().toISOString();
       if (phoneIndexId && fbUser.email) {
         const isSynth = isSyntheticPhoneAuthEmail(fbUser.email);
@@ -3992,12 +4039,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ).catch(() => {});
       }
 
-      // Ensure normalized phone fields are preserved on existing user doc without altering role/wallet/subscription
-      if (userDocData && (!userDocData.phoneE164 || !userDocData.phoneHash || !userDocData.phone)) {
+      // Preserve existing user's original phone untouched; only backfill missing phoneE164/phoneHash metadata
+      if (userDocData && (!userDocData.phoneE164 || !userDocData.phoneHash)) {
         setDoc(
           doc(db, 'users', fbUser.uid),
           {
-            phone: finalDisplayPhone,
+            ...(userDocData.phone ? {} : { phone: finalE164Phone }),
             phoneE164: finalE164Phone,
             ...(phoneIndexId ? { phoneHash: phoneIndexId } : {}),
             updatedAt: nowIso
@@ -4064,6 +4111,200 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err: any) {
       logFirestoreWarning(err, OperationType.GET, 'users');
       return { success: false, message: 'Erro ao iniciar sessão. Verifique a sua ligação e tente novamente.' };
+    }
+  };
+
+  // Verified Google Sign-In for Official Administrators (works immediately with Firebase Auth & Firestore isAdmin rules)
+  const loginAdminWithGoogleAsync = async (): Promise<{
+    success: boolean;
+    message: string;
+    role?: UserRole;
+  }> => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const credential = await signInWithPopup(auth, provider);
+      const fbUser = credential.user;
+
+      if (!fbUser) {
+        return { success: false, message: 'Não foi possível concluir a autenticação Google.' };
+      }
+
+      const [userSnap, adminSnap, adminPtSnap] = await Promise.allSettled([
+        getDoc(doc(db, 'users', fbUser.uid)),
+        getDoc(doc(db, 'admins', fbUser.uid)),
+        getDoc(doc(db, 'administradores', fbUser.uid))
+      ]);
+
+      const userDocData = userSnap.status === 'fulfilled' && userSnap.value.exists()
+        ? stripSensitiveFields({ id: userSnap.value.id, ...userSnap.value.data() } as User)
+        : null;
+
+      const fbEmailLower = (fbUser.email || '').trim().toLowerCase();
+      const isVerifiedSuperAdmin = Boolean(fbUser.emailVerified && fbEmailLower === OFFICIAL_ADMIN_EMAIL);
+      const hasAdminRecord =
+        isVerifiedSuperAdmin ||
+        (adminSnap.status === 'fulfilled' && adminSnap.value.exists()) ||
+        (adminPtSnap.status === 'fulfilled' && adminPtSnap.value.exists()) ||
+        userDocData?.role === 'admin';
+
+      if (!hasAdminRecord) {
+        await signOut(auth).catch(() => {});
+        return {
+          success: false,
+          message: `Acesso Recusado: a conta Google selecionada (${fbEmailLower || 'desconhecida'}) não possui privilégios de administrador autorizados.`
+        };
+      }
+
+      const persistedPhone = userDocData?.phone || '+244924835279';
+      const normalizedStored = normalizePhoneNumber(persistedPhone);
+      const finalPhone = normalizedStored.isValid ? normalizedStored.e164 : '+244924835279';
+      const nowIso = new Date().toISOString();
+
+      const adminProfile: User = stripSensitiveFields({
+        ...DEFAULT_ADMIN_USER,
+        ...(userDocData || {}),
+        id: fbUser.uid,
+        name: userDocData?.name || fbUser.displayName || DEFAULT_ADMIN_USER.name,
+        email: fbEmailLower || DEFAULT_ADMIN_USER.email,
+        phone: finalPhone,
+        phoneE164: finalPhone,
+        role: 'admin' as UserRole,
+        adminSubRole: (userDocData?.adminSubRole || 'super_admin') as AdminSubRole,
+        avatar: userDocData?.avatar || fbUser.photoURL || '',
+        verified: true,
+        createdAt: userDocData?.createdAt || nowIso,
+        updatedAt: nowIso
+      });
+
+      // Non-destructive sync of admin profile & official admin phone indexes (+244956011985 and +244924835279)
+      if (!userDocData) {
+        setDoc(doc(db, 'users', fbUser.uid), adminProfile, { merge: true }).catch(() => {});
+      }
+      if (!(adminSnap.status === 'fulfilled' && adminSnap.value.exists())) {
+        setDoc(
+          doc(db, 'admins', fbUser.uid),
+          {
+            uid: fbUser.uid,
+            email: fbEmailLower || OFFICIAL_ADMIN_EMAIL,
+            phone: finalPhone,
+            role: 'admin',
+            adminSubRole: adminProfile.adminSubRole || 'super_admin',
+            updatedAt: nowIso
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
+      if (fbEmailLower) {
+        for (const adminCanonDigits of OFFICIAL_ADMIN_PHONES_CANONICAL) {
+          computePhoneIndexId(`+${adminCanonDigits}`).then(idxId => {
+            if (!idxId) return;
+            setDoc(
+              doc(db, 'phone_login_index', idxId),
+              {
+                uid: fbUser.uid,
+                authMode: 'legacy_email',
+                authEmail: fbEmailLower,
+                hasRealEmail: true,
+                updatedAt: nowIso
+              },
+              { merge: true }
+            ).catch(() => {});
+          }).catch(() => {});
+        }
+      }
+
+      setFirebaseAuthUid(fbUser.uid);
+      loginUser(adminProfile, 'admin');
+      return {
+        success: true,
+        role: 'admin',
+        message: 'Acesso administrativo verificado com sucesso!'
+      };
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        return { success: false, message: 'Janela de autenticação Google fechada antes de concluir.' };
+      }
+      if (code === 'auth/popup-blocked') {
+        return { success: false, message: 'O navegador bloqueou a janela de autenticação. Permita pop-ups para este site e tente novamente.' };
+      }
+      if (code === 'auth/unauthorized-domain') {
+        return { success: false, message: 'Este domínio ainda precisa de estar autorizado em Firebase Authentication > Settings > Authorized domains.' };
+      }
+      return { success: false, message: 'Não foi possível concluir o login Google da administração. Tente novamente.' };
+    }
+  };
+
+  // Allows an already verified Admin to securely link or update their real Firebase Auth password for phone login (+244924835279 / +244956011985)
+  const setAdminPhonePasswordAsync = async (
+    newPassword: string
+  ): Promise<{ success: boolean; message: string; providerDisabled?: boolean }> => {
+    const cleanPassword = (newPassword || '').trim();
+    if (!auth.currentUser || currentUser.role !== 'admin') {
+      return { success: false, message: 'Apenas o administrador autenticado pode definir ou alterar a palavra-passe administrativa.' };
+    }
+    if (cleanPassword.length < 6) {
+      return { success: false, message: 'A palavra-passe deve conter pelo menos 6 caracteres.' };
+    }
+    const adminEmail = (auth.currentUser.email || '').trim().toLowerCase();
+    if (!adminEmail) {
+      return { success: false, message: 'A sessão atual do administrador não possui e-mail associado.' };
+    }
+
+    try {
+      const hasPasswordProvider = auth.currentUser.providerData.some(p => p.providerId === 'password');
+      if (hasPasswordProvider) {
+        await updatePassword(auth.currentUser, cleanPassword);
+      } else {
+        const cred = EmailAuthProvider.credential(adminEmail, cleanPassword);
+        await linkWithCredential(auth.currentUser, cred);
+      }
+
+      const nowIso = new Date().toISOString();
+      for (const adminCanonDigits of OFFICIAL_ADMIN_PHONES_CANONICAL) {
+        const idxId = await computePhoneIndexId(`+${adminCanonDigits}`);
+        if (idxId) {
+          await setDoc(
+            doc(db, 'phone_login_index', idxId),
+            {
+              uid: auth.currentUser.uid,
+              authMode: 'legacy_email',
+              authEmail: adminEmail,
+              hasRealEmail: true,
+              updatedAt: nowIso
+            },
+            { merge: true }
+          ).catch(() => {});
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Palavra-passe administrativa ativada com sucesso! Já pode entrar com +244924835279 ou +244956011985 e a sua palavra-passe.'
+      };
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/operation-not-allowed') {
+        return {
+          success: false,
+          providerDisabled: true,
+          message: 'O método "E-mail/Palavra-passe" ainda está desativado na Consola do Firebase. Ative-o em Authentication > Sign-in method > Email/Password e volte a guardar.'
+        };
+      }
+      if (code === 'auth/requires-recent-login') {
+        return {
+          success: false,
+          message: 'Por segurança, termine sessão e volte a entrar com Google antes de alterar a palavra-passe.'
+        };
+      }
+      if (code === 'auth/weak-password') {
+        return { success: false, message: 'Palavra-passe demasiado fraca. Utilize pelo menos 6 caracteres.' };
+      }
+      return {
+        success: false,
+        message: 'Não foi possível guardar a palavra-passe administrativa. Verifique a ligação e tente novamente.'
+      };
     }
   };
 
@@ -4267,14 +4508,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  // Non-destructive Admin helper: normalizes existing accounts' phones and indexes them for phone-only login
+  // Non-destructive Admin helper: scans ALL live Firestore accounts (users, professionals, admins)
+  // and indexes their existing phone numbers into phone_login_index WITHOUT modifying existing phones or data
   const migrateLegacyAccountsPhoneIndexAsync = async (): Promise<{
     success: boolean;
     migratedCount: number;
     skippedCount: number;
     message: string;
   }> => {
-    if (currentUser.role !== 'admin' || !auth.currentUser) {
+    const fbCurrentUser = auth.currentUser;
+    const isVerifiedSuperAdminSession = Boolean(
+      fbCurrentUser?.emailVerified &&
+      (fbCurrentUser.email || '').trim().toLowerCase() === OFFICIAL_ADMIN_EMAIL
+    );
+    if (!fbCurrentUser || (currentUser.role !== 'admin' && !isVerifiedSuperAdminSession)) {
       return {
         success: false,
         migratedCount: 0,
@@ -4284,7 +4531,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      const mergedById = new Map<string, User>();
+      const mergedById = new Map<string, Partial<User> & Record<string, any>>();
+
+      // 1. Read LIVE documents directly from Firestore collections (clients, professionals, admins)
+      const [liveUsersSnap, liveProsSnap, liveAdminsSnap, liveAdminsPtSnap] = await Promise.allSettled([
+        getDocs(collection(db, 'users')),
+        getDocs(collection(db, 'professionals')),
+        getDocs(collection(db, 'admins')),
+        getDocs(collection(db, 'administradores'))
+      ]);
+
+      const extractRawPhone = (record: Record<string, any>): string => {
+        const candidates = [
+          record.phone,
+          record.phoneE164,
+          record.phoneNumber,
+          record.telefone,
+          record.whatsapp
+        ];
+        for (const c of candidates) {
+          if (typeof c === 'string' && c.trim().length > 0) return c.trim();
+        }
+        return '';
+      };
+
+      const ingestSnap = (snapResult: PromiseSettledResult<any>) => {
+        if (snapResult.status !== 'fulfilled') return;
+        snapResult.value.forEach((docSnap: any) => {
+          const rawDoc = docSnap.data() || {};
+          const data = stripSensitiveFields({ id: docSnap.id, ...rawDoc } as User) as Partial<User> & Record<string, any>;
+          if (!data.id || data.isDeleted || isFictitiousOrInvalidUser(data)) return;
+          const prev = mergedById.get(data.id) || {};
+          const extractedPhone = extractRawPhone(rawDoc) || extractRawPhone(prev);
+          mergedById.set(data.id, {
+            ...prev,
+            ...data,
+            phone: extractedPhone || prev.phone,
+            email: data.email || prev.email
+          });
+        });
+      };
+
+      ingestSnap(liveUsersSnap);
+      ingestSnap(liveProsSnap);
+      ingestSnap(liveAdminsSnap);
+      ingestSnap(liveAdminsPtSnap);
+
+      // Include any in-memory hydrated accounts as fallback
       for (const u of [...allUsers, ...professionals]) {
         if (!u?.id || u.isDeleted || isFictitiousOrInvalidUser(u)) continue;
         if (!mergedById.has(u.id)) {
@@ -4297,7 +4590,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const nowIso = new Date().toISOString();
 
       for (const [uid, account] of mergedById.entries()) {
-        const norm = normalizePhoneNumber(account.phone);
+        const norm = normalizePhoneNumber(extractRawPhone(account));
         if (!norm.isValid) {
           skippedCount += 1;
           continue;
@@ -4316,7 +4609,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const authMode = publicEmail ? 'legacy_email' : 'phone_synthetic';
 
         try {
-          // Non-destructive merge: NEVER deletes or overwrites role/name/posts/wallet/subscriptions
+          // Non-destructive index write ONLY: NEVER modifies existing phone string, role, posts, chats, reviews, or balances
           await setDoc(
             doc(db, 'phone_login_index', idxId),
             {
@@ -4328,22 +4621,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             },
             { merge: true }
           );
-
-          if (account.phone !== norm.e164 || account.phoneE164 !== norm.e164 || account.phoneHash !== idxId) {
-            await setDoc(
-              doc(db, 'users', uid),
-              {
-                phone: norm.e164,
-                phoneE164: norm.e164,
-                phoneHash: idxId,
-                updatedAt: nowIso
-              },
-              { merge: true }
-            );
-          }
           migratedCount += 1;
         } catch {
           skippedCount += 1;
+        }
+      }
+
+      // Ensure both official Super Admin phones (+244924835279 and +244956011985) map to the existing verified admin UID
+      const fbAdminEmail = (auth.currentUser.email || '').trim().toLowerCase();
+      if (fbAdminEmail === OFFICIAL_ADMIN_EMAIL) {
+        for (const adminCanonDigits of OFFICIAL_ADMIN_PHONES_CANONICAL) {
+          const adminIdxId = await computePhoneIndexId(`+${adminCanonDigits}`);
+          if (adminIdxId) {
+            await setDoc(
+              doc(db, 'phone_login_index', adminIdxId),
+              {
+                uid: auth.currentUser.uid,
+                authMode: 'legacy_email',
+                authEmail: OFFICIAL_ADMIN_EMAIL,
+                hasRealEmail: true,
+                updatedAt: nowIso
+              },
+              { merge: true }
+            ).catch(() => {});
+          }
         }
       }
 
@@ -4351,7 +4652,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         success: true,
         migratedCount,
         skippedCount,
-        message: `Sincronização concluída sem perda de dados: ${migratedCount} conta(s) preparada(s) para entrada por telefone (${skippedCount} ignorada(s)).`
+        message: `Sincronização concluída sem alterar dados nem números originais: ${migratedCount} conta(s) antiga(s) indexada(s) para entrada por telefone (${skippedCount} sem número válido).`
       };
     } catch {
       return {
@@ -4362,6 +4663,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
   };
+
+  // Automatically execute the idempotent, non-destructive phone index sync once whenever a verified Admin logs in
+  useEffect(() => {
+    if (!isLoggedIn || currentUser.role !== 'admin' || !firebaseAuthUid) return;
+    if (autoSyncedAdminUidRef.current === firebaseAuthUid) return;
+    autoSyncedAdminUidRef.current = firebaseAuthUid;
+    migrateLegacyAccountsPhoneIndexAsync().catch(() => {});
+  }, [isLoggedIn, currentUser.role, firebaseAuthUid]);
 
   const sendAdminVerificationEmailAsync = async (): Promise<{ success: boolean; message: string }> => {
     if (!auth.currentUser) {
@@ -5869,6 +6178,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateUserProfile,
       registerUserAsync,
       loginUserWithCredentialsAsync,
+      loginAdminWithGoogleAsync,
+      setAdminPhonePasswordAsync,
       requestPasswordRecoveryOtpAsync,
       verifyRecoveryOtpAsync,
       resetAccountPasswordAsync,

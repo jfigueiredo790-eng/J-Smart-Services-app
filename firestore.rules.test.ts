@@ -27,6 +27,7 @@ import {
   normalizePhoneNumber,
   phoneToSyntheticAuthEmail,
   isSyntheticPhoneAuthEmail,
+  isValidLoginEmail,
   getPublicUserEmail,
   computePhoneIndexId,
   areSamePhoneNumber,
@@ -341,23 +342,39 @@ describe('J Smart Services Security Rules & General Update Verification', () => 
     expect(rulesText).toContain("!('passwordHash' in data)");
   });
 
-  it('19. Enforces phone-only 2-field login UI (no mandatory email) and password visibility toggle in AuthModal & AdminLoginPage', () => {
+  it('19. Enforces single phone+password login UI (with or without +244 normalization), optional email on signup, and password toggle', () => {
     const authModalText = fs.readFileSync(path.resolve(process.cwd(), 'src/components/AuthModal.tsx'), 'utf8');
     const adminLoginText = fs.readFileSync(path.resolve(process.cwd(), 'src/components/AdminLoginPage.tsx'), 'utf8');
     const recoveryModalText = fs.readFileSync(path.resolve(process.cwd(), 'src/components/AccountRecoveryModal.tsx'), 'utf8');
+    const appCtxText = fs.readFileSync(path.resolve(process.cwd(), 'src/context/AppContext.tsx'), 'utf8');
 
-    // AuthModal login uses phone + password with show/hide toggle and NO "Firebase Auth" label
+    // Phone normalization recognizes the exact same account with or without +244
+    expect(normalizePhoneNumber('924835279').e164).toBe('+244924835279');
+    expect(normalizePhoneNumber('+244924835279').e164).toBe('+244924835279');
+    expect(normalizePhoneNumber('+244 924 835 279').e164).toBe('+244924835279');
+    expect(normalizePhoneNumber('244924835279').e164).toBe('+244924835279');
+    expect(isValidLoginEmail('cliente@exemplo.ao')).toBe(true);
+    expect(isValidLoginEmail('u_244923456789@phone.jsmartservices.com')).toBe(false);
+
+    // AuthModal login is strictly 2 fields: phone + password (no email login tab, no "Firebase Auth" label)
     expect(authModalText).not.toContain('Firebase Auth');
+    expect(authModalText).not.toContain('Endereço de e-mail *');
     expect(authModalText).toContain('Número de telefone *');
     expect(authModalText).toContain('Palavra-passe *');
     expect(authModalText).toContain("aria-label={showPassword ? 'Ocultar palavra-passe' : 'Mostrar palavra-passe'}");
     expect(authModalText).toContain('(Opcional)');
 
-    // AdminLoginPage uses phone + password with show/hide toggle and NO hardcoded admin passwords
+    // AdminLoginPage uses strictly phone + password form (no email login tab, no hardcoded passwords)
+    expect(adminLoginText).not.toContain('E-mail administrativo *');
     expect(adminLoginText).toContain('Número de telefone *');
     expect(adminLoginText).toContain('Palavra-passe *');
     expect(adminLoginText).toContain("aria-label={showPassword ? 'Ocultar palavra-passe' : 'Mostrar palavra-passe'}");
     expect(adminLoginText).toContain("res.role !== 'admin'");
+
+    // AppContext supports non-destructive live migration of legacy accounts into phone_login_index
+    expect(appCtxText).toContain('migrateLegacyAccountsPhoneIndexAsync');
+    expect(appCtxText).toContain("getDocs(collection(db, 'users'))");
+    expect(appCtxText).toContain("getDocs(collection(db, 'professionals'))");
 
     // AccountRecoveryModal is phone-first and never forces email or exposes OTP codes
     expect(recoveryModalText).toContain('Número de Telefone da Conta *');
@@ -381,19 +398,25 @@ describe('J Smart Services Security Rules & General Update Verification', () => 
     expect(workerText).toContain("authPrimaryIdentifier: 'phone'");
   });
 
-  it('21. Keeps SMS_PROVIDER_URL, SMS_API_KEY, and SMS_SENDER_ID unconfigured and strictly optional without blocking auth', () => {
+  it('21. Keeps SMS_PROVIDER_URL, SMS_API_KEY, and SMS_SENDER_ID commented/optional so setup, login, and deployment never block', () => {
     const envExampleText = fs.readFileSync(path.resolve(process.cwd(), '.env.example'), 'utf8');
     const serverText = fs.readFileSync(path.resolve(process.cwd(), 'server.ts'), 'utf8');
     const workerText = fs.readFileSync(path.resolve(process.cwd(), 'src/worker.ts'), 'utf8');
 
-    expect(envExampleText).toContain('SMS_PROVIDER_URL=""');
-    expect(envExampleText).toContain('SMS_API_KEY=""');
-    expect(envExampleText).toContain('SMS_SENDER_ID=""');
+    // Commented out in .env.example so deployment/setup does not prompt or block for SMS secrets
+    expect(envExampleText).toContain('# SMS_PROVIDER_URL=""');
+    expect(envExampleText).toContain('# SMS_API_KEY=""');
+    expect(envExampleText).toContain('# SMS_SENDER_ID=""');
+    expect(envExampleText).not.toMatch(/^SMS_PROVIDER_URL=/m);
+    expect(envExampleText).not.toMatch(/^SMS_API_KEY=/m);
+    expect(envExampleText).not.toMatch(/^SMS_SENDER_ID=/m);
 
-    // Both backends treat SMS vars as optional and return a clean HTTP 200 fallback when unconfigured
+    // Both backends keep SMS integration ready as strictly optional, never require SMS for login, and never fabricate SMS delivery
     expect(workerText).toContain('SMS_PROVIDER_URL?: string;');
     expect(workerText).toContain('SMS_API_KEY?: string;');
     expect(workerText).toContain('SMS_SENDER_ID?: string;');
+    expect(serverText).toContain('smsVerificationRequiredForLogin: false');
+    expect(workerText).toContain('smsVerificationRequiredForLogin: false');
     expect(serverText).toContain('deliveryChannel: "fallback_verified"');
     expect(workerText).toContain("deliveryChannel: 'fallback_verified'");
   });
@@ -422,5 +445,24 @@ describe('J Smart Services Security Rules & General Update Verification', () => 
     expect(workerText).toContain('/^\\+244[0-9]{9}$/');
     expect(workerText).toContain('/api/v1/auth/validate-phone');
     expect(workerText).toContain('Introduza um número de telefone válido de Angola.');
+  });
+
+  it('23. Supports immediate verified Google Admin sign-in and secure admin phone password linking without hardcoded passwords', () => {
+    const appCtxText = fs.readFileSync(path.resolve(process.cwd(), 'src/context/AppContext.tsx'), 'utf8');
+    const adminLoginText = fs.readFileSync(path.resolve(process.cwd(), 'src/components/AdminLoginPage.tsx'), 'utf8');
+    const adminDashText = fs.readFileSync(path.resolve(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf8');
+
+    // Both official admin phones are recognized
+    expect(isOfficialAdminPhone('+244924835279')).toBe(true);
+    expect(isOfficialAdminPhone('+244956011985')).toBe(true);
+
+    // Verified Google Admin sign-in + password linking present, zero hardcoded passwords
+    expect(appCtxText).toContain('loginAdminWithGoogleAsync');
+    expect(appCtxText).toContain('setAdminPhonePasswordAsync');
+    expect(appCtxText).toContain('auth/operation-not-allowed');
+    expect(appCtxText).not.toContain('admin924');
+    expect(adminLoginText).toContain('Entrar com Conta Google da Administração');
+    expect(adminLoginText).not.toContain('admin924');
+    expect(adminDashText).toContain('setAdminPhonePasswordAsync');
   });
 });

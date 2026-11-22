@@ -16,7 +16,7 @@ import {
 import { 
   ShieldCheck, 
   Lock, 
-  Phone, 
+  Phone,
   ArrowRight, 
   AlertCircle, 
   ArrowLeft,
@@ -35,6 +35,7 @@ interface AdminLoginPageProps {
 export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
   const { 
     loginUserWithCredentialsAsync,
+    loginAdminWithGoogleAsync,
     setActiveTab, 
     setIsLoggedIn
   } = useApp();
@@ -44,12 +45,37 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [error, setError] = useState('');
+  const [providerDisabledNotice, setProviderDisabledNotice] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+
+  const handleAdminGoogleLogin = async () => {
+    setError('');
+    setSuccessMsg('');
+    setIsGoogleSubmitting(true);
+    try {
+      const res = await loginAdminWithGoogleAsync();
+      if (!res.success) {
+        setError(res.message);
+        return;
+      }
+      setSuccessMsg('Acesso administrativo confirmado. A abrir o Painel Administrativo...');
+      setTimeout(() => {
+        setIsLoggedIn(true);
+        setActiveTab('admin');
+      }, 300);
+    } catch {
+      setError('Não foi possível concluir o login Google da administração. Tente novamente.');
+    } finally {
+      setIsGoogleSubmitting(false);
+    }
+  };
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setProviderDisabledNotice(false);
     setSuccessMsg('');
 
     const fullPhone = buildFullAngolaPhone(adminPhone);
@@ -71,6 +97,9 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
       const res = await loginUserWithCredentialsAsync(validatedPhone.e164, passTrimmed, 'admin');
 
       if (!res.success) {
+        if (res.providerDisabled) {
+          setProviderDisabledNotice(true);
+        }
         setError(res.message || 'Acesso Recusado: Número de telefone ou palavra-passe incorretos.');
         return;
       }
@@ -170,7 +199,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
         {/* Form (Apenas 2 campos: Número de telefone + Palavra-passe) */}
         <form onSubmit={handleAdminLogin} className="space-y-4">
           
-          {/* 1. Número de Telefone (+244XXXXXXXXX) */}
+          {/* 1. Número de Telefone (+244XXXXXXXXX — aceita com ou sem +244) */}
           <div>
             <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
@@ -187,7 +216,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
                 type="tel"
                 inputMode="numeric"
                 autoComplete="tel-national"
-                maxLength={ANGOLA_PHONE_NATIONAL_LENGTH}
+                maxLength={14}
                 value={adminPhone}
                 onChange={(e) => {
                   setAdminPhone(sanitizeAngolaPhoneDigitsInput(e.target.value));
@@ -200,11 +229,11 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
                   ) {
                     return;
                   }
-                  if (!/^[0-9]$/.test(e.key)) {
+                  if (!/^[0-9+]$/.test(e.key)) {
                     e.preventDefault();
                   }
                 }}
-                placeholder="956011985"
+                placeholder="924835279"
                 className="w-full text-xs font-bold tracking-wider p-3.5 bg-transparent text-white placeholder-slate-500 focus:outline-none"
                 required
                 autoFocus
@@ -261,9 +290,9 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isGoogleSubmitting}
             className={`w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 rounded-xl shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 text-xs mt-2 ${
-              isSubmitting ? 'opacity-70 cursor-not-allowed' : ''
+              isSubmitting || isGoogleSubmitting ? 'opacity-70 cursor-not-allowed' : ''
             }`}
           >
             {isSubmitting ? (
@@ -273,13 +302,50 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onCancel }) => {
               </>
             ) : (
               <>
-                <span>Entrar no Painel Administrativo</span>
+                <span>Entrar com Telefone e Palavra-passe</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
 
         </form>
+
+        {/* Divider + Verified Google Admin Sign-In */}
+        <div className="my-5 flex items-center gap-3">
+          <div className="h-px flex-1 bg-slate-800" />
+          <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">ou acesso oficial verificado</span>
+          <div className="h-px flex-1 bg-slate-800" />
+        </div>
+
+        <button
+          type="button"
+          onClick={handleAdminGoogleLogin}
+          disabled={isGoogleSubmitting || isSubmitting}
+          className={`w-full bg-white hover:bg-slate-100 text-slate-900 font-extrabold py-3.5 px-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2.5 text-xs ${
+            isGoogleSubmitting || isSubmitting ? 'opacity-70 cursor-not-allowed' : ''
+          }`}
+        >
+          {isGoogleSubmitting ? (
+            <>
+              <div className="w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+              <span>A verificar conta Google da administração...</span>
+            </>
+          ) : (
+            <>
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Entrar com Conta Google da Administração</span>
+            </>
+          )}
+        </button>
+
+        {providerDisabledNotice && (
+          <div className="mt-4 bg-amber-950/60 border border-amber-500/40 rounded-2xl p-3.5 text-[11px] text-amber-100 space-y-1.5 leading-relaxed">
+            <p className="font-extrabold text-amber-300">Como ativar também o login por Telefone + Palavra-passe:</p>
+            <p>1. Entre agora acima com <strong>Entrar com Conta Google da Administração</strong>.</p>
+            <p>2. Na Consola do Firebase, ative <strong>Authentication → Sign-in method → Email/Password</strong>.</p>
+            <p>3. No Painel Admin (separador <strong>Segurança / Auditoria</strong>), defina a palavra-passe para <strong>+244924835279</strong>.</p>
+          </div>
+        )}
 
         {/* Back to main portal button */}
         <div className="pt-6 mt-6 border-t border-slate-800 text-center">

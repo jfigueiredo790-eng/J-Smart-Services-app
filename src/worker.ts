@@ -102,6 +102,19 @@ function isSafeGatewayUrlWorker(rawUrl: string): boolean {
   }
 }
 
+function getOptionalSmsGatewayConfigWorker(env: Env): {
+  configured: boolean;
+  providerUrl: string;
+  apiKey: string;
+  senderId: string;
+} {
+  const providerUrl = env.SMS_PROVIDER_URL?.trim() || '';
+  const apiKey = env.SMS_API_KEY?.trim() || '';
+  const senderId = env.SMS_SENDER_ID?.trim() || 'JSmart';
+  const configured = Boolean(providerUrl && apiKey && isSafeGatewayUrlWorker(providerUrl));
+  return { configured, providerUrl, apiKey, senderId };
+}
+
 async function hashOtpWebCrypto(code: string, saltHex: string): Promise<string> {
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveBits']);
@@ -314,11 +327,9 @@ export default {
         );
       }
 
-      const smsUrl = env.SMS_PROVIDER_URL?.trim() || '';
-      const smsKey = env.SMS_API_KEY?.trim() || '';
-      const smsSender = env.SMS_SENDER_ID?.trim() || 'JSmart';
+      const smsConfig = getOptionalSmsGatewayConfigWorker(env);
 
-      if (smsUrl && smsKey && isSafeGatewayUrlWorker(smsUrl)) {
+      if (smsConfig.configured) {
         const otpCode = generateCryptoSixDigitCode();
         const saltHex = randomHex(16);
         const sessionId = `rec_${randomHex(16)}`;
@@ -334,15 +345,15 @@ export default {
         });
 
         try {
-          const smsRes = await fetch(smsUrl, {
+          const smsRes = await fetch(smsConfig.providerUrl, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${smsKey}`
+              Authorization: `Bearer ${smsConfig.apiKey}`
             },
             body: JSON.stringify({
               to: parsedPhone.e164,
-              from: smsSender,
+              from: smsConfig.senderId,
               message: `J Smart Services: o seu código de verificação é ${otpCode}. Válido por 10 minutos.`
             })
           });
@@ -456,10 +467,13 @@ export default {
           supportPhoneWhatsapp: '+244956011985',
           supportPhoneExpress: '+244956011985',
           authPrimaryIdentifier: 'phone',
+          authSupportedIdentifiers: ['phone'],
           phoneCountryCode: '+244',
           phoneNationalDigits: 9,
           phoneFormat: '+244XXXXXXXXX',
           emailOptionalOnSignup: true,
+          smsVerificationRequiredForLogin: false,
+          smsProviderConfigured: getOptionalSmsGatewayConfigWorker(env).configured,
           defaultCommissionPercent: 0,
           freeTrialDays: 30,
           proPlanMonthlyPriceKz: 3000,
