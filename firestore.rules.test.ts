@@ -19,6 +19,13 @@ import {
 } from './src/utils/planUtils';
 import { runFullSystemTestSuite } from './src/utils/systemTestSuite';
 import {
+  ALL_USER_REFERENCE_COLLECTIONS,
+  PRIORITY_TEST_LEGACY_ACCOUNT,
+  PROTECTED_ADMIN_UIDS,
+  isProtectedAdminAccount,
+  looksLikeFirebaseAuthUid
+} from './src/utils/legacyMigrationService';
+import {
   INVALID_ANGOLA_PHONE_MESSAGE,
   validateStrictAngolaPhone,
   sanitizeAngolaPhoneDigitsInput,
@@ -464,5 +471,69 @@ describe('J Smart Services Security Rules & General Update Verification', () => 
     expect(adminLoginText).toContain('Entrar com Conta Google da Administração');
     expect(adminLoginText).not.toContain('admin924');
     expect(adminDashText).toContain('setAdminPhonePasswordAsync');
+  });
+
+  it('24. Enforces Starter Tier global diagnostic, batch migration safety, zero-deletion relink guarantees, and all 23 Firestore collections coverage', () => {
+    const migrationServiceText = fs.readFileSync(path.resolve(process.cwd(), 'src/utils/legacyMigrationService.ts'), 'utf8');
+    const migrationHubText = fs.readFileSync(path.resolve(process.cwd(), 'src/components/LegacyMigrationHub.tsx'), 'utf8');
+
+    // Strictly Starter Tier compatible: ZERO firebase-admin imports and ZERO deleteDoc calls anywhere in the migration engine
+    expect(migrationServiceText).not.toContain('firebase-admin');
+    expect(migrationServiceText).not.toContain('deleteDoc(');
+    expect(migrationServiceText).toContain('deletedDocumentsCount: 0');
+    expect(migrationServiceText).toContain('legacyArchiveOnly: true');
+
+    // Starter Tier batch migration worker uses isolated in-memory secondary Auth app, cleans up with deleteApp, verifies integrity, and supports sequential auto-stop execution
+    expect(migrationServiceText).toContain('executeLegacyBatchMigrationSafe');
+    expect(migrationServiceText).toContain('executeGlobalSequentialLegacyMigrationSafe');
+    expect(migrationServiceText).toContain('stopOnCriticalError');
+    expect(migrationServiceText).toContain('inMemoryPersistence');
+    expect(migrationServiceText).toContain('deleteApp(secondaryApp)');
+    expect(migrationServiceText).toContain('verifyRelinkIntegritySafe');
+    expect(migrationServiceText).toContain('eligibleStarterTierBatchCount');
+    expect(migrationServiceText).toContain('manualInterventionRequiredCount');
+
+    // Verifies ALL user-referencing collections are included in the audit
+    expect(ALL_USER_REFERENCE_COLLECTIONS.length).toBeGreaterThanOrEqual(23);
+    for (const col of [
+      'users',
+      'professionals',
+      'professionals_public',
+      'phone_login_index',
+      'service_requests',
+      'chat_messages',
+      'conversations',
+      'reviews',
+      'wallet_transactions',
+      'posts',
+      'work_feed_posts',
+      'app_notifications',
+      'reports',
+      'support_tickets',
+      'trial_claims'
+    ]) {
+      expect(ALL_USER_REFERENCE_COLLECTIONS).toContain(col);
+    }
+
+    // Accurately distinguishes legacy IDs from real Firebase Auth UIDs and strictly protects official admin accounts
+    expect(looksLikeFirebaseAuthUid('user-1786485151147')).toBe(false);
+    expect(looksLikeFirebaseAuthUid('user-admin-1')).toBe(false);
+    expect(looksLikeFirebaseAuthUid('UK0UyCKLjcNgLUlBAJch8U9BADM2')).toBe(true);
+    expect(PROTECTED_ADMIN_UIDS).toContain('user-admin-1');
+    expect(PROTECTED_ADMIN_UIDS).toContain('UK0UyCKLjcNgLUlBAJch8U9BADM2');
+    expect(isProtectedAdminAccount('user-admin-1', 'admin', 'jfigueiredo790@gmail.com')).toBe(true);
+    expect(isProtectedAdminAccount('UK0UyCKLjcNgLUlBAJch8U9BADM2', 'admin', 'jfigueiredo790@gmail.com')).toBe(true);
+    expect(isProtectedAdminAccount('user-1786485151147', 'cliente', 'mariakumeso1966@gmail.com')).toBe(false);
+
+    // Priority test account metadata preserved and Dry-Run + safe abort + sequential global runner enforced in UI
+    expect(PRIORITY_TEST_LEGACY_ACCOUNT.legacyUid).toBe('user-1786485151147');
+    expect(PRIORITY_TEST_LEGACY_ACCOUNT.phone).toBe('+244944926697');
+    expect(PRIORITY_TEST_LEGACY_ACCOUNT.email).toBe('mariakumeso1966@gmail.com');
+    expect(migrationHubText).toContain('Exclusivamente Leitura');
+    expect(migrationHubText).toContain('Executar Recuperação Global Automática');
+    expect(migrationHubText).toContain('isBatchDryRunValid');
+    expect(migrationHubText).toContain('Interromper Lote com Segurança');
+    expect(migrationHubText).toContain('isDryRunValidForCurrentInputs');
+    expect(migrationHubText).toContain('sendLegacyAccountPasswordResetAsync');
   });
 });

@@ -56,6 +56,19 @@ import { safeStorageGet, safeStorageSet, safeStorageRemove, sanitizeFeedPostsFor
 import { sanitizeMediaUrl, stripSensitiveFields, sanitizePlatformSettings, computeSha256Hex } from '../utils/securityUtils';
 import { logFirestoreWarning, OperationType } from '../utils/firestoreErrors';
 import { OFFICIAL_APP_URL } from '../config/domain';
+import {
+  generateLegacyAccountsReadOnlyReport,
+  relinkSingleLegacyAccountSafe,
+  executeLegacyBatchMigrationSafe,
+  executeGlobalSequentialLegacyMigrationSafe,
+  sendLegacyPasswordResetEmailSafe,
+  LegacyAccountsReadOnlyReport,
+  RelinkLegacyAccountResult,
+  BatchMigrationResult,
+  GlobalMigrationProgress,
+  GlobalSequentialMigrationResult,
+  DEFAULT_MIGRATION_BATCH_SIZE
+} from '../utils/legacyMigrationService';
 import { db, auth } from '../lib/firebase';
 import { 
   createUserWithEmailAndPassword, 
@@ -306,6 +319,32 @@ interface AppContextType {
     totalFirestoreAccounts?: number;
     diagnosisCode?: 'NOT_INDEXED' | 'INDEX_MISMATCH_SYNTHETIC' | 'INDEX_OK_LEGACY_UID_NO_AUTH' | 'INDEX_OK_CHECK_AUTH_USER' | 'NO_FIRESTORE_ACCOUNT' | 'ACCOUNT_BLOCKED_OR_DELETED';
     diagnosisSummary?: string;
+  }>;
+  generateLegacyAccountsReportAsync: () => Promise<LegacyAccountsReadOnlyReport>;
+  relinkLegacyAccountAsync: (params: {
+    legacyUid: string;
+    newAuthUid: string;
+    targetEmail?: string;
+    expectedPhone?: string;
+    dryRun?: boolean;
+  }) => Promise<RelinkLegacyAccountResult>;
+  executeLegacyBatchMigrationAsync: (params: {
+    batchNumber: number;
+    batchSize?: number;
+    dryRun?: boolean;
+    sendPasswordResetEmails?: boolean;
+    shouldAbort?: () => boolean;
+    onProgress?: (current: number, total: number, currentName: string) => void;
+  }) => Promise<BatchMigrationResult>;
+  executeGlobalSequentialLegacyMigrationAsync: (params?: {
+    batchSize?: number;
+    sendPasswordResetEmails?: boolean;
+    shouldAbort?: () => boolean;
+    onProgress?: (progress: GlobalMigrationProgress) => void;
+  }) => Promise<GlobalSequentialMigrationResult>;
+  sendLegacyAccountPasswordResetAsync: (email: string) => Promise<{
+    success: boolean;
+    message: string;
   }>;
   sendAdminVerificationEmailAsync: () => Promise<{
     success: boolean;
@@ -1545,7 +1584,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 isAutoApproved: isBlocked ? false : (raw.isAutoApproved ?? true),
                 accountType: raw.accountType || (raw.role === 'profissional' ? 'duplo' : 'cliente')
               } as unknown as User);
-              if (!isFictitiousOrInvalidUser(uData)) fsUsers.push(uData);
+              if (!isFictitiousOrInvalidUser(uData) && !uData.migratedToUid && !uData.legacyArchiveOnly) fsUsers.push(uData);
             });
             setAllUsers(prev => {
               const fsIds = new Set(fsUsers.map(u => u.id));
@@ -1604,7 +1643,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               accountType: raw.accountType || 'duplo',
               categories: Array.isArray(raw.categories) ? raw.categories : []
             } as unknown as ProfessionalProfile);
-            if (!isFictitiousOrInvalidUser(pData) && !pData.isDeleted && pData.status !== 'deleted') {
+            if (!isFictitiousOrInvalidUser(pData) && !pData.isDeleted && pData.status !== 'deleted' && !pData.migratedToUid && !pData.legacyArchiveOnly) {
               fsPros.push(pData);
             }
           });
@@ -4904,6 +4943,207 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Phase 1 (Starter Tier): Strictly READ-ONLY legacy accounts & references report across ALL Firestore collections
+  const generateLegacyAccountsReportAsync = async (): Promise<LegacyAccountsReadOnlyReport> => {
+    const fbCurrentUser = auth.currentUser;
+    const isVerifiedSuperAdminSession = Boolean(
+      fbCurrentUser?.emailVerified &&
+      (fbCurrentUser.email || '').trim().toLowerCase() === OFFICIAL_ADMIN_EMAIL
+    );
+    if (!fbCurrentUser || (currentUser.role !== 'admin' && !isVerifiedSuperAdminSession)) {
+      return {
+        success: false,
+        message: 'Apenas administradores autenticados podem gerar o relatório de contas antigas.',
+        generatedAt: new Date().toISOString(),
+        readOnlyConfirmed: true,
+        scannedCollections: [],
+        collectionTotals: {},
+        summary: {
+          totalUniqueAccounts: 0,
+          firebaseAuthUidAccounts: 0,
+          legacyPendingAccounts: 0,
+          eligibleStarterTierBatchCount: 0,
+          manualInterventionRequiredCount: 0,
+          duplicateAccountsCount: 0,
+          migratedArchiveAccounts: 0,
+          totalIndexedPhones: 0,
+          totalConflicts: 0,
+          clientsCount: 0,
+          professionalsCount: 0,
+          adminsCount: 0,
+          legacyClientsPending: 0,
+          legacyProfessionalsPending: 0,
+          recommendedBatchSize: DEFAULT_MIGRATION_BATCH_SIZE,
+          estimatedBatches: 0
+        },
+        priorityAccount: null,
+        eligibleBatchList: [],
+        manualInterventionList: [],
+        legacyPendingList: [],
+        firebaseAuthList: [],
+        migratedArchivesList: [],
+        conflicts: [],
+        plainTextReport: ''
+      };
+    }
+    return generateLegacyAccountsReadOnlyReport(db);
+  };
+
+  // Phase 2 (Starter Tier): Controlled single-account safe relink (defaults to dryRun=true, NEVER deletes documents)
+  const relinkLegacyAccountAsync = async (params: {
+    legacyUid: string;
+    newAuthUid: string;
+    targetEmail?: string;
+    expectedPhone?: string;
+    dryRun?: boolean;
+  }): Promise<RelinkLegacyAccountResult> => {
+    const fbCurrentUser = auth.currentUser;
+    const isVerifiedSuperAdminSession = Boolean(
+      fbCurrentUser?.emailVerified &&
+      (fbCurrentUser.email || '').trim().toLowerCase() === OFFICIAL_ADMIN_EMAIL
+    );
+    const isDryRun = params.dryRun !== false;
+    if (!fbCurrentUser || (currentUser.role !== 'admin' && !isVerifiedSuperAdminSession)) {
+      return {
+        success: false,
+        dryRun: isDryRun,
+        message: 'Apenas administradores autenticados podem simular ou executar a religação de contas antigas.',
+        legacyUid: params.legacyUid,
+        newAuthUid: params.newAuthUid,
+        plannedOrAppliedSteps: [],
+        deletedDocumentsCount: 0,
+        conflictsFound: ['UNAUTHORIZED']
+      };
+    }
+
+    return relinkSingleLegacyAccountSafe(db, {
+      legacyUid: params.legacyUid,
+      newAuthUid: params.newAuthUid,
+      targetEmail: params.targetEmail,
+      expectedPhone: params.expectedPhone,
+      dryRun: isDryRun,
+      adminUid: fbCurrentUser.uid,
+      adminEmail: fbCurrentUser.email || OFFICIAL_ADMIN_EMAIL
+    });
+  };
+
+  // Phase 2A (Starter Tier): Controlled batch migration (defaults to dryRun=true, isolated secondary Auth app, 0 deletions)
+  const executeLegacyBatchMigrationAsync = async (params: {
+    batchNumber: number;
+    batchSize?: number;
+    dryRun?: boolean;
+    sendPasswordResetEmails?: boolean;
+    shouldAbort?: () => boolean;
+    onProgress?: (current: number, total: number, currentName: string) => void;
+  }): Promise<BatchMigrationResult> => {
+    const fbCurrentUser = auth.currentUser;
+    const isVerifiedSuperAdminSession = Boolean(
+      fbCurrentUser?.emailVerified &&
+      (fbCurrentUser.email || '').trim().toLowerCase() === OFFICIAL_ADMIN_EMAIL
+    );
+    const isDryRun = params.dryRun !== false;
+    const batchSize = params.batchSize || DEFAULT_MIGRATION_BATCH_SIZE;
+    if (!fbCurrentUser || (currentUser.role !== 'admin' && !isVerifiedSuperAdminSession)) {
+      return {
+        success: false,
+        dryRun: isDryRun,
+        aborted: false,
+        batchNumber: params.batchNumber,
+        batchSize,
+        processedCount: 0,
+        migratedCount: 0,
+        alreadyInAuthCount: 0,
+        skippedConflictCount: 0,
+        failedCount: 0,
+        integrityPassedCount: 0,
+        passwordResetsSentCount: 0,
+        deletedDocumentsCount: 0,
+        outcomes: [],
+        message: 'Apenas administradores autenticados podem simular ou executar a migração por lotes.'
+      };
+    }
+
+    return executeLegacyBatchMigrationSafe(db, auth, {
+      batchNumber: params.batchNumber,
+      batchSize,
+      dryRun: isDryRun,
+      sendPasswordResetEmails: params.sendPasswordResetEmails !== false,
+      adminUid: fbCurrentUser.uid,
+      adminEmail: fbCurrentUser.email || OFFICIAL_ADMIN_EMAIL,
+      shouldAbort: params.shouldAbort,
+      onProgress: params.onProgress
+    });
+  };
+
+  // Phase 2A-Global (Starter Tier): Sequential automatic multi-batch runner (no manual approval needed between batches)
+  const executeGlobalSequentialLegacyMigrationAsync = async (params?: {
+    batchSize?: number;
+    sendPasswordResetEmails?: boolean;
+    shouldAbort?: () => boolean;
+    onProgress?: (progress: GlobalMigrationProgress) => void;
+  }): Promise<GlobalSequentialMigrationResult> => {
+    const fbCurrentUser = auth.currentUser;
+    const isVerifiedSuperAdminSession = Boolean(
+      fbCurrentUser?.emailVerified &&
+      (fbCurrentUser.email || '').trim().toLowerCase() === OFFICIAL_ADMIN_EMAIL
+    );
+    const batchSize = params?.batchSize || DEFAULT_MIGRATION_BATCH_SIZE;
+    if (!fbCurrentUser || (currentUser.role !== 'admin' && !isVerifiedSuperAdminSession)) {
+      const emptyReport = await generateLegacyAccountsReportAsync();
+      const now = new Date().toISOString();
+      return {
+        success: false,
+        completedAll: false,
+        stoppedEarly: true,
+        stopReason: 'UNAUTHORIZED',
+        startedAt: now,
+        finishedAt: now,
+        batchSize,
+        batchesExecuted: 0,
+        totalEstimatedBatches: 0,
+        initialEligibleCount: 0,
+        recoveredAccounts: [],
+        pendingEligibleAccounts: [],
+        manualInterventionAccounts: [],
+        errorOrConflictAccounts: [],
+        passwordResetsSentList: [],
+        passwordResetsFailedList: [],
+        totalReferencesRelinked: 0,
+        relinkedTotalsByCollection: {},
+        deletedDocumentsCount: 0,
+        batchResults: [],
+        finalReport: emptyReport,
+        plainTextFinalReport: '',
+        message: 'Apenas administradores autenticados podem executar a recuperação global automática.'
+      };
+    }
+
+    return executeGlobalSequentialLegacyMigrationSafe(db, auth, {
+      batchSize,
+      sendPasswordResetEmails: params?.sendPasswordResetEmails !== false,
+      adminUid: fbCurrentUser.uid,
+      adminEmail: fbCurrentUser.email || OFFICIAL_ADMIN_EMAIL,
+      shouldAbort: params?.shouldAbort,
+      onProgress: params?.onProgress
+    });
+  };
+
+  // Phase 3: Official Firebase password setup / recovery email for migrated accounts
+  const sendLegacyAccountPasswordResetAsync = async (email: string): Promise<{ success: boolean; message: string }> => {
+    const fbCurrentUser = auth.currentUser;
+    const isVerifiedSuperAdminSession = Boolean(
+      fbCurrentUser?.emailVerified &&
+      (fbCurrentUser.email || '').trim().toLowerCase() === OFFICIAL_ADMIN_EMAIL
+    );
+    if (!fbCurrentUser || (currentUser.role !== 'admin' && !isVerifiedSuperAdminSession)) {
+      return {
+        success: false,
+        message: 'Apenas administradores autenticados podem enviar ligações de redefinição a partir do Painel Admin.'
+      };
+    }
+    return sendLegacyPasswordResetEmailSafe(auth, email);
+  };
+
   const sendAdminVerificationEmailAsync = async (): Promise<{ success: boolean; message: string }> => {
     if (!auth.currentUser) {
       return { success: false, message: 'Inicie sessão primeiro para enviar o e-mail de verificação.' };
@@ -6419,6 +6659,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateRecoveredPhoneNumberAsync,
       migrateLegacyAccountsPhoneIndexAsync,
       diagnosePhoneLoginAsync,
+      generateLegacyAccountsReportAsync,
+      relinkLegacyAccountAsync,
+      executeLegacyBatchMigrationAsync,
+      executeGlobalSequentialLegacyMigrationAsync,
+      sendLegacyAccountPasswordResetAsync,
       sendAdminVerificationEmailAsync,
       changeProPlan,
       subscribeToPlan,

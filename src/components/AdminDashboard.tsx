@@ -3,6 +3,7 @@ import { useApp, isFictitiousOrInvalidUser } from '../context/AppContext';
 import { AndroidPrepHub } from './AndroidPrepHub';
 import { UserAvatar } from './UserAvatar';
 import { AdminCategoryManager } from './AdminCategoryManager';
+import { LegacyMigrationHub } from './LegacyMigrationHub';
 import { sanitizeMediaUrl, openSafePdfProof } from '../utils/securityUtils';
 import { buildShareUrl } from '../config/domain';
 import { auth } from '../lib/firebase';
@@ -2798,6 +2799,9 @@ export const AdminDashboard: React.FC = () => {
               )}
             </div>
           </div>
+
+          {/* Fase 1 (Relatório Apenas Leitura) + Fase 2 (Religação Segura Preparada) + Fase 3 (Recuperação Oficial de Palavra-passe) */}
+          <LegacyMigrationHub onNotify={(type, message, durationMs) => showToast(type, message, durationMs)} />
 
           {/* Card de Ativação / Alteração da Palavra-passe de Login por Telefone do Administrador */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">

@@ -90,6 +90,11 @@ export interface User {
   referralCode?: string;
   experienceYears?: number;
   experienceVerified?: boolean;
+  legacyUid?: string;
+  migratedFromLegacyUid?: string;
+  migratedToUid?: string;
+  migratedAt?: string;
+  legacyArchiveOnly?: boolean;
 }
 
 export interface ProfessionalProfile extends User {

@@ -1,7 +1,6 @@
 import express from "express";
 import crypto from "crypto";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 
 const ALLOWED_ORIGINS = new Set<string>([
   "https://jsmartservices.com",
@@ -100,7 +99,8 @@ function checkRecoveryRate(key: string): boolean {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const isProduction = process.env.NODE_ENV === "production";
+  const PORT = isProduction ? Number(process.env.PORT) || 3000 : 3000;
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
@@ -142,6 +142,12 @@ async function startServer() {
     }
     bucket.count += 1;
     next();
+  });
+
+  // 0. Lightweight Cloud Run readiness/liveness probe
+  app.get("/healthz", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.status(200).json({ status: "ok" });
   });
 
   // 1. Health check & Backend Status (no internal DB IDs exposed)
@@ -393,8 +399,14 @@ async function startServer() {
     });
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  // Return JSON 404 for unknown /api/* endpoints instead of HTML
+  app.use("/api/", (_req, res) => {
+    res.status(404).json({ error: "Endpoint não encontrado." });
+  });
+
+  // Vite middleware for development; static dist serving for production (Cloud Run)
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -408,9 +420,18 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`J Smart Services Backend running on http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`J Smart Services Backend running on http://0.0.0.0:${PORT} (env=${process.env.NODE_ENV || "development"})`);
   });
+
+  const shutdown = () => {
+    server.close(() => process.exit(0));
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("Failed to start J Smart Services server:", err);
+  process.exit(1);
+});
