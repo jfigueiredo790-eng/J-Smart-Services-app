@@ -1,9 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp, isFictitiousOrInvalidUser } from '../context/AppContext';
 import { AndroidPrepHub } from './AndroidPrepHub';
 import { UserAvatar } from './UserAvatar';
 import { AdminCategoryManager } from './AdminCategoryManager';
 import { LegacyMigrationHub } from './LegacyMigrationHub';
+import { AdminRecoveryPanel } from './AdminRecoveryPanel';
+import { AdminDuplicateAuditCard } from './AdminDuplicateAuditCard';
+import {
+  deduplicateCanonicalUsers,
+  deduplicateCanonicalProfessionals
+} from '../utils/userDeduplicationUtils';
 import { sanitizeMediaUrl, openSafePdfProof } from '../utils/securityUtils';
 import { buildShareUrl } from '../config/domain';
 import { auth } from '../lib/firebase';
@@ -42,11 +48,20 @@ import {
   Smartphone,
   Trash2,
   X,
-  RefreshCw
+  RefreshCw,
+  KeyRound
 } from 'lucide-react';
 import { ANGOLA_PROVINCES, User } from '../types';
 
-import { getProPlanStatus, getPlanDisplayInfo, ORDERED_PAID_PLANS } from '../utils/planUtils';
+import {
+  getProPlanStatus,
+  getPlanDisplayInfo,
+  ORDERED_PAID_PLANS,
+  isWithinChristmasCampaign,
+  CHRISTMAS_CAMPAIGN_END_ISO,
+  POST_CAMPAIGN_START_ISO,
+  POST_CAMPAIGN_TRIAL_DAYS
+} from '../utils/planUtils';
 
 export const AdminDashboard: React.FC = () => {
   const { 
@@ -83,8 +98,20 @@ export const AdminDashboard: React.FC = () => {
     forceSyncWithFirestore,
     isSyncing,
     syncStatus,
-    lastSyncTimestamp
+    lastSyncTimestamp,
+    accountRecoveryRequests,
+    refreshAccountRecoveryRequestsAsync
   } = useApp();
+
+  useEffect(() => {
+    if (currentUser.role === 'admin') {
+      refreshAccountRecoveryRequestsAsync().catch(() => {});
+    }
+  }, [currentUser.role]);
+
+  const pendingRecoveryCount = accountRecoveryRequests.filter(
+    r => r.status === 'pendente' || r.status === 'em_analise'
+  ).length;
 
   const [adminSyncFeedback, setAdminSyncFeedback] = useState<string | null>(null);
   const [isMigratingPhones, setIsMigratingPhones] = useState(false);
@@ -104,7 +131,7 @@ export const AdminDashboard: React.FC = () => {
     setTimeout(() => setAdminSyncFeedback(null), 4000);
   };
 
-  const [adminTab, setAdminTab] = useState<'all_registered' | 'payments' | 'financial' | 'users' | 'clients' | 'categories' | 'commissions' | 'reports' | 'staff' | 'audit' | 'tests' | 'code_of_conduct' | 'android_api'>('all_registered');
+  const [adminTab, setAdminTab] = useState<'all_registered' | 'recovery' | 'payments' | 'financial' | 'users' | 'clients' | 'categories' | 'commissions' | 'reports' | 'staff' | 'audit' | 'tests' | 'code_of_conduct' | 'android_api'>('all_registered');
   const [editableRules, setEditableRules] = useState(() => codeOfConductRules);
   const [rulesSaveSuccess, setRulesSaveSuccess] = useState(false);
   const [newRuleInput, setNewRuleInput] = useState<{ [sectionId: string]: string }>({});
@@ -154,7 +181,9 @@ export const AdminDashboard: React.FC = () => {
     }
   }, [codeOfConductRules]);
   const [testResults, setTestResults] = useState<{ success: boolean; totalTests: number; passedTests: number; logResults: { step: string; status: 'pass' | 'fail'; message: string }[] } | null>(null);
-  const [proPlanFilter, setProPlanFilter] = useState<'all' | 'active_paid' | 'trial' | 'trial_ended' | 'expired'>('all');
+  const [proPlanFilter, setProPlanFilter] = useState<
+    'all' | 'christmas_campaign' | 'trial_14d' | 'trial_expired' | 'active_paid' | 'no_subscription' | 'expired'
+  >('all');
   const [proPlanSearch, setProPlanSearch] = useState<string>('');
   const [verifiedValidityMap, setVerifiedValidityMap] = useState<Record<string, string>>({});
 
@@ -220,16 +249,26 @@ export const AdminDashboard: React.FC = () => {
   const [broadcastTarget, setBroadcastTarget] = useState<'all' | 'pros' | 'clients'>('all');
   const [broadcastSent, setBroadcastSent] = useState(false);
 
+  // Canonical Deduplication (1 unique active person/UID — excludes migration archives, deleted docs, and legacy admin duplicates)
+  const canonicalUsers = useMemo(
+    () => deduplicateCanonicalUsers(allUsers, { filterFictitious: isFictitiousOrInvalidUser }).uniqueUsers,
+    [allUsers]
+  );
+  const canonicalPros = useMemo(
+    () => deduplicateCanonicalProfessionals(professionals, { filterFictitious: isFictitiousOrInvalidUser }).uniqueProfessionals,
+    [professionals]
+  );
+
   // Low Rating Alert Pros (Capítulo 8)
-  const lowRatingPros = professionals.filter(p => p.reviewCount >= 1 && p.rating < 3.0);
+  const lowRatingPros = canonicalPros.filter(p => p.reviewCount >= 1 && p.rating < 3.0);
 
   // Metrics
-  const totalPros = professionals.length;
-  const autoApprovedPros = professionals.filter(p => p.verified || p.isAutoApproved).length;
-  const pendingPros = professionals.filter(p => !p.verified && !p.isAutoApproved);
+  const totalPros = canonicalPros.length;
+  const autoApprovedPros = canonicalPros.filter(p => p.verified || p.isAutoApproved).length;
+  const pendingPros = canonicalPros.filter(p => !p.verified && !p.isAutoApproved);
   const totalRequestsCount = requests.length;
 
-  const clientUsers = allUsers.filter(u => u.role === 'cliente' && !isFictitiousOrInvalidUser(u));
+  const clientUsers = canonicalUsers.filter(u => u.role === 'cliente' && !isFictitiousOrInvalidUser(u));
   const totalClients = clientUsers.length;
 
   const totalVolumeKz = requests.reduce((acc, curr) => acc + curr.budgetKz, 0);
@@ -237,7 +276,7 @@ export const AdminDashboard: React.FC = () => {
     .filter(t => t.type === 'commission')
     .reduce((acc, curr) => acc + curr.amountKz, 0);
 
-  const filteredPros = professionals.filter(p => 
+  const filteredPros = canonicalPros.filter(p => 
     !isFictitiousOrInvalidUser(p) && (
       p.name.toLowerCase().includes(userSearch.toLowerCase()) || 
       p.email.toLowerCase().includes(userSearch.toLowerCase()) ||
@@ -400,8 +439,24 @@ export const AdminDashboard: React.FC = () => {
           }`}
         >
           <Users className="w-4 h-4 text-amber-300" />
-          <span className="font-black">Todos os Cadastrados ({allUsers.length})</span>
+          <span className="font-black">Todos os Cadastrados ({canonicalUsers.length})</span>
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-0.5"></span>
+        </button>
+
+        {/* TAB EXCLUSIVA: RECUPERAÇÃO DE CONTAS */}
+        <button
+          onClick={() => setAdminTab('recovery')}
+          className={`px-4 py-2.5 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 relative ${
+            adminTab === 'recovery' ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' : 'text-slate-700 hover:text-slate-900 bg-white border border-slate-200'
+          }`}
+        >
+          <KeyRound className={`w-4 h-4 ${adminTab === 'recovery' ? 'text-slate-950' : 'text-amber-600'}`} />
+          <span className="font-black">RECUPERAÇÃO DE CONTAS</span>
+          {pendingRecoveryCount > 0 && (
+            <span className="bg-rose-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full ml-0.5 animate-pulse">
+              {pendingRecoveryCount}
+            </span>
+          )}
         </button>
 
         {/* TAB ANDROID & BACKEND API */}
@@ -445,7 +500,7 @@ export const AdminDashboard: React.FC = () => {
           className={`px-4 py-2.5 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${adminTab === 'users' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
         >
           <Users className="w-4 h-4 text-emerald-400" />
-          <span>Profissionais ({professionals.length})</span>
+          <span>Profissionais ({canonicalPros.length})</span>
         </button>
 
         <button
@@ -490,7 +545,7 @@ export const AdminDashboard: React.FC = () => {
           className={`px-4 py-2.5 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${adminTab === 'staff' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
         >
           <ShieldCheck className="w-4 h-4 text-amber-400" />
-          <span>Equipa & Sub-Admins ({allUsers.filter(u => u.role === 'admin').length})</span>
+          <span>Equipa & Sub-Admins ({canonicalUsers.filter(u => u.role === 'admin').length})</span>
         </button>
 
         <button
@@ -567,8 +622,8 @@ export const AdminDashboard: React.FC = () => {
           }
         };
 
-        // Filter registered users
-        const filteredRegisteredUsers = allUsers.filter(u => {
+        // Filter registered users (strictly canonical unique accounts — 1 per person/UID)
+        const filteredRegisteredUsers = canonicalUsers.filter(u => {
           if (isFictitiousOrInvalidUser(u)) return false;
 
           // Role filter
@@ -597,7 +652,7 @@ export const AdminDashboard: React.FC = () => {
           return true;
         });
 
-        const activeRegisteredUsers = allUsers.filter(u => !isFictitiousOrInvalidUser(u));
+        const activeRegisteredUsers = canonicalUsers.filter(u => !isFictitiousOrInvalidUser(u));
         const clientCount = activeRegisteredUsers.filter(u => u.role === 'cliente').length;
         const proCount = activeRegisteredUsers.filter(u => u.role === 'profissional' || u.accountType === 'profissional').length;
         const dualCount = activeRegisteredUsers.filter(u => u.accountType === 'duplo').length;
@@ -630,10 +685,10 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 )}
                 <h3 className="text-xl font-black text-white mt-2">
-                  Todos os Cadastrados na J Smart Services ({allUsers.length})
+                  Todos os Cadastrados na J Smart Services ({canonicalUsers.length})
                 </h3>
                 <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-                  Encontre todas as pessoas registadas na plataforma. Todas as contas criadas através de links partilhados ou diretamente na aplicação são guardadas em tempo real nesta base de dados universal.
+                  Encontre todas as pessoas registadas na plataforma. Cada conta ativa é contabilizada exatamente uma vez pelo seu UID único, sem misturar arquivos históricos da migração nem perfis duplicados.
                 </p>
               </div>
 
@@ -645,6 +700,9 @@ export const AdminDashboard: React.FC = () => {
                 <span>{copiedShareLinkMsg ? '✓ Link de Convite Copiado!' : 'Copiar Link de Partilha'}</span>
               </button>
             </div>
+
+            {/* 100% Read-Only Live Duplicate & Canonical Accounts Audit */}
+            <AdminDuplicateAuditCard />
 
             {/* Share Link Banner Card */}
             <div className="bg-white p-5 rounded-3xl border-2 border-emerald-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -704,8 +762,8 @@ export const AdminDashboard: React.FC = () => {
                 className={`p-4 rounded-2xl border transition-all cursor-pointer ${regRoleFilter === 'all' ? 'bg-slate-900 text-white border-slate-900 shadow' : 'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}
               >
                 <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">Total Cadastrados</span>
-                <span className="text-2xl font-black">{allUsers.length}</span>
-                <span className="text-[10px] block mt-0.5 opacity-80">Na J Smart Services</span>
+                <span className="text-2xl font-black">{canonicalUsers.length}</span>
+                <span className="text-[10px] block mt-0.5 opacity-80">Utilizadores únicos</span>
               </div>
 
               <div 
@@ -789,7 +847,7 @@ export const AdminDashboard: React.FC = () => {
                   onClick={() => setRegRoleFilter('all')}
                   className={`px-3 py-1 rounded-xl transition-all ${regRoleFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                 >
-                  Todos ({allUsers.length})
+                  Todos ({canonicalUsers.length})
                 </button>
                 <button
                   onClick={() => setRegRoleFilter('cliente')}
@@ -1498,16 +1556,20 @@ export const AdminDashboard: React.FC = () => {
       {/* TAB 1: PAINEL FINANCEIRO */}
       {adminTab === 'financial' && (() => {
         const formatDt = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('pt-AO') : '—');
-        const prosWithStatus = professionals.map(pro => ({
+        const campaignActiveNow = isWithinChristmasCampaign();
+        const prosWithStatus = canonicalPros.map(pro => ({
           pro,
           status: getProPlanStatus(pro)
         }));
 
-        const trialProsCount = prosWithStatus.filter(p => p.status.isTrial && p.status.isActive).length;
-        const trialEndedCount = prosWithStatus.filter(p => p.status.isTrial && p.status.isExpired).length;
-        const activePaidProsCount = prosWithStatus.filter(p => !p.status.isTrial && p.status.isActive).length;
+        const christmasCampaignProsCount = prosWithStatus.filter(p => p.status.entitlementState === 'christmas_campaign').length;
+        const christmasBeneficiariesCount = prosWithStatus.filter(p => p.status.wasChristmasCampaignBeneficiary).length;
+        const trial14dActiveCount = prosWithStatus.filter(p => p.status.entitlementState === 'trial_14d_active').length;
+        const trialExpiredCount = prosWithStatus.filter(p => p.status.entitlementState === 'trial_expired').length;
+        const activePaidProsCount = prosWithStatus.filter(p => p.status.entitlementState === 'paid_active').length;
+        const noPaidSubscriptionCount = prosWithStatus.filter(p => !p.status.hasPaidSubscription).length;
         const expiredProsCount = prosWithStatus.filter(p => p.status.isExpired).length;
-        const expiredPaidCount = prosWithStatus.filter(p => !p.status.isTrial && p.status.isExpired).length;
+        const expiredPaidCount = prosWithStatus.filter(p => p.status.entitlementState === 'paid_expired').length;
 
         const approvedPlanTransactions = walletTransactions.filter(
           t => t.status === 'concluido' && (t.type === 'payment' || t.description.toLowerCase().includes('plano'))
@@ -1549,15 +1611,47 @@ export const AdminDashboard: React.FC = () => {
             (item.pro.phone || '').toLowerCase().includes(proPlanSearch.toLowerCase()) ||
             (item.pro.email || '').toLowerCase().includes(proPlanSearch.toLowerCase());
           if (!matchesQuery) return false;
-          if (proPlanFilter === 'active_paid') return !item.status.isTrial && item.status.isActive;
-          if (proPlanFilter === 'trial') return item.status.isTrial && item.status.isActive;
-          if (proPlanFilter === 'trial_ended') return item.status.isTrial && item.status.isExpired;
+          if (proPlanFilter === 'christmas_campaign') return item.status.entitlementState === 'christmas_campaign';
+          if (proPlanFilter === 'trial_14d') return item.status.entitlementState === 'trial_14d_active';
+          if (proPlanFilter === 'trial_expired') return item.status.entitlementState === 'trial_expired';
+          if (proPlanFilter === 'active_paid') return item.status.entitlementState === 'paid_active';
+          if (proPlanFilter === 'no_subscription') return !item.status.hasPaidSubscription;
           if (proPlanFilter === 'expired') return item.status.isExpired;
           return true;
         });
 
         return (
           <div className="space-y-6">
+            {/* Banner Informativo: Campanha Especial de Natal & Regra de 14 Dias */}
+            <div className="bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-900 text-white rounded-3xl p-5 border border-emerald-500/40 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-md uppercase tracking-wider">
+                    {campaignActiveNow ? 'Campanha de Natal Ativa' : 'Fase Pós-Campanha (14 Dias)'}
+                  </span>
+                  <span className="text-[11px] font-bold text-emerald-300">
+                    Monetização exclusiva por subscrições • 0% comissão
+                  </span>
+                </div>
+                <h3 className="text-sm sm:text-base font-black text-white">
+                  Campanha Especial de Natal (Nov 2026 – Jan 2027) &amp; Regra Automática de {POST_CAMPAIGN_TRIAL_DAYS} Dias
+                </h3>
+                <p className="text-xs text-emerald-100/85 leading-relaxed max-w-3xl">
+                  Profissionais e contas duplas têm acesso 100% gratuito até <strong>{formatDt(CHRISTMAS_CAMPAIGN_END_ISO)}</strong>. A partir de <strong>{formatDt(POST_CAMPAIGN_START_ISO)}</strong>, os beneficiários da campanha recebem automaticamente +{POST_CAMPAIGN_TRIAL_DAYS} dias gratuitos (01/02 a 14/02/2027) e novos profissionais recebem {POST_CAMPAIGN_TRIAL_DAYS} dias corridos desde a ativação, sem reinício.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 shrink-0 text-xs">
+                <div className="bg-white/10 border border-white/15 rounded-2xl px-3.5 py-2 text-center">
+                  <span className="text-[10px] text-emerald-200 uppercase font-bold block">Beneficiários Natal</span>
+                  <span className="text-lg font-black text-amber-300">{christmasBeneficiariesCount}</span>
+                </div>
+                <div className="bg-white/10 border border-white/15 rounded-2xl px-3.5 py-2 text-center">
+                  <span className="text-[10px] text-emerald-200 uppercase font-bold block">Sem Subscrição Paga</span>
+                  <span className="text-lg font-black text-white">{noPaidSubscriptionCount}</span>
+                </div>
+              </div>
+            </div>
+
             {/* Resumo da Receita da Plataforma */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="bg-gradient-to-br from-emerald-900 via-slate-900 to-teal-950 text-white p-5 rounded-3xl border border-emerald-500/30 shadow-md">
@@ -1585,51 +1679,67 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Painel do Estado dos Profissionais */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-emerald-800 uppercase block">Subscrições Ativas</span>
-                  <span className="text-2xl font-black text-emerald-900">{activePaidProsCount}</span>
-                  <p className="text-[11px] text-emerald-700 mt-0.5">Planos pagos em vigor</p>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black">
-                  ✓
-                </div>
-              </div>
+            {/* Painel do Estado dos Profissionais (Campanha de Natal + 14 Dias + Subscrições) */}
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+              <button
+                type="button"
+                onClick={() => setProPlanFilter('christmas_campaign')}
+                className="text-left bg-red-50 hover:bg-red-100/70 border border-red-200 p-4 rounded-2xl transition-colors"
+              >
+                <span className="text-[10px] font-extrabold text-red-800 uppercase block">Campanha Natal</span>
+                <span className="text-2xl font-black text-red-950 block mt-0.5">{christmasCampaignProsCount}</span>
+                <p className="text-[10px] text-red-700 mt-0.5 font-semibold">Grátis até 31/01/2027</p>
+              </button>
 
-              <div className="bg-teal-50 border border-teal-200 p-4 rounded-2xl flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-teal-800 uppercase block">Em Teste Grátis (30d)</span>
-                  <span className="text-2xl font-black text-teal-900">{trialProsCount}</span>
-                  <p className="text-[11px] text-teal-700 mt-0.5">30 dias (1 mês) gratuitos ativos</p>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black">
-                  🕒
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => setProPlanFilter('trial_14d')}
+                className="text-left bg-teal-50 hover:bg-teal-100/70 border border-teal-200 p-4 rounded-2xl transition-colors"
+              >
+                <span className="text-[10px] font-extrabold text-teal-800 uppercase block">Em 14 Dias Grátis</span>
+                <span className="text-2xl font-black text-teal-950 block mt-0.5">{trial14dActiveCount}</span>
+                <p className="text-[10px] text-teal-700 mt-0.5 font-semibold">Período gratuito ativo</p>
+              </button>
 
-              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-amber-800 uppercase block">Teste Terminado</span>
-                  <span className="text-2xl font-black text-amber-900">{trialEndedCount}</span>
-                  <p className="text-[11px] text-amber-700 mt-0.5">Aguardam 1.º plano pago</p>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center font-black">
-                  ⌛
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => setProPlanFilter('trial_expired')}
+                className="text-left bg-amber-50 hover:bg-amber-100/70 border border-amber-200 p-4 rounded-2xl transition-colors"
+              >
+                <span className="text-[10px] font-extrabold text-amber-800 uppercase block">Gratuito Expirado</span>
+                <span className="text-2xl font-black text-amber-950 block mt-0.5">{trialExpiredCount}</span>
+                <p className="text-[10px] text-amber-700 mt-0.5 font-semibold">Aguardam 1.ª subscrição</p>
+              </button>
 
-              <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-rose-800 uppercase block">Expirados Total</span>
-                  <span className="text-2xl font-black text-rose-900">{expiredProsCount}</span>
-                  <p className="text-[11px] text-rose-700 mt-0.5">{expiredPaidCount} pagos expirados • ocultos da pesquisa</p>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center font-black">
-                  ⚠️
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => setProPlanFilter('active_paid')}
+                className="text-left bg-emerald-50 hover:bg-emerald-100/70 border border-emerald-200 p-4 rounded-2xl transition-colors"
+              >
+                <span className="text-[10px] font-extrabold text-emerald-800 uppercase block">Subscrição Ativa</span>
+                <span className="text-2xl font-black text-emerald-950 block mt-0.5">{activePaidProsCount}</span>
+                <p className="text-[10px] text-emerald-700 mt-0.5 font-semibold">Planos pagos em vigor</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProPlanFilter('no_subscription')}
+                className="text-left bg-slate-100 hover:bg-slate-200/70 border border-slate-200 p-4 rounded-2xl transition-colors"
+              >
+                <span className="text-[10px] font-extrabold text-slate-700 uppercase block">Sem Subscrição</span>
+                <span className="text-2xl font-black text-slate-900 block mt-0.5">{noPaidSubscriptionCount}</span>
+                <p className="text-[10px] text-slate-600 mt-0.5 font-semibold">Ainda sem plano pago</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProPlanFilter('expired')}
+                className="text-left bg-rose-50 hover:bg-rose-100/70 border border-rose-200 p-4 rounded-2xl transition-colors"
+              >
+                <span className="text-[10px] font-extrabold text-rose-800 uppercase block">Expirados Total</span>
+                <span className="text-2xl font-black text-rose-950 block mt-0.5">{expiredProsCount}</span>
+                <p className="text-[10px] text-rose-700 mt-0.5 font-semibold">{expiredPaidCount} pago(s) • pro pausado</p>
+              </button>
             </div>
 
             {/* Tabela de Estado dos Planos dos Profissionais */}
@@ -1638,10 +1748,10 @@ export const AdminDashboard: React.FC = () => {
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
                     <Users className="w-4 h-4 text-emerald-600" />
-                    Gestão de Subscrições dos Profissionais ({professionals.length})
+                    Gestão de Campanha de Natal &amp; Subscrições ({canonicalPros.length})
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Consulte datas de início/expiração, verifique a validade e liberte manualmente um dos 3 planos oficiais.
+                    Acompanhe início e fim exatos de cada período gratuito ou pago, filtre por estado e ative qualquer um dos 3 planos oficiais.
                   </p>
                 </div>
 
@@ -1651,25 +1761,37 @@ export const AdminDashboard: React.FC = () => {
                     onClick={() => setProPlanFilter('all')}
                     className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'}`}
                   >
-                    Registados ({professionals.length})
+                    Todos ({canonicalPros.length})
                   </button>
                   <button
-                    onClick={() => setProPlanFilter('trial')}
-                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'trial' ? 'bg-teal-700 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                    onClick={() => setProPlanFilter('christmas_campaign')}
+                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'christmas_campaign' ? 'bg-red-700 text-white' : 'text-slate-600 hover:text-slate-900'}`}
                   >
-                    Em Teste ({trialProsCount})
+                    Campanha Natal ({christmasCampaignProsCount})
                   </button>
                   <button
-                    onClick={() => setProPlanFilter('trial_ended')}
-                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'trial_ended' ? 'bg-amber-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                    onClick={() => setProPlanFilter('trial_14d')}
+                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'trial_14d' ? 'bg-teal-700 text-white' : 'text-slate-600 hover:text-slate-900'}`}
                   >
-                    Teste Terminado ({trialEndedCount})
+                    14 Dias Grátis ({trial14dActiveCount})
+                  </button>
+                  <button
+                    onClick={() => setProPlanFilter('trial_expired')}
+                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'trial_expired' ? 'bg-amber-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    Gratuito Expirado ({trialExpiredCount})
                   </button>
                   <button
                     onClick={() => setProPlanFilter('active_paid')}
                     className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'active_paid' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
                   >
-                    Subscrições Ativas ({activePaidProsCount})
+                    Subscrição Ativa ({activePaidProsCount})
+                  </button>
+                  <button
+                    onClick={() => setProPlanFilter('no_subscription')}
+                    className={`px-2.5 py-1.5 rounded-xl transition-all ${proPlanFilter === 'no_subscription' ? 'bg-slate-700 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    Sem Subscrição ({noPaidSubscriptionCount})
                   </button>
                   <button
                     onClick={() => setProPlanFilter('expired')}
@@ -1699,6 +1821,8 @@ export const AdminDashboard: React.FC = () => {
                 <div className="space-y-3">
                   {filteredProsByPlan.map(({ pro, status }) => {
                     const lastCheckMsg = verifiedValidityMap[pro.id];
+                    const periodStart = status.freePeriodStartIso || status.startedAtIso;
+                    const periodEnd = status.freePeriodEndIso || status.expiresAtIso;
                     return (
                       <div key={pro.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-3 text-xs">
                         <div className="flex items-start gap-3">
@@ -1715,15 +1839,30 @@ export const AdminDashboard: React.FC = () => {
                               <h4 className="font-bold text-slate-900 text-sm">{pro.name}</h4>
                               <span className="text-slate-400">•</span>
                               <span className="text-slate-600 font-semibold">{pro.categoryName || 'Profissional'}</span>
+                              {pro.accountType === 'duplo' && (
+                                <span className="bg-indigo-100 text-indigo-800 border border-indigo-200 text-[10px] font-extrabold px-2 py-0.5 rounded-md">
+                                  Conta Dupla
+                                </span>
+                              )}
+                              {status.wasChristmasCampaignBeneficiary && (
+                                <span className="bg-red-100 text-red-800 border border-red-200 text-[10px] font-extrabold px-2 py-0.5 rounded-md">
+                                  Beneficiário Natal
+                                </span>
+                              )}
                             </div>
                             <p className="text-slate-500 mt-0.5">{pro.province} • {pro.email || 'Sem e-mail'} • {pro.phone}</p>
                             <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[10px] font-bold text-slate-600">
                               <span className="bg-white border border-slate-200 px-2 py-0.5 rounded-md">
-                                📅 Início: {formatDt(status.startedAtIso)}
+                                Início: {formatDt(periodStart)}
                               </span>
                               <span className="bg-white border border-slate-200 px-2 py-0.5 rounded-md">
-                                ⏳ Expiração: {formatDt(status.expiresAtIso)}
+                                Fim: {formatDt(periodEnd)}
                               </span>
+                              {status.isChristmasCampaign && (
+                                <span className="bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-md">
+                                  +14d grátis: 01/02/2027 a 14/02/2027
+                                </span>
+                              )}
                               <button
                                 onClick={() => {
                                   const nextVal = !pro.experienceVerified;
@@ -1747,28 +1886,38 @@ export const AdminDashboard: React.FC = () => {
 
                         <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto justify-between xl:justify-end">
                           <div className="text-left xl:text-right">
-                            {status.isTrial && status.isActive && (
+                            {status.entitlementState === 'christmas_campaign' && (
                               <>
-                                <span className="bg-teal-100 text-teal-800 border border-teal-300 text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-block">
-                                  🕒 {status.planLabel || 'Teste Grátis'}: {status.daysRemaining}d restantes
+                                <span className="bg-red-100 text-red-900 border border-red-300 text-[10px] font-extrabold px-2.5 py-1 rounded-md inline-block">
+                                  Campanha de Natal: grátis até 31/01/2027 ({status.daysRemaining}d)
                                 </span>
-                                <span className="block text-[10px] text-slate-500 mt-1">Visível nas pesquisas</span>
+                                <span className="block text-[10px] text-slate-500 mt-1">Sem subscrição paga • acesso pro completo</span>
                               </>
                             )}
-                            {!status.isTrial && status.isActive && (
+                            {status.entitlementState === 'trial_14d_active' && (
                               <>
-                                <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-block">
-                                  ✓ {status.planLabel || 'Plano Ativo'} ({status.daysRemaining}d)
+                                <span className="bg-teal-100 text-teal-800 border border-teal-300 text-[10px] font-extrabold px-2.5 py-1 rounded-md inline-block">
+                                  14 Dias Grátis: {status.daysRemaining}d restantes
                                 </span>
-                                <span className="block text-[10px] text-emerald-600 font-bold mt-1">Subscrição válida</span>
+                                <span className="block text-[10px] text-slate-500 mt-1">Visível nas pesquisas • sem subscrição paga</span>
+                              </>
+                            )}
+                            {status.entitlementState === 'paid_active' && (
+                              <>
+                                <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-extrabold px-2.5 py-1 rounded-md inline-block">
+                                  ✓ {status.planLabel || 'Subscrição Ativa'} ({status.daysRemaining}d)
+                                </span>
+                                <span className="block text-[10px] text-emerald-600 font-bold mt-1">Subscrição paga válida</span>
                               </>
                             )}
                             {status.isExpired && (
                               <>
-                                <span className="bg-rose-100 text-rose-800 border border-rose-300 text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-block">
-                                  ❌ {status.planLabel || 'Expirado'}
+                                <span className="bg-rose-100 text-rose-800 border border-rose-300 text-[10px] font-extrabold px-2.5 py-1 rounded-md inline-block">
+                                  ❌ {status.planLabel || 'Período Expirado'}
                                 </span>
-                                <span className="block text-[10px] text-rose-600 font-bold mt-1">Oculto das pesquisas • aguarda renovação</span>
+                                <span className="block text-[10px] text-rose-600 font-bold mt-1">
+                                  Pro suspenso • dados preservados{pro.accountType === 'duplo' ? ' • Cliente ativo' : ''}
+                                </span>
                               </>
                             )}
                           </div>
@@ -2246,7 +2395,8 @@ export const AdminDashboard: React.FC = () => {
                   <span>📅 Cobrança ao Profissional (Planos de Subscrição):</span>
                 </p>
                 <p className="text-[11px] text-slate-600 leading-relaxed">
-                  • <strong>Período de Teste:</strong> 30 dias (1 mês) 100% gratuitos para novos profissionais (1 vez por utilizador).<br/>
+                  • <strong>Campanha Especial de Natal:</strong> Novembro 2026, Dezembro 2026 e Janeiro 2027 100% gratuitos para todos os profissionais e contas duplas.<br/>
+                  • <strong>Regra a partir de 01/02/2027:</strong> 14 dias gratuitos corridos (01/02 a 14/02/2027 para beneficiários da campanha; 14 dias desde a ativação para novos profissionais, 1 vez por utilizador).<br/>
                   • 📅 <strong>Plano Semanal:</strong> 1.500 Kz (2 semanas / 14 dias)<br/>
                   • 📅 <strong>Plano Mensal:</strong> 3.000 Kz (1 mês / 30 dias)<br/>
                   • 📅 <strong>Plano Trimestral:</strong> 8.000 Kz (3 meses / 90 dias)
@@ -2612,7 +2762,7 @@ export const AdminDashboard: React.FC = () => {
             <div className="space-y-2 pt-2">
               <h4 className="text-xs font-extrabold text-slate-900 uppercase">Lista da Equipa Administrativa</h4>
               <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden bg-white">
-                {allUsers.filter(u => u.role === 'admin').map((adm) => (
+                {canonicalUsers.filter(u => u.role === 'admin').map((adm) => (
                   <div key={adm.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-slate-900 text-amber-400 font-extrabold flex items-center justify-center text-sm border border-slate-800 shadow-sm">
@@ -3276,6 +3426,11 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB EXCLUSIVA: RECUPERAÇÃO DE CONTAS */}
+      {adminTab === 'recovery' && (
+        <AdminRecoveryPanel />
       )}
 
       {/* TAB: PREPARAÇÃO APP ANDROID & BACKEND API */}

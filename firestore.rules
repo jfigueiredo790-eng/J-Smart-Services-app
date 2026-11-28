@@ -50,6 +50,68 @@ service cloud.firestore {
       return phone is string && phone.matches('^\\+244[0-9]{9}$');
     }
 
+    function isValidRecoveryRequestCreate(data, requestId) {
+      return hasNoSecrets(data) &&
+        data.keys().hasAll(['id', 'identifierType', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'submittedPhone', 'submittedEmail', 'identifierType', 'status', 'createdAt', 'updatedAt']) &&
+        data.id == requestId &&
+        data.status == 'pendente' &&
+        data.identifierType in ['phone', 'email', 'both'] &&
+        (('submittedPhone' in data) || ('submittedEmail' in data)) &&
+        (!('submittedPhone' in data) || isValidAngolaPhone(data.submittedPhone)) &&
+        (!('submittedEmail' in data) || (data.submittedEmail is string && data.submittedEmail.size() >= 5 && data.submittedEmail.size() <= 200 && data.submittedEmail.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'))) &&
+        data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64;
+    }
+
+    function isChristmasCampaignWindow() {
+      return request.time >= timestamp.date(2026, 11, 1) && request.time < timestamp.date(2027, 2, 1);
+    }
+
+    function hasActiveProEntitlement() {
+      return isAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        !('blocked' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.blocked == true) &&
+        !('isDeleted' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isDeleted == true) &&
+        (
+          // 1. Subscrição paga ativa (Timestamp autoritativo ou registo pago legado ativo)
+          ('planExpiresTimestamp' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.planExpiresTimestamp is timestamp &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.planExpiresTimestamp > request.time) ||
+          (!('planExpiresTimestamp' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) &&
+            'subscriptionPlan' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.subscriptionPlan in ['plan_14d', 'plan_30d', 'plan_90d'] &&
+            'subscriptionStatus' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.subscriptionStatus == 'ACTIVE') ||
+          // 2. Campanha Especial de Natal: Novembro 2026, Dezembro 2026 e Janeiro 2027 (até 31/01/2027)
+          isChristmasCampaignWindow() ||
+          // 3. Período gratuito adicional de 14 dias (01/02/2027 a 14/02/2027) para beneficiários da Campanha de Natal
+          (
+            request.time >= timestamp.date(2027, 2, 1) &&
+            request.time < timestamp.date(2027, 2, 15) &&
+            (!('trialDurationDays' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) ||
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.trialDurationDays > 0) &&
+            (
+              ('christmasCampaignEligible' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.christmasCampaignEligible == true) ||
+              ('createdAt' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.createdAt is string &&
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.createdAt < '2027-02-01T00:00:00.000Z')
+            )
+          ) ||
+          // 4. Período gratuito individual de 14 dias corridos para novos profissionais a partir de 01/02/2027
+          (
+            'trialStartServerTimestamp' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.trialStartServerTimestamp is timestamp &&
+            (!('trialDurationDays' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) ||
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.trialDurationDays == 14) &&
+            (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.trialStartServerTimestamp + duration.value(14, 'd') > request.time)
+          )
+        )
+      );
+    }
+
     function isValidUserCreate(data, userId) {
       return hasNoSecrets(data) &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
@@ -63,34 +125,85 @@ service cloud.firestore {
         (!('adminSubRole' in data)) &&
         (!('subscriptionPlan' in data) || data.subscriptionPlan == 'free_trial') &&
         (!('planExpiresAt' in data)) &&
+        (!('planExpiresTimestamp' in data)) &&
         (!('planStartedAt' in data)) &&
-        (!('trialDurationDays' in data) || data.trialDurationDays in [0, 30]) &&
+        (!('trialDurationDays' in data) || data.trialDurationDays in [0, 14]) &&
         (!('trialStartServerTimestamp' in data) || data.trialStartServerTimestamp == request.time) &&
+        (!('freeTrialCanonicalUid' in data) || data.freeTrialCanonicalUid == userId) &&
+        (!('christmasCampaignEligible' in data) || (data.christmasCampaignEligible is bool && (data.christmasCampaignEligible == false || isChristmasCampaignWindow()))) &&
         (!('id' in data) || data.id == userId);
     }
 
-    function isValidUserUpdate(data, prev) {
-      return hasNoSecrets(data) &&
-        (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 120)) &&
-        (!('phone' in data) || (('phone' in prev && data.phone == prev.phone) || isValidAngolaPhone(data.phone))) &&
-        (!('phoneE164' in data) || (('phoneE164' in prev && data.phoneE164 == prev.phoneE164) || isValidAngolaPhone(data.phoneE164))) &&
-        (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
-        (!('role' in data) || data.role == prev.role || (prev.accountType == 'duplo' && data.role in ['cliente', 'profissional'])) &&
-        (!('accountType' in data) || data.accountType == prev.accountType) &&
+    function isValidClientToDualActivation(data, prev, userId) {
+      return prev.accountType == 'cliente' &&
+        data.accountType == 'duplo' &&
+        (!('role' in data) || data.role in ['cliente', 'profissional']) &&
         (!('adminSubRole' in data) || ('adminSubRole' in prev && data.adminSubRole == prev.adminSubRole)) &&
         (!('walletBalanceKz' in data) || ('walletBalanceKz' in prev && data.walletBalanceKz == prev.walletBalanceKz)) &&
         (!('blocked' in data) || ('blocked' in prev && data.blocked == prev.blocked)) &&
         (!('accountStatus' in data) || ('accountStatus' in prev && data.accountStatus == prev.accountStatus)) &&
         (!('isDeleted' in data) || ('isDeleted' in prev && data.isDeleted == prev.isDeleted)) &&
-        (!('subscriptionPlan' in data) || ('subscriptionPlan' in prev && data.subscriptionPlan == prev.subscriptionPlan)) &&
         (!('planStartedAt' in data) || ('planStartedAt' in prev && data.planStartedAt == prev.planStartedAt)) &&
         (!('planExpiresAt' in data) || ('planExpiresAt' in prev && data.planExpiresAt == prev.planExpiresAt)) &&
-        (!('trialStartDate' in data) || ('trialStartDate' in prev && data.trialStartDate == prev.trialStartDate)) &&
-        (!('trialEndsAt' in data) || ('trialEndsAt' in prev && data.trialEndsAt == prev.trialEndsAt)) &&
-        (!('trialDurationDays' in data) || ('trialDurationDays' in prev && data.trialDurationDays == prev.trialDurationDays)) &&
-        (!('trialStartServerTimestamp' in data) || ('trialStartServerTimestamp' in prev && data.trialStartServerTimestamp == prev.trialStartServerTimestamp)) &&
-        (!('subscriptionStatus' in data) || ('subscriptionStatus' in prev && data.subscriptionStatus == prev.subscriptionStatus)) &&
-        (!('experienceVerified' in data) || ('experienceVerified' in prev && data.experienceVerified == prev.experienceVerified));
+        (!('planExpiresTimestamp' in data) || ('planExpiresTimestamp' in prev && data.planExpiresTimestamp == prev.planExpiresTimestamp)) &&
+        (!('subscriptionPlan' in data) || data.subscriptionPlan == 'free_trial' || ('subscriptionPlan' in prev && data.subscriptionPlan == prev.subscriptionPlan)) &&
+        (!('experienceVerified' in data) || ('experienceVerified' in prev && data.experienceVerified == prev.experienceVerified)) &&
+        (!('freeTrialCanonicalUid' in data) || data.freeTrialCanonicalUid == userId) &&
+        // Anti-reinício: se já teve ativação/trial antes, preserva estritamente os campos anteriores
+        (
+          (
+            ('professionalActivatedAt' in prev || 'trialStartDate' in prev || ('freeTrialConsumed' in prev && prev.freeTrialConsumed == true)) &&
+            (!('professionalActivatedAt' in data) || ('professionalActivatedAt' in prev && data.professionalActivatedAt == prev.professionalActivatedAt)) &&
+            (!('trialStartDate' in data) || ('trialStartDate' in prev && data.trialStartDate == prev.trialStartDate)) &&
+            (!('trialEndsAt' in data) || ('trialEndsAt' in prev && data.trialEndsAt == prev.trialEndsAt)) &&
+            (!('trialDurationDays' in data) || ('trialDurationDays' in prev && data.trialDurationDays == prev.trialDurationDays)) &&
+            (!('trialStartServerTimestamp' in data) || ('trialStartServerTimestamp' in prev && data.trialStartServerTimestamp == prev.trialStartServerTimestamp)) &&
+            (!('christmasCampaignEligible' in data) || ('christmasCampaignEligible' in prev && data.christmasCampaignEligible == prev.christmasCampaignEligible))
+          ) ||
+          (
+            !('professionalActivatedAt' in prev) &&
+            !('trialStartDate' in prev) &&
+            !('freeTrialConsumed' in prev) &&
+            (!('trialDurationDays' in data) || data.trialDurationDays in [0, 14]) &&
+            (!('trialStartServerTimestamp' in data) || data.trialStartServerTimestamp == request.time) &&
+            (!('christmasCampaignEligible' in data) || (data.christmasCampaignEligible is bool && (data.christmasCampaignEligible == false || isChristmasCampaignWindow())))
+          )
+        );
+    }
+
+    function isValidUserUpdate(data, prev, userId) {
+      return hasNoSecrets(data) &&
+        (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 120)) &&
+        (!('phone' in data) || (('phone' in prev && data.phone == prev.phone) || isValidAngolaPhone(data.phone))) &&
+        (!('phoneE164' in data) || (('phoneE164' in prev && data.phoneE164 == prev.phoneE164) || isValidAngolaPhone(data.phoneE164))) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
+        (
+          isValidClientToDualActivation(data, prev, userId) ||
+          (
+            (!('role' in data) || data.role == prev.role || (prev.accountType == 'duplo' && data.role in ['cliente', 'profissional'])) &&
+            (!('accountType' in data) || data.accountType == prev.accountType) &&
+            (!('adminSubRole' in data) || ('adminSubRole' in prev && data.adminSubRole == prev.adminSubRole)) &&
+            (!('walletBalanceKz' in data) || ('walletBalanceKz' in prev && data.walletBalanceKz == prev.walletBalanceKz)) &&
+            (!('blocked' in data) || ('blocked' in prev && data.blocked == prev.blocked)) &&
+            (!('accountStatus' in data) || ('accountStatus' in prev && data.accountStatus == prev.accountStatus)) &&
+            (!('isDeleted' in data) || ('isDeleted' in prev && data.isDeleted == prev.isDeleted)) &&
+            (!('subscriptionPlan' in data) || ('subscriptionPlan' in prev && data.subscriptionPlan == prev.subscriptionPlan)) &&
+            (!('planStartedAt' in data) || ('planStartedAt' in prev && data.planStartedAt == prev.planStartedAt)) &&
+            (!('planExpiresAt' in data) || ('planExpiresAt' in prev && data.planExpiresAt == prev.planExpiresAt)) &&
+            (!('planExpiresTimestamp' in data) || ('planExpiresTimestamp' in prev && data.planExpiresTimestamp == prev.planExpiresTimestamp)) &&
+            (!('trialStartDate' in data) || ('trialStartDate' in prev && data.trialStartDate == prev.trialStartDate)) &&
+            (!('trialEndsAt' in data) || ('trialEndsAt' in prev && data.trialEndsAt == prev.trialEndsAt)) &&
+            (!('trialDurationDays' in data) || ('trialDurationDays' in prev && data.trialDurationDays == prev.trialDurationDays)) &&
+            (!('trialStartServerTimestamp' in data) || ('trialStartServerTimestamp' in prev && data.trialStartServerTimestamp == prev.trialStartServerTimestamp)) &&
+            (!('professionalActivatedAt' in data) || ('professionalActivatedAt' in prev && data.professionalActivatedAt == prev.professionalActivatedAt)) &&
+            (!('christmasCampaignEligible' in data) || ('christmasCampaignEligible' in prev && data.christmasCampaignEligible == prev.christmasCampaignEligible)) &&
+            (!('christmasCampaignEndsAt' in data) || ('christmasCampaignEndsAt' in prev && data.christmasCampaignEndsAt == prev.christmasCampaignEndsAt)) &&
+            (!('freeTrialCanonicalUid' in data) || ('freeTrialCanonicalUid' in prev && data.freeTrialCanonicalUid == prev.freeTrialCanonicalUid)) &&
+            (!('freeTrialConsumed' in data) || ('freeTrialConsumed' in prev && data.freeTrialConsumed == prev.freeTrialConsumed)) &&
+            (!('subscriptionStatus' in data) || ('subscriptionStatus' in prev && data.subscriptionStatus == prev.subscriptionStatus)) &&
+            (!('experienceVerified' in data) || ('experienceVerified' in prev && data.experienceVerified == prev.experienceVerified))
+          )
+        );
     }
 
     function isValidPublicPro(data) {
@@ -117,8 +230,10 @@ service cloud.firestore {
       return isValidPublicPro(data) &&
         (!('subscriptionPlan' in data) || data.subscriptionPlan == 'free_trial') &&
         !('planExpiresAt' in data) &&
+        !('planExpiresTimestamp' in data) &&
         !('planStartedAt' in data) &&
-        (!('trialDurationDays' in data) || data.trialDurationDays in [0, 30]) &&
+        (!('trialDurationDays' in data) || data.trialDurationDays in [0, 14]) &&
+        (!('christmasCampaignEligible' in data) || (data.christmasCampaignEligible is bool && (data.christmasCampaignEligible == false || isChristmasCampaignWindow()))) &&
         (!('blocked' in data) || data.blocked == false) &&
         (!('isDeleted' in data) || data.isDeleted == false);
     }
@@ -128,9 +243,14 @@ service cloud.firestore {
         (!('subscriptionPlan' in data) || ('subscriptionPlan' in prev && data.subscriptionPlan == prev.subscriptionPlan)) &&
         (!('planStartedAt' in data) || ('planStartedAt' in prev && data.planStartedAt == prev.planStartedAt)) &&
         (!('planExpiresAt' in data) || ('planExpiresAt' in prev && data.planExpiresAt == prev.planExpiresAt)) &&
+        (!('planExpiresTimestamp' in data) || ('planExpiresTimestamp' in prev && data.planExpiresTimestamp == prev.planExpiresTimestamp)) &&
         (!('trialStartDate' in data) || ('trialStartDate' in prev && data.trialStartDate == prev.trialStartDate)) &&
         (!('trialEndsAt' in data) || ('trialEndsAt' in prev && data.trialEndsAt == prev.trialEndsAt)) &&
         (!('trialDurationDays' in data) || ('trialDurationDays' in prev && data.trialDurationDays == prev.trialDurationDays)) &&
+        (!('professionalActivatedAt' in data) || ('professionalActivatedAt' in prev && data.professionalActivatedAt == prev.professionalActivatedAt)) &&
+        (!('christmasCampaignEligible' in data) || ('christmasCampaignEligible' in prev && data.christmasCampaignEligible == prev.christmasCampaignEligible)) &&
+        (!('christmasCampaignEndsAt' in data) || ('christmasCampaignEndsAt' in prev && data.christmasCampaignEndsAt == prev.christmasCampaignEndsAt)) &&
+        (!('freeTrialConsumed' in data) || ('freeTrialConsumed' in prev && data.freeTrialConsumed == prev.freeTrialConsumed)) &&
         (!('subscriptionStatus' in data) || ('subscriptionStatus' in prev && data.subscriptionStatus == prev.subscriptionStatus)) &&
         (!('blocked' in data) || ('blocked' in prev && data.blocked == prev.blocked)) &&
         (!('isDeleted' in data) || ('isDeleted' in prev && data.isDeleted == prev.isDeleted)) &&
@@ -205,16 +325,16 @@ service cloud.firestore {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
       allow list: if isAdmin() || (isSignedIn() && resource.data.id == request.auth.uid);
       allow create: if isValidId(userId) && (isAdmin() || (isOwner(userId) && isValidUserCreate(incoming(), userId)));
-      allow update: if isValidId(userId) && (isAdmin() || (isOwner(userId) && isValidUserUpdate(incoming(), existing())));
+      allow update: if isValidId(userId) && (isAdmin() || (isOwner(userId) && isValidUserUpdate(incoming(), existing(), userId)));
       allow delete: if isValidId(userId) && isAdmin();
     }
 
-    // --- PROFESSIONALS PRIVATE PROFILES (Private PII & Wallet) ---
+    // --- PROFESSIONALS PRIVATE PROFILES (Private PII & Subscription State) ---
     match /professionals/{proId} {
       allow get: if isValidId(proId) && (isOwner(proId) || isAdmin());
       allow list: if isAdmin() || (isSignedIn() && resource.data.id == request.auth.uid);
       allow create: if isValidId(proId) && (isAdmin() || (isOwner(proId) && isValidUserCreate(incoming(), proId)));
-      allow update: if isValidId(proId) && (isAdmin() || (isOwner(proId) && isValidUserUpdate(incoming(), existing())));
+      allow update: if isValidId(proId) && (isAdmin() || (isOwner(proId) && isValidUserUpdate(incoming(), existing(), proId)));
       allow delete: if isValidId(proId) && isAdmin();
     }
 
@@ -242,13 +362,24 @@ service cloud.firestore {
       allow delete: if isValidId(phoneHash) && isAdmin();
     }
 
-    // --- ANTI-DUPLICATE FREE TRIAL CLAIMS (One initial 30-day free trial per identity) ---
+    // --- ACCOUNT RECOVERY REQUESTS (Write-Only Public Submission, Strictly Admin-Only Read/Manage) ---
+    match /account_recovery_requests/{requestId} {
+      allow get: if isValidId(requestId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(requestId) &&
+        requestId.matches('^rec_[a-zA-Z0-9_\\-]{8,64}$') &&
+        isValidRecoveryRequestCreate(incoming(), requestId);
+      allow update: if isValidId(requestId) && isAdmin() && hasNoSecrets(incoming());
+      allow delete: if isValidId(requestId) && isAdmin();
+    }
+
+    // --- ANTI-DUPLICATE FREE TRIAL CLAIMS (One 14-day free trial per canonical identity) ---
     match /trial_claims/{claimId} {
       allow get: if isValidId(claimId) && isSignedIn();
       allow list: if isAdmin();
       allow create: if isValidId(claimId) && isSignedIn() &&
         incoming().claimedBy == request.auth.uid &&
-        (!('trialDurationDays' in incoming()) || incoming().trialDurationDays == 30);
+        (!('trialDurationDays' in incoming()) || incoming().trialDurationDays in [0, 14]);
       allow update, delete: if isValidId(claimId) && isAdmin();
     }
 
@@ -299,12 +430,13 @@ service cloud.firestore {
           !(existing().status in ['concluido', 'cancelado']) &&
           incoming().clientId == existing().clientId &&
           (
-            // Case A: First-come-first-served exclusive accept
+            // Case A: First-come-first-served exclusive accept (requires active Christmas Campaign, 14-day trial, or paid subscription)
             (
               existing().status in ['pendente', 'novamente_disponivel'] &&
               incoming().status == 'aceito' &&
               incoming().professionalId == request.auth.uid &&
               existing().clientId != request.auth.uid &&
+              hasActiveProEntitlement() &&
               incoming().diff(existing()).affectedKeys().hasOnly(['status', 'isReopened', 'acceptedAt', 'professionalId', 'professionalName', 'professionalAvatar', 'commissionAmountKz', 'netProAmountKz', 'updatedAt'])
             ) ||
             // Case B: Release without agreement back to available
@@ -389,14 +521,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // --- WORK POSTS & FEED ---
+    // --- WORK POSTS & FEED (Publishing gated by active Christmas Campaign, 14-day trial, or paid subscription; old posts always preserved) ---
     match /posts/{postId} {
       allow get: if isValidId(postId) && isSignedIn();
       allow list: if isSignedIn();
-      allow create: if isValidId(postId) && (isAdmin() || (isSignedIn() && isValidWorkPost(incoming()) && incoming().professionalId == request.auth.uid));
+      allow create: if isValidId(postId) && (isAdmin() || (isSignedIn() && isValidWorkPost(incoming()) && incoming().professionalId == request.auth.uid && hasActiveProEntitlement()));
       allow update: if isValidId(postId) && isSignedIn() && isValidWorkPost(incoming()) && (
         isAdmin() ||
-        (existing().professionalId == request.auth.uid && incoming().professionalId == existing().professionalId) ||
+        (existing().professionalId == request.auth.uid && incoming().professionalId == existing().professionalId && hasActiveProEntitlement()) ||
         incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'likedBy', 'reactions'])
       );
       allow delete: if isValidId(postId) && (isAdmin() || (isSignedIn() && existing().professionalId == request.auth.uid));
@@ -405,10 +537,10 @@ service cloud.firestore {
     match /work_feed_posts/{postId} {
       allow get: if isValidId(postId) && isSignedIn();
       allow list: if isSignedIn();
-      allow create: if isValidId(postId) && (isAdmin() || (isSignedIn() && isValidWorkPost(incoming()) && incoming().professionalId == request.auth.uid));
+      allow create: if isValidId(postId) && (isAdmin() || (isSignedIn() && isValidWorkPost(incoming()) && incoming().professionalId == request.auth.uid && hasActiveProEntitlement()));
       allow update: if isValidId(postId) && isSignedIn() && isValidWorkPost(incoming()) && (
         isAdmin() ||
-        (existing().professionalId == request.auth.uid && incoming().professionalId == existing().professionalId) ||
+        (existing().professionalId == request.auth.uid && incoming().professionalId == existing().professionalId && hasActiveProEntitlement()) ||
         incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'likedBy', 'reactions'])
       );
       allow delete: if isValidId(postId) && (isAdmin() || (isSignedIn() && existing().professionalId == request.auth.uid));

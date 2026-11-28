@@ -371,29 +371,32 @@ export function runFullSystemTestSuite(): TestSuiteReport {
 
   // 4. PLANOS E BLOQUEIO DE PROFISSIONAL (Requisito 3)
   runTest('T4.1', 'Ciclo de Vida do Plano Pro', 'Plano Ativo vs Expirado (Visibilidade, Pedidos, Conversas e Renovação)', () => {
+    // Usamos data pós-campanha de Natal e pós-14 dias (20/02/2027) para validar expiração real
+    const postCampaignNow = new Date('2027-02-20T12:00:00.000Z').getTime();
+
     const activePro: Partial<ProfessionalProfile> = {
       id: 'pro-active',
       name: 'Manuel Eletricista',
       subscriptionPlan: 'plan_30d',
-      planExpiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+      planExpiresAt: new Date(postCampaignNow + 10 * 24 * 60 * 60 * 1000).toISOString(),
     };
 
     const expiredPro: Partial<ProfessionalProfile> = {
       id: 'pro-expired',
       name: 'Pedro Canalizador',
       subscriptionPlan: 'free_trial',
-      trialStartDate: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(), // 32 dias atrás (> 30 dias trial)
-      createdAt: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(),
+      trialStartDate: new Date(postCampaignNow - 32 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(postCampaignNow - 32 * 24 * 60 * 60 * 1000).toISOString(),
     };
 
     // 1. Teste Plano Ativo
-    const statusActive = getProPlanStatus(activePro, true);
+    const statusActive = getProPlanStatus(activePro, true, postCampaignNow);
     const activeAppearsInSearch = statusActive.isActive;
     const activeCanReceiveRequests = statusActive.isActive;
     const activeCanStartChat = statusActive.isActive;
 
     // 2. Teste Plano Expirado
-    const statusExpired = getProPlanStatus(expiredPro, true);
+    const statusExpired = getProPlanStatus(expiredPro, true, postCampaignNow);
     const expiredHiddenFromSearch = !statusExpired.isActive;
     const expiredBlockedFromRequests = !statusExpired.isActive;
     const expiredBlockedFromChat = !statusExpired.isActive;
@@ -402,9 +405,9 @@ export function runFullSystemTestSuite(): TestSuiteReport {
     const renewedPro: Partial<ProfessionalProfile> = {
       ...expiredPro,
       subscriptionPlan: 'plan_14d',
-      planExpiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      planExpiresAt: new Date(postCampaignNow + 14 * 24 * 60 * 60 * 1000).toISOString(),
     };
-    const statusRenewed = getProPlanStatus(renewedPro, true);
+    const statusRenewed = getProPlanStatus(renewedPro, true, postCampaignNow);
     const renewedReactivatedAutomatically = statusRenewed.isActive && !statusRenewed.isExpired;
 
     const allPassed = 
@@ -425,25 +428,27 @@ export function runFullSystemTestSuite(): TestSuiteReport {
 
   // 5. BLOQUEIO APÓS EXPIRAÇÃO
   runTest('T5.1', 'Bloqueio de Expiração', 'Ocultação automática de profissionais expirados das pesquisas', () => {
+    const postCampaignNow = new Date('2027-02-20T12:00:00.000Z').getTime();
+
     const expiredPro: Partial<ProfessionalProfile> = {
       id: 'p-expired',
       subscriptionPlan: 'free_trial',
-      trialStartDate: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(), // 32 dias atrás (> 30 dias trial)
-      createdAt: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(),
+      trialStartDate: new Date(postCampaignNow - 32 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(postCampaignNow - 32 * 24 * 60 * 60 * 1000).toISOString(),
     };
 
     const activePro: Partial<ProfessionalProfile> = {
       id: 'p-active',
       subscriptionPlan: 'plan_30d',
-      planExpiresAt: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString(),
+      planExpiresAt: new Date(postCampaignNow + 20 * 24 * 60 * 60 * 1000).toISOString(),
     };
 
-    const statusExpired = getProPlanStatus(expiredPro, true);
-    const statusActive = getProPlanStatus(activePro, true);
+    const statusExpired = getProPlanStatus(expiredPro, true, postCampaignNow);
+    const statusActive = getProPlanStatus(activePro, true, postCampaignNow);
 
     // Simulação do filtro de pesquisa da app
     const proList = [expiredPro, activePro];
-    const visiblePros = proList.filter(p => getProPlanStatus(p, true).isActive);
+    const visiblePros = proList.filter(p => getProPlanStatus(p, true, postCampaignNow).isActive);
 
     const isExpiredHidden = !visiblePros.some(p => p.id === 'p-expired');
     const isActiveVisible = visiblePros.some(p => p.id === 'p-active');
@@ -1092,11 +1097,13 @@ export function runFullSystemTestSuite(): TestSuiteReport {
 
   // 17. REGRAS DE EXPIRAÇÃO DE ASSINATURA E RETENÇÃO DE DADOS
   runTest('T17.1', 'Gestão de Assinaturas', 'Expiração de Plano Profissional (Trial ou Pago) exige renovação e bloqueia aceite de trabalhos', () => {
+    const postCampaignNow = new Date('2027-02-20T12:00:00.000Z').getTime();
+
     const expiredProUser: Partial<User> = {
       id: 'pro-expired-1',
       role: 'profissional',
-      trialStartDate: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(), // 32 dias atrás (> 30 dias trial)
-      createdAt: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString(),
+      trialStartDate: new Date(postCampaignNow - 32 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(postCampaignNow - 32 * 24 * 60 * 60 * 1000).toISOString(),
       subscriptionPlan: 'free_trial'
     };
 
@@ -1104,11 +1111,11 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       id: 'pro-active-1',
       role: 'profissional',
       subscriptionPlan: 'plan_30d',
-      planExpiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString() // +15 dias
+      planExpiresAt: new Date(postCampaignNow + 15 * 24 * 60 * 60 * 1000).toISOString()
     };
 
-    const expiredStatus = getProPlanStatus(expiredProUser, true);
-    const activeStatus = getProPlanStatus(activeProUser, true);
+    const expiredStatus = getProPlanStatus(expiredProUser, true, postCampaignNow);
+    const activeStatus = getProPlanStatus(activeProUser, true, postCampaignNow);
 
     const passed = expiredStatus.isExpired && !expiredStatus.isActive && activeStatus.isActive && !activeStatus.isExpired;
 
@@ -1116,13 +1123,15 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       passed,
       message: 'Deteta corretamente a expiração de planos profissionais e redireciona para a área de renovação.',
       details: [
-        `Profissional com Trial Expirado (>30 dias): 🔒 isExpired = ${expiredStatus.isExpired} (${expiredStatus.message})`,
+        `Profissional com Trial Expirado (pós-14 dias): 🔒 isExpired = ${expiredStatus.isExpired} (${expiredStatus.message})`,
         `Profissional com Plano Mensal Ativo (+15 dias): ✅ isActive = ${activeStatus.isActive} (${activeStatus.message})`
       ]
     };
   });
 
   runTest('T17.2', 'Gestão de Assinaturas', 'Garantia de Retenção de Dados: Conta, Histórico, Fotos e Avaliações permanecem 100% intactos após expiração', () => {
+    const postCampaignNow = new Date('2027-02-20T12:00:00.000Z').getTime();
+
     const mockProDatabaseRecord: ProfessionalProfile = {
       id: 'pro-audit-1',
       name: 'João Manuel Eletricista',
@@ -1143,11 +1152,11 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       status: 'disponivel',
       address: 'Maianga, Luanda',
       verified: true,
-      trialStartDate: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString(),
-      createdAt: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString()
+      trialStartDate: new Date(postCampaignNow - 35 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(postCampaignNow - 35 * 24 * 60 * 60 * 1000).toISOString()
     };
 
-    const statusAfterExpiration = getProPlanStatus(mockProDatabaseRecord, true);
+    const statusAfterExpiration = getProPlanStatus(mockProDatabaseRecord, true, postCampaignNow);
 
     // Verify all original profile properties remain unmodified despite statusAfterExpiration.isExpired being true
     const dataIntact = 
@@ -1822,11 +1831,12 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       likedBy: []
     };
 
+    const postCampaignNow = new Date('2027-02-20T12:00:00.000Z').getTime();
     const ranked = rankWorkFeedPosts([postExpiredPro], null, [expiredPro]);
 
     // Publicação continua 100% visível e preservada no Feed
     const postPreserved = ranked.length === 1 && ranked[0].id === 'feed-post-expired-pro';
-    const proPlanStatus = getProPlanStatus(expiredPro, true);
+    const proPlanStatus = getProPlanStatus(expiredPro, true, postCampaignNow);
 
     const passed = postPreserved && proPlanStatus.isExpired && !proPlanStatus.isActive;
 
@@ -1841,29 +1851,51 @@ export function runFullSystemTestSuite(): TestSuiteReport {
     };
   });
 
-  // 26. CONTROLO DE SUBSCRIÇÕES (30 DIAS GRÁTIS, 3 PLANOS OFICIAIS & PROTEÇÃO DE DADOS)
-  runTest('T26.1', 'Subscrições & 30 Dias Grátis', 'Validar período experimental de 30 dias, 3 planos oficiais, anti-duplicação e preservação de contas antigas', () => {
-    const now = Date.now();
-    const newlyRegisteredPro: Partial<ProfessionalProfile> = {
-      id: 'pro-novo-30d',
+  // 26. CAMPANHA ESPECIAL DE NATAL (NOV–JAN), REGRA DE 14 DIAS & 3 PLANOS OFICIAIS
+  runTest('T26.1', 'Campanha Natal & 14 Dias Grátis', 'Validar Campanha de Natal (Nov–Jan), regra de 14 dias pós-01/02/2027, 3 planos oficiais e anti-duplicação', () => {
+    const campaignNow = new Date('2026-12-15T12:00:00.000Z').getTime();
+    const febNow = new Date('2027-02-05T12:00:00.000Z').getTime();
+    const afterCohortNow = new Date('2027-02-20T12:00:00.000Z').getTime();
+
+    const campaignPro: Partial<ProfessionalProfile> = {
+      id: 'pro-natal-1',
       name: 'Lucas Eletricista',
       role: 'profissional',
       subscriptionPlan: 'free_trial',
-      trialStartDate: new Date(now).toISOString(),
-      trialDurationDays: 30,
-      trialEndsAt: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      createdAt: new Date(now).toISOString(),
+      professionalActivatedAt: '2026-11-25T10:00:00.000Z',
+      christmasCampaignEligible: true,
+      trialStartDate: '2027-02-01T00:00:00.000Z',
+      trialDurationDays: 14,
+      trialEndsAt: '2027-02-15T00:00:00.000Z',
+      createdAt: '2026-11-25T10:00:00.000Z',
+      blocked: false
+    };
+
+    const newlyRegisteredFebPro: Partial<ProfessionalProfile> = {
+      id: 'pro-novo-14d',
+      name: 'Ana Costureira',
+      role: 'profissional',
+      subscriptionPlan: 'free_trial',
+      professionalActivatedAt: new Date(febNow).toISOString(),
+      christmasCampaignEligible: false,
+      trialStartDate: new Date(febNow).toISOString(),
+      trialDurationDays: 14,
+      trialEndsAt: new Date(febNow + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(febNow).toISOString(),
       blocked: false
     };
 
     const expiredTrialPro: Partial<ProfessionalProfile> = {
-      id: 'pro-exp-30d',
+      id: 'pro-exp-14d',
       name: 'Manuel Pintor',
       role: 'profissional',
       subscriptionPlan: 'free_trial',
-      trialStartDate: new Date(now - 35 * 24 * 60 * 60 * 1000).toISOString(),
-      trialDurationDays: 30,
-      createdAt: new Date(now - 35 * 24 * 60 * 60 * 1000).toISOString(),
+      professionalActivatedAt: '2027-02-01T00:00:00.000Z',
+      christmasCampaignEligible: false,
+      trialStartDate: '2027-02-01T00:00:00.000Z',
+      trialDurationDays: 14,
+      trialEndsAt: '2027-02-15T00:00:00.000Z',
+      createdAt: '2027-02-01T00:00:00.000Z',
       blocked: false
     };
 
@@ -1872,10 +1904,12 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       name: 'Conta Duplicada',
       role: 'profissional',
       subscriptionPlan: 'free_trial',
-      trialStartDate: new Date(now).toISOString(),
+      professionalActivatedAt: new Date(febNow).toISOString(),
+      christmasCampaignEligible: false,
+      trialStartDate: new Date(febNow).toISOString(),
       trialDurationDays: 0,
-      trialEndsAt: new Date(now).toISOString(),
-      createdAt: new Date(now).toISOString(),
+      trialEndsAt: new Date(febNow).toISOString(),
+      createdAt: new Date(febNow).toISOString(),
       blocked: false
     };
 
@@ -1884,16 +1918,17 @@ export function runFullSystemTestSuite(): TestSuiteReport {
       name: 'Rosa Canalizadora',
       role: 'profissional',
       subscriptionPlan: 'plan_30d',
-      planStartedAt: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(),
-      planExpiresAt: new Date(now + 20 * 24 * 60 * 60 * 1000).toISOString(),
+      planStartedAt: new Date(afterCohortNow - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      planExpiresAt: new Date(afterCohortNow + 20 * 24 * 60 * 60 * 1000).toISOString(),
       blocked: false
     };
 
-    const newTrialStatus = getProPlanStatus(newlyRegisteredPro, true, now);
-    const expiredStatus = getProPlanStatus(expiredTrialPro, true, now);
-    const expiredValidation = validateProAction(expiredTrialPro);
-    const dupStatus = getProPlanStatus(duplicateTrialPro, true, now);
-    const paidStatus = getProPlanStatus(existingPaidPro, true, now);
+    const christmasStatus = getProPlanStatus(campaignPro, true, campaignNow);
+    const newFebTrialStatus = getProPlanStatus(newlyRegisteredFebPro, true, febNow);
+    const expiredStatus = getProPlanStatus(expiredTrialPro, true, afterCohortNow);
+    const expiredValidation = validateProAction(expiredTrialPro, afterCohortNow);
+    const dupStatus = getProPlanStatus(duplicateTrialPro, true, febNow);
+    const paidStatus = getProPlanStatus(existingPaidPro, true, afterCohortNow);
 
     const pricesValid =
       PLAN_PRICES.plan_14d.days === 14 && PLAN_PRICES.plan_14d.priceKz === 1500 &&
@@ -1902,7 +1937,8 @@ export function runFullSystemTestSuite(): TestSuiteReport {
 
     const passed =
       GLOBAL_SUBSCRIPTIONS_ACTIVE === true &&
-      newTrialStatus.isTrial && newTrialStatus.isActive && newTrialStatus.daysRemaining === 30 &&
+      christmasStatus.isChristmasCampaign === true && christmasStatus.isActive &&
+      newFebTrialStatus.isTrial && newFebTrialStatus.isActive && newFebTrialStatus.daysRemaining === 14 &&
       expiredStatus.isExpired && !expiredStatus.isActive && !expiredValidation.allowed &&
       dupStatus.isExpired && !dupStatus.isActive &&
       paidStatus.isActive && !paidStatus.isTrial && paidStatus.daysRemaining === 20 &&
@@ -1910,13 +1946,14 @@ export function runFullSystemTestSuite(): TestSuiteReport {
 
     return {
       passed,
-      message: 'Subscrições ativas: 30 dias gratuitos (1 mês), 3 planos exatos (1.500 / 3.000 / 8.000 Kz) e contas pagas preservadas.',
+      message: 'Campanha de Natal (Nov–Jan), regra de 14 dias pós-01/02/2027, 3 planos oficiais (1.500 / 3.000 / 8.000 Kz) e contas pagas validados.',
       details: [
-        `1. Novo profissional (30 dias grátis): ${newTrialStatus.isActive && newTrialStatus.daysRemaining === 30 ? '✅ 30 dias ativos' : '❌ Falhou'}`,
-        `2. Trial expirado bloqueia ações sem apagar conta: ${expiredStatus.isExpired && !expiredValidation.allowed ? '✅ Bloqueado com segurança' : '❌ Falhou'}`,
-        `3. Bloqueio de segundo trial gratuito (trialDurationDays=0): ${dupStatus.isExpired ? '✅ Impedido' : '❌ Falhou'}`,
-        `4. Profissional com plano pago preservado (+20 dias): ${paidStatus.isActive && paidStatus.daysRemaining === 20 ? '✅ Preservado' : '❌ Falhou'}`,
-        `5. Tabela oficial: Semanal 2s (1.500 Kz) | Mensal 1m (3.000 Kz) | Trimestral 3m (8.000 Kz): ${pricesValid ? '✅ Conforme' : '❌ Falhou'}`
+        `1. Campanha Especial de Natal (Dez 2026): ${christmasStatus.isChristmasCampaign && christmasStatus.isActive ? '✅ Grátis até 31/01/2027' : '❌ Falhou'}`,
+        `2. Novo profissional em Fev 2027 (14 dias grátis): ${newFebTrialStatus.isActive && newFebTrialStatus.daysRemaining === 14 ? '✅ 14 dias ativos' : '❌ Falhou'}`,
+        `3. Período gratuito expirado bloqueia ações pro sem apagar conta: ${expiredStatus.isExpired && !expiredValidation.allowed ? '✅ Bloqueado com segurança' : '❌ Falhou'}`,
+        `4. Bloqueio de segundo trial gratuito (trialDurationDays=0): ${dupStatus.isExpired ? '✅ Impedido' : '❌ Falhou'}`,
+        `5. Profissional com plano pago preservado (+20 dias): ${paidStatus.isActive && paidStatus.daysRemaining === 20 ? '✅ Preservado' : '❌ Falhou'}`,
+        `6. Tabela oficial: Semanal 2s (1.500 Kz) | Mensal 1m (3.000 Kz) | Trimestral 3m (8.000 Kz): ${pricesValid ? '✅ Conforme' : '❌ Falhou'}`
       ]
     };
   });

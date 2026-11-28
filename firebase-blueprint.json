@@ -22,6 +22,17 @@
         "verified": { "type": "boolean" },
         "blocked": { "type": "boolean" },
         "accountStatus": { "type": "string", "enum": ["ACTIVE", "BLOCKED"] },
+        "subscriptionPlan": { "type": "string", "enum": ["free_trial", "plan_7d", "plan_14d", "plan_30d", "plan_90d"] },
+        "planStartedAt": { "type": "string", "maxLength": 64 },
+        "planExpiresAt": { "type": "string", "maxLength": 64 },
+        "trialStartDate": { "type": "string", "maxLength": 64 },
+        "trialEndsAt": { "type": "string", "maxLength": 64 },
+        "trialDurationDays": { "type": "number" },
+        "professionalActivatedAt": { "type": "string", "maxLength": 64 },
+        "christmasCampaignEligible": { "type": "boolean" },
+        "christmasCampaignEndsAt": { "type": "string", "maxLength": 64 },
+        "freeTrialCanonicalUid": { "type": "string", "maxLength": 128 },
+        "freeTrialConsumed": { "type": "boolean" },
         "ownerId": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
@@ -60,6 +71,11 @@
         "trialStartDate": { "type": "string", "maxLength": 64 },
         "trialEndsAt": { "type": "string", "maxLength": 64 },
         "trialDurationDays": { "type": "number" },
+        "professionalActivatedAt": { "type": "string", "maxLength": 64 },
+        "christmasCampaignEligible": { "type": "boolean" },
+        "christmasCampaignEndsAt": { "type": "string", "maxLength": 64 },
+        "freeTrialCanonicalUid": { "type": "string", "maxLength": 128 },
+        "freeTrialConsumed": { "type": "boolean" },
         "ownerId": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
@@ -92,7 +108,11 @@
         "planExpiresAt": { "type": "string", "maxLength": 64 },
         "trialStartDate": { "type": "string", "maxLength": 64 },
         "trialEndsAt": { "type": "string", "maxLength": 64 },
-        "trialDurationDays": { "type": "number" }
+        "trialDurationDays": { "type": "number" },
+        "professionalActivatedAt": { "type": "string", "maxLength": 64 },
+        "christmasCampaignEligible": { "type": "boolean" },
+        "christmasCampaignEndsAt": { "type": "string", "maxLength": 64 },
+        "freeTrialConsumed": { "type": "boolean" }
       },
       "required": ["id", "name", "province", "categories", "status"]
     },
@@ -342,6 +362,33 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["uid", "authMode"]
+    },
+    "AccountRecoveryRequest": {
+      "title": "AccountRecoveryRequest",
+      "description": "Pedidos de recuperação de palavra-passe submetidos via Esqueci a palavra-passe (leitura e gestão exclusiva do Administrador)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "submittedPhone": { "type": "string", "pattern": "^\\+244[0-9]{9}$" },
+        "submittedEmail": { "type": "string", "maxLength": 200 },
+        "identifierType": { "type": "string", "enum": ["phone", "email", "both"] },
+        "status": { "type": "string", "enum": ["pendente", "em_analise", "aprovado", "rejeitado", "concluido"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "reviewedBy": { "type": "string", "maxLength": 128 },
+        "reviewedByName": { "type": "string", "maxLength": 120 },
+        "reviewedAt": { "type": "string", "maxLength": 64 },
+        "approvedAt": { "type": "string", "maxLength": 64 },
+        "completedAt": { "type": "string", "maxLength": 64 },
+        "rejectionReason": { "type": "string", "maxLength": 500 },
+        "adminNotes": { "type": "string", "maxLength": 800 },
+        "deliveryMethod": { "type": "string", "enum": ["firebase_email_link", "sms_code", "manual_pending", "none"] },
+        "matchedUid": { "type": "string", "maxLength": 128 },
+        "matchedLegacyUid": { "type": "string", "maxLength": 128 },
+        "matchedHolderName": { "type": "string", "maxLength": 120 },
+        "matchedRole": { "type": "string", "enum": ["cliente", "profissional", "admin"] }
+      },
+      "required": ["id", "identifierType", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -456,6 +503,10 @@
     "/phone_login_index/{phoneHash}": {
       "schema": { "$ref": "#/entities/PhoneLoginIndex" },
       "description": "Índice hash privado para autenticação por telefone e prevenção de duplicados"
+    },
+    "/account_recovery_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/AccountRecoveryRequest" },
+      "description": "Pedidos de recuperação de conta com submissão write-only e gestão exclusiva de administradores"
     }
   }
 }

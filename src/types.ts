@@ -83,9 +83,15 @@ export interface User {
   trialDurationDays?: number;
   trialStartServerTimestamp?: unknown;
   trialClaimedHash?: string;
+  professionalActivatedAt?: string;
+  christmasCampaignEligible?: boolean;
+  christmasCampaignEndsAt?: string;
+  freeTrialCanonicalUid?: string;
+  freeTrialConsumed?: boolean;
   subscriptionPlan?: ProSubscriptionPlan;
   planStartedAt?: string;
   planExpiresAt?: string;
+  planExpiresTimestamp?: unknown;
   registrationSource?: string;
   referralCode?: string;
   experienceYears?: number;
@@ -266,6 +272,65 @@ export interface AdminAuditLog {
   ipAddress?: string;
   timestamp: string;
   ownerId?: string;
+}
+
+export type AccountRecoveryStatus =
+  | 'pendente'
+  | 'em_analise'
+  | 'aprovado'
+  | 'rejeitado'
+  | 'concluido';
+
+export type AccountRecoveryOrigin =
+  | 'legacy_migrated'
+  | 'legacy_unmigrated'
+  | 'new_account'
+  | 'protected_admin'
+  | 'none';
+
+export interface AccountRecoveryMatchedAccount {
+  matched: boolean;
+  matchSource: 'phone' | 'email' | 'both' | 'none';
+  accountOrigin: AccountRecoveryOrigin;
+  uid?: string;
+  legacyUid?: string;
+  holderName?: string;
+  role?: UserRole;
+  accountType?: AccountType;
+  phone?: string;
+  realEmail?: string;
+  authEmail?: string;
+  hasVerifiableEmail: boolean;
+  hasPhone: boolean;
+  isBlocked?: boolean;
+  isDeleted?: boolean;
+  warningNote?: string;
+}
+
+export interface AccountRecoveryRequest {
+  id: string;
+  submittedPhone?: string;
+  submittedEmail?: string;
+  identifierType: 'phone' | 'email' | 'both';
+  status: AccountRecoveryStatus;
+  createdAt: string;
+  updatedAt: string;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  reviewedAt?: string;
+  approvedAt?: string;
+  completedAt?: string;
+  rejectionReason?: string;
+  adminNotes?: string;
+  deliveryMethod?: 'firebase_email_link' | 'sms_code' | 'manual_pending' | 'none';
+  matchedUid?: string;
+  matchedLegacyUid?: string;
+  matchedHolderName?: string;
+  matchedRole?: UserRole;
+  matchedAccountOrigin?: AccountRecoveryOrigin;
+  matchedEmailMasked?: string;
+  matchedPhoneMasked?: string;
+  resetLinkSentAt?: string;
 }
 
 export interface Review {

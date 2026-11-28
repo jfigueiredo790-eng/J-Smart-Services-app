@@ -14,6 +14,7 @@ import {
   validateStrictAngolaPhone
 } from '../utils/phoneAuthUtils';
 import { UserAvatar } from './UserAvatar';
+import { isWithinChristmasCampaign, POST_CAMPAIGN_TRIAL_DAYS } from '../utils/planUtils';
 import { AccountRecoveryModal } from './AccountRecoveryModal';
 import { 
   X, 
@@ -850,10 +851,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, initialRole = 'cl
                   <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-[11px] text-emerald-900 font-bold space-y-1">
                     <div className="flex items-center gap-1.5 text-emerald-700 font-black">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                      <span>Aprovação Automática &amp; 30 Dias (1 Mês) Totalmente Grátis</span>
+                      <span>
+                        {isWithinChristmasCampaign()
+                          ? 'Campanha Especial de Natal — Grátis até 31/01/2027 (+14 dias em Fevereiro)'
+                          : `Aprovação Automática & ${POST_CAMPAIGN_TRIAL_DAYS} Dias Gratuitos Corridos`}
+                      </span>
                     </div>
                     <p className="text-slate-600 text-[10px] font-medium leading-relaxed">
-                      O seu perfil profissional fica ativo imediatamente com 30 dias (1 mês) gratuitos a partir da criação da conta (1 período experimental gratuito por utilizador).
+                      {isWithinChristmasCampaign()
+                        ? `O seu perfil profissional fica ativo imediatamente e 100% gratuito durante Novembro, Dezembro e Janeiro (até 31/01/2027), seguido de +${POST_CAMPAIGN_TRIAL_DAYS} dias grátis a partir de 01/02/2027.`
+                        : `O seu perfil profissional fica ativo imediatamente com ${POST_CAMPAIGN_TRIAL_DAYS} dias corridos gratuitos a partir da ativação (1 período gratuito por conta, sem reinício).`}
                     </p>
                   </div>
                 )}

@@ -17,6 +17,9 @@ import {
   ProSubscriptionPlan,
   AppNotification,
   AdminAuditLog,
+  AccountRecoveryRequest,
+  AccountRecoveryStatus,
+  AccountRecoveryMatchedAccount,
   CodeOfConductSection,
   WorkFeedPost
 } from '../types';
@@ -24,6 +27,9 @@ import { DEFAULT_CODE_OF_CONDUCT_RULES } from '../data/defaultCodeOfConduct';
 import {
   PLAN_PRICES,
   NEW_TRIAL_DAYS,
+  POST_CAMPAIGN_TRIAL_DAYS,
+  isWithinChristmasCampaign,
+  buildProfessionalEntitlementFields,
   getProPlanStatus,
   validateProAction,
   getPlanDisplayInfo,
@@ -69,6 +75,25 @@ import {
   GlobalSequentialMigrationResult,
   DEFAULT_MIGRATION_BATCH_SIZE
 } from '../utils/legacyMigrationService';
+import {
+  PhoneIndexSnapshotEntry,
+  submitAccountRecoveryRequestPublicSafe,
+  listAccountRecoveryRequestsAdminSafe,
+  listPhoneLoginIndexAdminSafe,
+  updateAccountRecoveryStatusAdminSafe,
+  approveAccountRecoveryAdminSafe,
+  verifyResetLinkCodeSafe,
+  confirmPasswordResetSafe,
+  isAuthorizedAdminActor,
+  RECOVERY_STATUS_LABELS
+} from '../utils/accountRecoveryService';
+import {
+  isArchivedOrDeletedAccountRecord,
+  deduplicateCanonicalUsers,
+  deduplicateCanonicalProfessionals,
+  generateLiveDuplicateAuditReportSafe,
+  LiveDuplicateAuditReport
+} from '../utils/userDeduplicationUtils';
 import { db, auth } from '../lib/firebase';
 import { 
   createUserWithEmailAndPassword, 
@@ -96,7 +121,8 @@ import {
   query, 
   where, 
   runTransaction,
-  serverTimestamp
+  serverTimestamp,
+  Timestamp
 } from 'firebase/firestore';
 
 export type ActiveTab = 'home' | 'feed' | 'categories' | 'search' | 'requests' | 'chat' | 'profile' | 'admin' | 'pro_dashboard' | 'wallet';
@@ -321,6 +347,7 @@ interface AppContextType {
     diagnosisSummary?: string;
   }>;
   generateLegacyAccountsReportAsync: () => Promise<LegacyAccountsReadOnlyReport>;
+  generateLiveDuplicateAuditReportAsync: () => Promise<{ success: boolean; report?: LiveDuplicateAuditReport; message?: string }>;
   relinkLegacyAccountAsync: (params: {
     legacyUid: string;
     newAuthUid: string;
@@ -350,10 +377,68 @@ interface AppContextType {
     success: boolean;
     message: string;
   }>;
+  accountRecoveryRequests: AccountRecoveryRequest[];
+  phoneLoginIndexSnapshot: PhoneIndexSnapshotEntry[];
+  submitAccountRecoveryRequestAsync: (input: {
+    phone?: string;
+    email?: string;
+  }) => Promise<{
+    success: boolean;
+    requestId?: string;
+    message: string;
+    rateLimited?: boolean;
+  }>;
+  refreshAccountRecoveryRequestsAsync: () => Promise<{
+    success: boolean;
+    requests: AccountRecoveryRequest[];
+    message?: string;
+  }>;
+  setAccountRecoveryStatusAdminAsync: (
+    requestId: string,
+    status: Exclude<AccountRecoveryStatus, 'aprovado'>,
+    options?: {
+      rejectionReason?: string;
+      adminNotes?: string;
+      matchedAccount?: AccountRecoveryMatchedAccount;
+    }
+  ) => Promise<{ success: boolean; message: string }>;
+  approveAccountRecoveryRequestAdminAsync: (
+    request: AccountRecoveryRequest,
+    matchedAccount: AccountRecoveryMatchedAccount,
+    options?: { adminNotes?: string }
+  ) => Promise<{
+    success: boolean;
+    status: AccountRecoveryStatus;
+    deliveryMethod: 'firebase_email_link' | 'sms_code' | 'manual_pending' | 'none';
+    requiresExternalSmsConfig?: boolean;
+    message: string;
+  }>;
+  verifyResetLinkCodeAsync: (oobCode: string) => Promise<{
+    valid: boolean;
+    maskedEmail?: string;
+    errorCode?: 'expired' | 'used_or_invalid' | 'network';
+    message: string;
+  }>;
+  confirmPasswordResetAsync: (
+    oobCode: string,
+    newPassword: string,
+    confirmPassword: string
+  ) => Promise<{
+    success: boolean;
+    errorCode?: 'validation' | 'expired' | 'used_or_invalid' | 'weak_password' | 'network';
+    message: string;
+  }>;
 
   changeProPlan: (plan: 'gratuito' | 'pro_destaque') => void;
   subscribeToPlan: (planType: ProSubscriptionPlan, bypassBalance?: boolean) => { success: boolean; message: string };
   adminUnlockProPlan: (proId: string, planType: ProSubscriptionPlan) => Promise<{ success: boolean; message: string }>;
+  activateProfessionalProfileAsync: (params: {
+    categories: string[];
+    bio?: string;
+    experienceYears?: number;
+    hourlyRateKz?: number;
+    address?: string;
+  }) => Promise<{ success: boolean; message: string }>;
   adminChangeUserAccountType: (userId: string, newAccountType: AccountType) => Promise<{ success: boolean; message: string }>;
   adminUpdateProCategories: (userId: string, newCategories: string[]) => Promise<{ success: boolean; message: string }>;
   auditAndFixBuggedCategories: (options?: { dryRun?: boolean }) => Promise<{
@@ -517,6 +602,10 @@ const toPublicProData = (pro: Partial<User & ProfessionalProfile>): Record<strin
   if (pro.trialStartDate) publicDoc.trialStartDate = pro.trialStartDate;
   if (pro.trialEndsAt) publicDoc.trialEndsAt = pro.trialEndsAt;
   if (typeof pro.trialDurationDays === 'number') publicDoc.trialDurationDays = pro.trialDurationDays;
+  if (pro.professionalActivatedAt) publicDoc.professionalActivatedAt = pro.professionalActivatedAt;
+  if (typeof pro.christmasCampaignEligible === 'boolean') publicDoc.christmasCampaignEligible = pro.christmasCampaignEligible;
+  if (pro.christmasCampaignEndsAt) publicDoc.christmasCampaignEndsAt = pro.christmasCampaignEndsAt;
+  if (typeof pro.freeTrialConsumed === 'boolean') publicDoc.freeTrialConsumed = pro.freeTrialConsumed;
   if (pro.subscriptionStatus) publicDoc.subscriptionStatus = pro.subscriptionStatus;
   if (pro.isDeleted !== undefined) publicDoc.isDeleted = pro.isDeleted;
   return publicDoc;
@@ -541,18 +630,24 @@ export const checkProAutoApproval = (pro: Partial<ProfessionalProfile>): { isApp
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [firebaseAuthUid, setFirebaseAuthUid] = useState<string | null>(() => auth.currentUser?.uid || null);
 
-  // Load state from local storage safely without plaintext secrets
+  // Load state from local storage safely without plaintext secrets, archived migration copies, or duplicates
   const [professionals, setProfessionals] = useState<ProfessionalProfile[]>(() => {
     const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_pros`);
     if (saved) {
       try {
         const parsed: ProfessionalProfile[] = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed.filter(p => !isFictitiousOrInvalidUser(p)).map(p => stripSensitiveFields(p));
+          const cleaned = parsed
+            .filter(p => !isFictitiousOrInvalidUser(p) && !isArchivedOrDeletedAccountRecord(p))
+            .map(p => stripSensitiveFields(p));
+          return deduplicateCanonicalProfessionals(cleaned, { filterFictitious: isFictitiousOrInvalidUser }).uniqueProfessionals;
         }
       } catch {}
     }
-    return MOCK_PROFESSIONALS.filter(p => !isFictitiousOrInvalidUser(p)).map(p => stripSensitiveFields(p));
+    return deduplicateCanonicalProfessionals(
+      MOCK_PROFESSIONALS.filter(p => !isFictitiousOrInvalidUser(p) && !isArchivedOrDeletedAccountRecord(p)).map(p => stripSensitiveFields(p)),
+      { filterFictitious: isFictitiousOrInvalidUser }
+    ).uniqueProfessionals;
   });
 
   const [allUsers, setAllUsers] = useState<User[]>(() => {
@@ -561,11 +656,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const parsed: User[] = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed.filter(u => !isFictitiousOrInvalidUser(u)).map(u => stripSensitiveFields(u));
+          const cleaned = parsed
+            .filter(u => !isFictitiousOrInvalidUser(u) && !isArchivedOrDeletedAccountRecord(u))
+            .map(u => stripSensitiveFields(u));
+          return deduplicateCanonicalUsers(cleaned, { filterFictitious: isFictitiousOrInvalidUser }).uniqueUsers;
         }
       } catch {}
     }
-    return MOCK_USERS.filter(u => !isFictitiousOrInvalidUser(u)).map(u => stripSensitiveFields(u));
+    return deduplicateCanonicalUsers(
+      MOCK_USERS.filter(u => !isFictitiousOrInvalidUser(u) && !isArchivedOrDeletedAccountRecord(u)).map(u => stripSensitiveFields(u)),
+      { filterFictitious: isFictitiousOrInvalidUser }
+    ).uniqueUsers;
   });
 
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
@@ -695,6 +796,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_audit_logs`);
     return saved ? JSON.parse(saved) : [];
   });
+
+  const [accountRecoveryRequests, setAccountRecoveryRequests] = useState<AccountRecoveryRequest[]>([]);
+  const [phoneLoginIndexSnapshot, setPhoneLoginIndexSnapshot] = useState<PhoneIndexSnapshotEntry[]>([]);
 
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(() => {
     const saved = safeStorageGet(`${LOCAL_STORAGE_KEY}_settings`);
@@ -1405,7 +1509,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Automatic private notification when a professional's 30-day trial or subscription approaches/reaches expiration
+  // Automatic private notification when a professional's Christmas Campaign, 14-day free period, or subscription approaches/reaches expiration
   useEffect(() => {
     if (!isLoggedIn || !currentUser?.id || currentUser.id === 'guest-client') return;
     if (currentUser.role === 'admin' || currentUser.blocked || currentUser.isDeleted) return;
@@ -1434,10 +1538,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           userId: uid,
           targetRoleScope: 'profissional',
           title: planStatus.isTrial
-            ? '⏰ O seu período gratuito de 30 dias terminou'
+            ? '⏰ O seu período gratuito de 14 dias terminou'
             : '⏰ A sua subscrição profissional expirou',
           message:
-            'Os seus dados, publicações e histórico estão preservados. Escolha o plano Semanal (2 semanas — 1.500 Kz), Mensal (1 mês — 3.000 Kz) ou Trimestral (3 meses — 8.000 Kz) e envie o comprovativo para continuar a trabalhar.',
+            'Os seus dados, publicações, avaliações, conversas e modo Cliente estão 100% preservados. Escolha um plano de subscrição (Semanal — 1.500 Kz, Mensal — 3.000 Kz ou Trimestral — 8.000 Kz) para reativar as funcionalidades profissionais.',
           type: 'plano_expira',
           read: false,
           createdAt: new Date().toISOString()
@@ -1465,8 +1569,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           id: stageNotifId,
           userId: uid,
           targetRoleScope: 'profissional',
-          title: '🔔 Lembrete do Período Experimental (30 Dias Grátis)',
-          message: `${planStatus.message} Após o término, poderá renovar com o plano Semanal (1.500 Kz), Mensal (3.000 Kz) ou Trimestral (8.000 Kz).`,
+          title: planStatus.isChristmasCampaign
+            ? '🎄 Lembrete — Campanha Especial de Natal (até 31/01/2027)'
+            : '🔔 Lembrete do Período Gratuito (14 Dias Corridos)',
+          message: `${planStatus.message} Quando terminar o período gratuito, poderá ativar o plano Semanal (1.500 Kz), Mensal (3.000 Kz) ou Trimestral (8.000 Kz).`,
           type: 'trial_aviso',
           read: false,
           createdAt: new Date().toISOString()
@@ -1488,6 +1594,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     currentUser?.trialStartDate,
     currentUser?.trialEndsAt,
     currentUser?.trialDurationDays,
+    currentUser?.professionalActivatedAt,
+    currentUser?.christmasCampaignEligible,
     currentUser?.planExpiresAt,
     currentUser?.subscriptionPlan,
     currentUser?.blocked,
@@ -1584,12 +1692,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 isAutoApproved: isBlocked ? false : (raw.isAutoApproved ?? true),
                 accountType: raw.accountType || (raw.role === 'profissional' ? 'duplo' : 'cliente')
               } as unknown as User);
-              if (!isFictitiousOrInvalidUser(uData) && !uData.migratedToUid && !uData.legacyArchiveOnly) fsUsers.push(uData);
+              if (!isFictitiousOrInvalidUser(uData) && !isArchivedOrDeletedAccountRecord(uData)) fsUsers.push(uData);
             });
             setAllUsers(prev => {
               const fsIds = new Set(fsUsers.map(u => u.id));
-              const existingNonFs = prev.filter(u => !fsIds.has(u.id) && !isFictitiousOrInvalidUser(u) && (!snapshot.metadata.fromCache ? pendingWriteIdsRef.current.has(u.id) : true));
-              return [...fsUsers, ...existingNonFs];
+              const existingNonFs = prev.filter(
+                u =>
+                  !fsIds.has(u.id) &&
+                  !isFictitiousOrInvalidUser(u) &&
+                  !isArchivedOrDeletedAccountRecord(u) &&
+                  (!snapshot.metadata.fromCache ? pendingWriteIdsRef.current.has(u.id) : true)
+              );
+              return deduplicateCanonicalUsers([...fsUsers, ...existingNonFs], {
+                filterFictitious: isFictitiousOrInvalidUser
+              }).uniqueUsers;
             });
           }
         }, (err) => logFirestoreWarning(err, OperationType.LIST, 'users')));
@@ -1643,14 +1759,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               accountType: raw.accountType || 'duplo',
               categories: Array.isArray(raw.categories) ? raw.categories : []
             } as unknown as ProfessionalProfile);
-            if (!isFictitiousOrInvalidUser(pData) && !pData.isDeleted && pData.status !== 'deleted' && !pData.migratedToUid && !pData.legacyArchiveOnly) {
+            if (!isFictitiousOrInvalidUser(pData) && !isArchivedOrDeletedAccountRecord(pData)) {
               fsPros.push(pData);
             }
           });
           setProfessionals(prev => {
             const fsIds = new Set(fsPros.map(p => p.id));
-            const existingNonFs = prev.filter(p => !fsIds.has(p.id) && !isFictitiousOrInvalidUser(p) && !p.isDeleted && p.status !== 'deleted' && (!snapshot.metadata.fromCache ? pendingWriteIdsRef.current.has(p.id) : true));
-            return [...fsPros, ...existingNonFs];
+            const existingNonFs = prev.filter(
+              p =>
+                !fsIds.has(p.id) &&
+                !isFictitiousOrInvalidUser(p) &&
+                !isArchivedOrDeletedAccountRecord(p) &&
+                (!snapshot.metadata.fromCache ? pendingWriteIdsRef.current.has(p.id) : true)
+            );
+            return deduplicateCanonicalProfessionals([...fsPros, ...existingNonFs], {
+              filterFictitious: isFictitiousOrInvalidUser
+            }).uniqueProfessionals;
           });
         }
       }, (err) => logFirestoreWarning(err, OperationType.LIST, isAdminUser ? 'professionals' : 'professionals_public')));
@@ -1920,12 +2044,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                     isAutoApproved: isBlocked ? false : (raw.isAutoApproved ?? true),
                     accountType: raw.accountType || (raw.role === 'profissional' ? 'duplo' : 'cliente')
                   } as unknown as User);
-                  if (!isFictitiousOrInvalidUser(uData)) fsUsers.push(uData);
+                  if (!isFictitiousOrInvalidUser(uData) && !isArchivedOrDeletedAccountRecord(uData)) fsUsers.push(uData);
                 });
                 setAllUsers(prev => {
                   const fsIds = new Set(fsUsers.map(u => u.id));
-                  const existingNonFs = prev.filter(u => !fsIds.has(u.id) && !isFictitiousOrInvalidUser(u) && pendingWriteIdsRef.current.has(u.id));
-                  return [...fsUsers, ...existingNonFs];
+                  const existingNonFs = prev.filter(
+                    u =>
+                      !fsIds.has(u.id) &&
+                      !isFictitiousOrInvalidUser(u) &&
+                      !isArchivedOrDeletedAccountRecord(u) &&
+                      pendingWriteIdsRef.current.has(u.id)
+                  );
+                  return deduplicateCanonicalUsers([...fsUsers, ...existingNonFs], {
+                    filterFictitious: isFictitiousOrInvalidUser
+                  }).uniqueUsers;
                 });
               }
             } else {
@@ -1964,14 +2096,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   accountType: raw.accountType || 'duplo',
                   categories: Array.isArray(raw.categories) ? raw.categories : []
                 } as unknown as ProfessionalProfile);
-                if (!isFictitiousOrInvalidUser(pData) && !pData.isDeleted && pData.status !== 'deleted') {
+                if (!isFictitiousOrInvalidUser(pData) && !isArchivedOrDeletedAccountRecord(pData)) {
                   fsPros.push(pData);
                 }
               });
               setProfessionals(prev => {
                 const fsIds = new Set(fsPros.map(p => p.id));
-                const existingNonFs = prev.filter(p => !fsIds.has(p.id) && !isFictitiousOrInvalidUser(p) && !p.isDeleted && p.status !== 'deleted' && pendingWriteIdsRef.current.has(p.id));
-                return [...fsPros, ...existingNonFs];
+                const existingNonFs = prev.filter(
+                  p =>
+                    !fsIds.has(p.id) &&
+                    !isFictitiousOrInvalidUser(p) &&
+                    !isArchivedOrDeletedAccountRecord(p) &&
+                    pendingWriteIdsRef.current.has(p.id)
+                );
+                return deduplicateCanonicalProfessionals([...fsPros, ...existingNonFs], {
+                  filterFictitious: isFictitiousOrInvalidUser
+                }).uniqueProfessionals;
               });
             }
           } catch (e) {
@@ -3705,6 +3845,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (normalizedDocNum) {
           hashInputs.push({ prefix: 'doc', value: normalizedDocNum });
         }
+        hashInputs.push({ prefix: 'uid', value: firebaseUid });
 
         for (const item of hashInputs) {
           const digest = await computeSha256Hex(`${item.prefix}:${item.value}`);
@@ -3726,10 +3867,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      const assignedTrialDays = isProRegistration ? (alreadyUsedTrial ? 0 : NEW_TRIAL_DAYS) : NEW_TRIAL_DAYS;
-      const assignedTrialEndsAt = isProRegistration
-        ? new Date(authoritativeNowMs + assignedTrialDays * 24 * 60 * 60 * 1000).toISOString()
-        : undefined;
+      const proEntitlement = isProRegistration
+        ? buildProfessionalEntitlementFields({
+            uid: firebaseUid,
+            nowMs: authoritativeNowMs,
+            alreadyUsedTrial
+          })
+        : null;
 
       const newUserObj: User = stripSensitiveFields({
         id: firebaseUid,
@@ -3754,11 +3898,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         blocked: false,
         isDeleted: false,
         subscriptionPlan: 'free_trial',
-        ...(isProRegistration ? {
-          trialStartDate: nowIso,
-          trialEndsAt: assignedTrialEndsAt,
-          trialDurationDays: assignedTrialDays,
-          subscriptionStatus: assignedTrialDays > 0 ? 'ACTIVE' : 'EXPIRED'
+        ...(proEntitlement ? {
+          professionalActivatedAt: proEntitlement.professionalActivatedAt,
+          christmasCampaignEligible: proEntitlement.christmasCampaignEligible,
+          ...(proEntitlement.christmasCampaignEndsAt ? { christmasCampaignEndsAt: proEntitlement.christmasCampaignEndsAt } : {}),
+          trialStartDate: proEntitlement.trialStartDate,
+          trialEndsAt: proEntitlement.trialEndsAt,
+          trialDurationDays: proEntitlement.trialDurationDays,
+          freeTrialCanonicalUid: proEntitlement.freeTrialCanonicalUid,
+          freeTrialConsumed: proEntitlement.freeTrialConsumed,
+          subscriptionStatus: proEntitlement.subscriptionStatus
         } : {}),
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -3788,7 +3937,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       // 3. If Professional/Duplo, persist private profile + PII-free public catalog + trial claims
-      if (isProRegistration) {
+      if (isProRegistration && proEntitlement) {
         const proProfileToSave: ProfessionalProfile = stripSensitiveFields({
           id: firebaseUid,
           name: newUserObj.name,
@@ -3823,10 +3972,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           blocked: false,
           isDeleted: false,
           subscriptionPlan: 'free_trial',
-          trialStartDate: nowIso,
-          trialEndsAt: assignedTrialEndsAt,
-          trialDurationDays: assignedTrialDays,
-          subscriptionStatus: assignedTrialDays > 0 ? 'ACTIVE' : 'EXPIRED',
+          professionalActivatedAt: proEntitlement.professionalActivatedAt,
+          christmasCampaignEligible: proEntitlement.christmasCampaignEligible,
+          ...(proEntitlement.christmasCampaignEndsAt ? { christmasCampaignEndsAt: proEntitlement.christmasCampaignEndsAt } : {}),
+          trialStartDate: proEntitlement.trialStartDate,
+          trialEndsAt: proEntitlement.trialEndsAt,
+          trialDurationDays: proEntitlement.trialDurationDays,
+          freeTrialCanonicalUid: proEntitlement.freeTrialCanonicalUid,
+          freeTrialConsumed: proEntitlement.freeTrialConsumed,
+          subscriptionStatus: proEntitlement.subscriptionStatus,
           createdAt: nowIso,
           updatedAt: nowIso
         });
@@ -3841,8 +3995,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             claimIdsToRecord.map(claimId =>
               setDoc(doc(db, 'trial_claims', claimId), {
                 claimedBy: firebaseUid,
-                trialDurationDays: NEW_TRIAL_DAYS,
-                trialEndsAt: assignedTrialEndsAt,
+                trialDurationDays: POST_CAMPAIGN_TRIAL_DAYS,
+                christmasCampaignClaimed: proEntitlement.christmasCampaignEligible,
+                trialEndsAt: proEntitlement.trialEndsAt,
                 createdAt: serverTimestamp()
               })
             )
@@ -4673,7 +4828,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         snapResult.value.forEach((docSnap: any) => {
           const rawDoc = docSnap.data() || {};
           const data = stripSensitiveFields({ id: docSnap.id, ...rawDoc } as User) as Partial<User> & Record<string, any>;
-          if (!data.id || data.isDeleted || isFictitiousOrInvalidUser(data)) return;
+          if (!data.id || isArchivedOrDeletedAccountRecord(data) || isFictitiousOrInvalidUser(data)) return;
           const prev = mergedById.get(data.id) || {};
           const extractedPhone = extractRawPhone(rawDoc) || extractRawPhone(prev);
           mergedById.set(data.id, {
@@ -4690,9 +4845,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ingestSnap(liveAdminsSnap);
       ingestSnap(liveAdminsPtSnap);
 
-      // Include any in-memory hydrated accounts as fallback
+      // Include any in-memory hydrated accounts as fallback (strictly excluding archived/deleted)
       for (const u of [...allUsers, ...professionals]) {
-        if (!u?.id || u.isDeleted || isFictitiousOrInvalidUser(u)) continue;
+        if (!u?.id || isArchivedOrDeletedAccountRecord(u) || isFictitiousOrInvalidUser(u)) continue;
         if (!mergedById.has(u.id)) {
           mergedById.set(u.id, u);
         }
@@ -4943,6 +5098,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Strictly READ-ONLY live audit of unique users, archived migration copies, professionals, and true active duplicates
+  const generateLiveDuplicateAuditReportAsync = async (): Promise<{
+    success: boolean;
+    report?: LiveDuplicateAuditReport;
+    message?: string;
+  }> => {
+    const fbCurrentUser = auth.currentUser;
+    const isVerifiedSuperAdminSession = Boolean(
+      fbCurrentUser?.emailVerified &&
+      (fbCurrentUser.email || '').trim().toLowerCase() === OFFICIAL_ADMIN_EMAIL
+    );
+    if (!fbCurrentUser || (currentUser.role !== 'admin' && !isVerifiedSuperAdminSession)) {
+      return {
+        success: false,
+        message: 'Apenas administradores autenticados podem executar a auditoria de leitura do Firestore.'
+      };
+    }
+    try {
+      const report = await generateLiveDuplicateAuditReportSafe(db, isFictitiousOrInvalidUser);
+      return { success: true, report };
+    } catch (err: any) {
+      logFirestoreWarning(err, OperationType.LIST, 'users');
+      return {
+        success: false,
+        message: err?.message || 'Não foi possível concluir a auditoria de leitura no Firestore.'
+      };
+    }
+  };
+
   // Phase 1 (Starter Tier): Strictly READ-ONLY legacy accounts & references report across ALL Firestore collections
   const generateLegacyAccountsReportAsync = async (): Promise<LegacyAccountsReadOnlyReport> => {
     const fbCurrentUser = auth.currentUser;
@@ -5179,6 +5363,133 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // ==================== ACCOUNT RECOVERY SYSTEM (ANTI-ENUMERATION + ADMIN APPROVAL) ====================
+  const buildCurrentAdminRecoveryActor = () => {
+    const fbUser = auth.currentUser;
+    if (!fbUser) return null;
+    return {
+      uid: fbUser.uid,
+      name: currentUser.name || 'Administrador J Smart Services',
+      role: currentUser.role,
+      email: fbUser.email,
+      emailVerified: fbUser.emailVerified,
+      getIdToken: () => fbUser.getIdToken()
+    };
+  };
+
+  const submitAccountRecoveryRequestAsync = async (input: {
+    phone?: string;
+    email?: string;
+  }) => {
+    return submitAccountRecoveryRequestPublicSafe(db, input);
+  };
+
+  const refreshAccountRecoveryRequestsAsync = async () => {
+    const actor = buildCurrentAdminRecoveryActor();
+    if (!isAuthorizedAdminActor(actor)) {
+      setAccountRecoveryRequests([]);
+      setPhoneLoginIndexSnapshot([]);
+      return {
+        success: false,
+        requests: [],
+        message: 'Acesso negado: apenas administradores autorizados podem consultar pedidos de recuperação.'
+      };
+    }
+    try {
+      const [reqs, idxEntries] = await Promise.all([
+        listAccountRecoveryRequestsAdminSafe(db),
+        listPhoneLoginIndexAdminSafe(db)
+      ]);
+      setAccountRecoveryRequests(reqs);
+      setPhoneLoginIndexSnapshot(idxEntries);
+      return { success: true, requests: reqs };
+    } catch (err) {
+      logFirestoreWarning(err, OperationType.LIST, 'account_recovery_requests');
+      return {
+        success: false,
+        requests: accountRecoveryRequests,
+        message: 'Não foi possível carregar os pedidos de recuperação. Verifique a sessão administrativa.'
+      };
+    }
+  };
+
+  const setAccountRecoveryStatusAdminAsync = async (
+    requestId: string,
+    status: Exclude<AccountRecoveryStatus, 'aprovado'>,
+    options?: {
+      rejectionReason?: string;
+      adminNotes?: string;
+      matchedAccount?: AccountRecoveryMatchedAccount;
+    }
+  ) => {
+    const actor = buildCurrentAdminRecoveryActor();
+    const res = await updateAccountRecoveryStatusAdminSafe(db, actor, requestId, status, options);
+    if (res.success && res.updatedFields) {
+      setAccountRecoveryRequests(prev =>
+        prev.map(r => (r.id === requestId ? { ...r, ...res.updatedFields } : r))
+      );
+      await logAdminAction(
+        `RECUPERACAO_CONTA_${status.toUpperCase()}`,
+        requestId,
+        `Estado atualizado para ${RECOVERY_STATUS_LABELS[status]}${
+          options?.rejectionReason ? ` | Motivo: ${options.rejectionReason}` : ''
+        }${options?.matchedAccount?.holderName ? ` | Conta: ${options.matchedAccount.holderName}` : ''}`
+      );
+    }
+    return { success: res.success, message: res.message };
+  };
+
+  const approveAccountRecoveryRequestAdminAsync = async (
+    request: AccountRecoveryRequest,
+    matchedAccount: AccountRecoveryMatchedAccount,
+    options?: { adminNotes?: string }
+  ) => {
+    const actor = buildCurrentAdminRecoveryActor();
+    const res = await approveAccountRecoveryAdminSafe(
+      db,
+      auth,
+      actor,
+      request,
+      matchedAccount,
+      options
+    );
+    if (res.updatedFields) {
+      setAccountRecoveryRequests(prev =>
+        prev.map(r => (r.id === request.id ? { ...r, ...res.updatedFields } : r))
+      );
+    }
+    if (isAuthorizedAdminActor(actor)) {
+      await logAdminAction(
+        res.success ? 'RECUPERACAO_CONTA_APROVADA' : 'RECUPERACAO_CONTA_PENDENTE_CONTACTO',
+        request.id,
+        `Conta: ${matchedAccount.holderName || 'N/A'} (${matchedAccount.uid || 'sem UID'}) | Canal: ${res.deliveryMethod} | Resultado: ${res.message}`
+      );
+    }
+    return {
+      success: res.success,
+      status: res.status,
+      deliveryMethod: res.deliveryMethod,
+      requiresExternalSmsConfig: res.requiresExternalSmsConfig,
+      message: res.message
+    };
+  };
+
+  const verifyResetLinkCodeAsync = async (oobCode: string) => {
+    return verifyResetLinkCodeSafe(auth, oobCode);
+  };
+
+  const confirmPasswordResetAsync = async (
+    oobCode: string,
+    newPassword: string,
+    confirmPassword: string
+  ) => {
+    const res = await confirmPasswordResetSafe(auth, oobCode, newPassword, confirmPassword);
+    if (res.success) {
+      setIsLoggedIn(false);
+    }
+    return res;
+  };
+
   const updateUserProfile = (updated: Partial<User & ProfessionalProfile>) => {
     const isAdminActor = currentUser.role === 'admin';
     const sanitizedUpdates = stripSensitiveFields(updated);
@@ -5193,10 +5504,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       delete (sanitizedUpdates as any).subscriptionPlan;
       delete (sanitizedUpdates as any).planStartedAt;
       delete (sanitizedUpdates as any).planExpiresAt;
+      delete (sanitizedUpdates as any).planExpiresTimestamp;
       delete (sanitizedUpdates as any).trialStartDate;
       delete (sanitizedUpdates as any).trialEndsAt;
       delete (sanitizedUpdates as any).trialDurationDays;
       delete (sanitizedUpdates as any).trialStartServerTimestamp;
+      delete (sanitizedUpdates as any).professionalActivatedAt;
+      delete (sanitizedUpdates as any).christmasCampaignEligible;
+      delete (sanitizedUpdates as any).christmasCampaignEndsAt;
+      delete (sanitizedUpdates as any).freeTrialCanonicalUid;
+      delete (sanitizedUpdates as any).freeTrialConsumed;
       delete (sanitizedUpdates as any).subscriptionStatus;
       delete (sanitizedUpdates as any).experienceVerified;
       delete (sanitizedUpdates as any).adminSubRole;
@@ -5325,6 +5642,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         trialStartDate: existingPro?.trialStartDate || updatedUser.trialStartDate,
         trialEndsAt: existingPro?.trialEndsAt || updatedUser.trialEndsAt,
         trialDurationDays: existingPro?.trialDurationDays ?? updatedUser.trialDurationDays,
+        professionalActivatedAt: existingPro?.professionalActivatedAt || updatedUser.professionalActivatedAt,
+        christmasCampaignEligible: existingPro?.christmasCampaignEligible ?? updatedUser.christmasCampaignEligible,
+        christmasCampaignEndsAt: existingPro?.christmasCampaignEndsAt || updatedUser.christmasCampaignEndsAt,
+        freeTrialCanonicalUid: existingPro?.freeTrialCanonicalUid || updatedUser.freeTrialCanonicalUid,
+        freeTrialConsumed: existingPro?.freeTrialConsumed ?? updatedUser.freeTrialConsumed,
         subscriptionStatus: existingPro?.subscriptionStatus || updatedUser.subscriptionStatus,
         blocked: existingPro?.blocked ?? updatedUser.blocked ?? false,
         createdAt: existingPro?.createdAt || updatedUser.createdAt || nowIso,
@@ -5581,7 +5903,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const startedAtIso = now.toISOString();
-    const newExpiresAt = new Date(baseDate.getTime() + planInfo.days * 24 * 60 * 60 * 1000).toISOString();
+    const newExpiresDate = new Date(baseDate.getTime() + planInfo.days * 24 * 60 * 60 * 1000);
+    const newExpiresAt = newExpiresDate.toISOString();
     const planPayload = {
       subscriptionPlan: planType,
       planStartedAt: startedAtIso,
@@ -5589,11 +5912,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       subscriptionStatus: 'ACTIVE' as const,
       updatedAt: startedAtIso
     };
+    const firestorePlanPayload = {
+      ...planPayload,
+      planExpiresTimestamp: Timestamp.fromDate(newExpiresDate)
+    };
 
     try {
-      await setDoc(doc(db, 'professionals', proId), planPayload, { merge: true });
-      await setDoc(doc(db, 'professionals_public', proId), { ...planPayload, name: existingPro?.name || 'Profissional' }, { merge: true }).catch(() => {});
-      await setDoc(doc(db, 'users', proId), planPayload, { merge: true });
+      await setDoc(doc(db, 'professionals', proId), firestorePlanPayload, { merge: true });
+      await setDoc(doc(db, 'professionals_public', proId), { ...firestorePlanPayload, name: existingPro?.name || 'Profissional' }, { merge: true }).catch(() => {});
+      await setDoc(doc(db, 'users', proId), firestorePlanPayload, { merge: true });
 
       setProfessionals(prev => prev.map(p => (p.id === proId ? { ...p, ...planPayload } : p)));
       setAllUsers(prev => prev.map(u => (u.id === proId ? { ...u, ...planPayload } : u)));
@@ -5829,6 +6156,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             subscriptionPlan: tx.planId,
             planStartedAt: startedAtIso,
             planExpiresAt: expiresAtIso,
+            planExpiresTimestamp: Timestamp.fromDate(new Date(expiresAtIso)),
             subscriptionStatus: 'ACTIVE' as const,
             updatedAt: nowIso
           };
@@ -6094,6 +6422,223 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Permite a um Cliente existente ativar o perfil Profissional (Conta Dupla) sob o MESMO UID canónico,
+  // aplicando a Campanha Especial de Natal (até 31/01/2027) ou 14 dias gratuitos (a partir de 01/02/2027) sem nunca reiniciar períodos já usados.
+  const activateProfessionalProfileAsync = async (params: {
+    categories: string[];
+    bio?: string;
+    experienceYears?: number;
+    hourlyRateKz?: number;
+    address?: string;
+  }): Promise<{ success: boolean; message: string }> => {
+    const uid = auth.currentUser?.uid || currentUser.id;
+    if (!uid || uid === 'guest-client' || !auth.currentUser) {
+      return { success: false, message: 'Inicie sessão na sua conta para ativar o perfil profissional.' };
+    }
+    if (currentUser.role === 'admin') {
+      return { success: false, message: 'Contas administrativas já possuem acesso completo.' };
+    }
+    if (currentUser.blocked || currentUser.isDeleted) {
+      return { success: false, message: 'Esta conta não está elegível para ativação profissional.' };
+    }
+    if (currentUser.accountType === 'duplo' || currentUser.accountType === 'profissional') {
+      switchRole('profissional');
+      return { success: true, message: 'O seu perfil profissional já está ativo na sua conta.' };
+    }
+
+    const sanitizedCategories = Array.isArray(params.categories)
+      ? params.categories.map(c => String(c || '').trim()).filter(Boolean)
+      : [];
+    if (sanitizedCategories.length === 0) {
+      return { success: false, message: 'Selecione pelo menos uma categoria de serviço para ativar o perfil profissional.' };
+    }
+
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+
+    try {
+      // Verifica no Firestore se este UID ou telefone/e-mail/BI já usou período gratuito anteriormente
+      const [liveUserSnap, liveProSnap] = await Promise.all([
+        getDoc(doc(db, 'users', uid)).catch(() => null),
+        getDoc(doc(db, 'professionals', uid)).catch(() => null)
+      ]);
+      const liveUserData = liveUserSnap?.exists() ? (liveUserSnap.data() as Partial<User>) : currentUser;
+      const liveProData = liveProSnap?.exists() ? (liveProSnap.data() as Partial<ProfessionalProfile>) : undefined;
+      const existingMerged: Partial<User & ProfessionalProfile> = {
+        ...currentUser,
+        ...liveUserData,
+        ...(liveProData || {})
+      };
+
+      let alreadyUsedTrial = false;
+      const claimIdsToRecord: string[] = [];
+      const normPhone = normalizePhoneNumber(existingMerged.phoneE164 || existingMerged.phone || '');
+      const pubEmail = getPublicUserEmail(existingMerged.email).toLowerCase();
+      const docNum = (existingMerged.documentNumber || '').trim().toUpperCase();
+
+      const hashInputs: Array<{ prefix: string; value: string }> = [
+        { prefix: 'uid', value: uid }
+      ];
+      if (normPhone.isValid) hashInputs.push({ prefix: 'phone', value: normPhone.e164 });
+      if (pubEmail) hashInputs.push({ prefix: 'email', value: pubEmail });
+      if (docNum) hashInputs.push({ prefix: 'doc', value: docNum });
+
+      for (const item of hashInputs) {
+        const digest = await computeSha256Hex(`${item.prefix}:${item.value}`);
+        if (!digest) continue;
+        const claimId = `${item.prefix}_${digest}`;
+        try {
+          const claimSnap = await getDoc(doc(db, 'trial_claims', claimId));
+          if (claimSnap.exists()) {
+            const owner = (claimSnap.data() as any)?.claimedBy;
+            if (owner && owner !== uid) {
+              alreadyUsedTrial = true;
+            }
+          } else {
+            claimIdsToRecord.push(claimId);
+          }
+        } catch {
+          claimIdsToRecord.push(claimId);
+        }
+      }
+
+      const entitlement = buildProfessionalEntitlementFields({
+        uid,
+        nowMs,
+        alreadyUsedTrial,
+        existingProfile: existingMerged
+      });
+
+      const userUpgradeFields: Partial<User> & Record<string, any> = {
+        accountType: 'duplo',
+        role: 'profissional',
+        categories: sanitizedCategories,
+        ...(params.address ? { address: params.address.trim() } : {}),
+        ...(entitlement.wasPreservedWithoutReset ? {} : {
+          subscriptionPlan: entitlement.subscriptionPlan,
+          professionalActivatedAt: entitlement.professionalActivatedAt,
+          christmasCampaignEligible: entitlement.christmasCampaignEligible,
+          ...(entitlement.christmasCampaignEndsAt ? { christmasCampaignEndsAt: entitlement.christmasCampaignEndsAt } : {}),
+          trialStartDate: entitlement.trialStartDate,
+          trialEndsAt: entitlement.trialEndsAt,
+          trialDurationDays: entitlement.trialDurationDays,
+          freeTrialCanonicalUid: entitlement.freeTrialCanonicalUid,
+          freeTrialConsumed: entitlement.freeTrialConsumed,
+          subscriptionStatus: entitlement.subscriptionStatus,
+          trialStartServerTimestamp: serverTimestamp()
+        }),
+        updatedAt: nowIso
+      };
+
+      await setDoc(doc(db, 'users', uid), userUpgradeFields, { merge: true });
+
+      const proProfileToSave: ProfessionalProfile = stripSensitiveFields({
+        id: uid,
+        name: existingMerged.name || currentUser.name,
+        email: existingMerged.email || currentUser.email || '',
+        phone: existingMerged.phone || currentUser.phone || '',
+        phoneE164: existingMerged.phoneE164 || currentUser.phoneE164 || (normPhone.isValid ? normPhone.e164 : undefined),
+        phoneHash: existingMerged.phoneHash || currentUser.phoneHash,
+        authIdentifierType: existingMerged.authIdentifierType || currentUser.authIdentifierType || 'phone',
+        gender: existingMerged.gender || currentUser.gender,
+        province: existingMerged.province || currentUser.province || 'Luanda',
+        city: existingMerged.city || currentUser.city || 'Luanda',
+        role: 'profissional',
+        accountType: 'duplo',
+        avatar: existingMerged.avatar || currentUser.avatar || '',
+        photoURL: existingMerged.avatar || currentUser.avatar || '',
+        categories: sanitizedCategories,
+        bio: (params.bio || existingMerged.bio || 'Profissional prestador de serviços na J Smart Services Angola.').trim(),
+        experienceYears: Math.max(0, Number(params.experienceYears ?? existingMerged.experienceYears ?? 1)),
+        experienceVerified: existingMerged.experienceVerified ?? false,
+        hourlyRateKz: Math.max(0, Number(params.hourlyRateKz ?? existingMerged.hourlyRateKz ?? 15000)),
+        rating: existingMerged.rating || 5.0,
+        reviewCount: existingMerged.reviewCount || 0,
+        completedJobs: existingMerged.completedJobs || 0,
+        status: 'disponivel',
+        verified: true,
+        documentsVerified: true,
+        isAutoApproved: true,
+        address: (params.address || existingMerged.address || `${currentUser.province || 'Luanda'}, Angola`).trim(),
+        documentType: existingMerged.documentType || 'Bilhete de Identidade',
+        documentNumber: existingMerged.documentNumber || '',
+        portfolioImages: Array.isArray(existingMerged.portfolioImages) ? existingMerged.portfolioImages : [],
+        walletBalanceKz: existingMerged.walletBalanceKz || 0,
+        blocked: false,
+        isDeleted: false,
+        subscriptionPlan: entitlement.subscriptionPlan,
+        planStartedAt: existingMerged.planStartedAt,
+        planExpiresAt: existingMerged.planExpiresAt,
+        professionalActivatedAt: entitlement.professionalActivatedAt,
+        christmasCampaignEligible: entitlement.christmasCampaignEligible,
+        christmasCampaignEndsAt: entitlement.christmasCampaignEndsAt,
+        trialStartDate: entitlement.trialStartDate,
+        trialEndsAt: entitlement.trialEndsAt,
+        trialDurationDays: entitlement.trialDurationDays,
+        freeTrialCanonicalUid: entitlement.freeTrialCanonicalUid,
+        freeTrialConsumed: entitlement.freeTrialConsumed,
+        subscriptionStatus: entitlement.subscriptionStatus,
+        createdAt: existingMerged.createdAt || currentUser.createdAt || nowIso,
+        updatedAt: nowIso
+      });
+
+      const proFirestorePayload = {
+        ...proProfileToSave,
+        ...(entitlement.wasPreservedWithoutReset ? {} : { trialStartServerTimestamp: serverTimestamp() })
+      };
+
+      await setDoc(doc(db, 'professionals', uid), proFirestorePayload, { merge: true });
+      await setDoc(doc(db, 'professionals_public', uid), toPublicProData(proProfileToSave), { merge: true });
+
+      if (!entitlement.wasPreservedWithoutReset && !alreadyUsedTrial && claimIdsToRecord.length > 0) {
+        await Promise.allSettled(
+          claimIdsToRecord.map(claimId =>
+            setDoc(doc(db, 'trial_claims', claimId), {
+              claimedBy: uid,
+              trialDurationDays: POST_CAMPAIGN_TRIAL_DAYS,
+              christmasCampaignClaimed: entitlement.christmasCampaignEligible,
+              trialEndsAt: entitlement.trialEndsAt,
+              createdAt: serverTimestamp()
+            })
+          )
+        );
+      }
+
+      const nextUserState = stripSensitiveFields({
+        ...currentUser,
+        ...proProfileToSave,
+        accountType: 'duplo' as AccountType,
+        role: 'profissional' as UserRole
+      });
+      setCurrentUser(nextUserState);
+      safeStorageSet(`${LOCAL_STORAGE_KEY}_user`, JSON.stringify(nextUserState));
+
+      setAllUsers(prev => prev.map(u => (u.id === uid ? { ...u, ...nextUserState } : u)));
+      setProfessionals(prev => {
+        const exists = prev.some(p => p.id === uid);
+        if (exists) return prev.map(p => (p.id === uid ? { ...p, ...proProfileToSave } : p));
+        return [proProfileToSave, ...prev];
+      });
+      setActiveTab('pro_dashboard');
+
+      const campaignMsg = entitlement.christmasCampaignEligible && isWithinChristmasCampaign(nowMs)
+        ? '🎄 Perfil Profissional (Conta Dupla) ativado com a Campanha Especial de Natal: utilização gratuita até 31/01/2027 + 14 dias grátis a partir de 01/02/2027!'
+        : entitlement.wasPreservedWithoutReset
+        ? 'Perfil Profissional (Conta Dupla) reativado preservando o seu histórico original (sem reinício de período gratuito).'
+        : entitlement.trialDurationDays > 0
+        ? 'Perfil Profissional (Conta Dupla) ativado com 14 dias corridos totalmente gratuitos!'
+        : 'Perfil Profissional (Conta Dupla) ativado. Escolha um plano de subscrição para começar a prestar serviços.';
+
+      return { success: true, message: campaignMsg };
+    } catch (err: any) {
+      logFirestoreWarning(err, OperationType.UPDATE, `users/${uid}`);
+      return {
+        success: false,
+        message: `Não foi possível ativar o perfil profissional agora: ${err?.message || 'erro desconhecido'}`
+      };
+    }
+  };
+
   const adminChangeUserAccountType = async (userId: string, newAccountType: AccountType): Promise<{ success: boolean; message: string }> => {
     if (currentUser.role !== 'admin') {
       return { success: false, message: 'Permissão negada.' };
@@ -6101,29 +6646,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const targetRole: UserRole = newAccountType === 'profissional' ? 'profissional' : 'cliente';
     const target = allUsers.find(u => u.id === userId) || professionals.find(p => p.id === userId);
-    const changeTimestamp = new Date().toISOString();
-    const changePayload = {
+    const existingPro = professionals.find(p => p.id === userId);
+    const nowMs = Date.now();
+    const changeTimestamp = new Date(nowMs).toISOString();
+
+    const isActivatingPro = newAccountType === 'profissional' || newAccountType === 'duplo';
+    const entitlement = isActivatingPro
+      ? buildProfessionalEntitlementFields({
+          uid: userId,
+          nowMs,
+          existingProfile: { ...(target || {}), ...(existingPro || {}) }
+        })
+      : null;
+
+    const changePayload: Record<string, any> = {
       accountType: newAccountType,
       role: target?.role === 'admin' ? ('admin' as UserRole) : targetRole,
       accountTypeChangedAt: changeTimestamp,
-      accountTypeChangedBy: currentUser.id
+      accountTypeChangedBy: currentUser.id,
+      ...(entitlement && !entitlement.wasPreservedWithoutReset ? {
+        subscriptionPlan: entitlement.subscriptionPlan,
+        professionalActivatedAt: entitlement.professionalActivatedAt,
+        christmasCampaignEligible: entitlement.christmasCampaignEligible,
+        ...(entitlement.christmasCampaignEndsAt ? { christmasCampaignEndsAt: entitlement.christmasCampaignEndsAt } : {}),
+        trialStartDate: entitlement.trialStartDate,
+        trialEndsAt: entitlement.trialEndsAt,
+        trialDurationDays: entitlement.trialDurationDays,
+        freeTrialCanonicalUid: entitlement.freeTrialCanonicalUid,
+        freeTrialConsumed: entitlement.freeTrialConsumed,
+        subscriptionStatus: entitlement.subscriptionStatus
+      } : {})
     };
 
     try {
       await setDoc(doc(db, 'users', userId), changePayload, { merge: true });
-      await setDoc(doc(db, 'professionals', userId), changePayload, { merge: true });
-      if (newAccountType === 'profissional' || newAccountType === 'duplo') {
-        await setDoc(doc(db, 'professionals_public', userId), {
-          accountType: newAccountType,
-          role: 'profissional',
-          name: target?.name || 'Profissional'
-        }, { merge: true }).catch(() => {});
+      if (isActivatingPro || existingPro) {
+        const proMergePayload = {
+          ...(target || {}),
+          ...(existingPro || {}),
+          ...changePayload,
+          id: userId,
+          role: 'profissional' as UserRole
+        };
+        await setDoc(doc(db, 'professionals', userId), proMergePayload, { merge: true });
+        if (isActivatingPro) {
+          await setDoc(doc(db, 'professionals_public', userId), toPublicProData(proMergePayload as ProfessionalProfile), { merge: true }).catch(() => {});
+        }
       }
 
       await logAdminAction('Alteração do Tipo de Conta', userId, `Tipo de conta de ${target?.name || userId} alterado para ${newAccountType}`);
 
       setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, ...changePayload } : u));
-      setProfessionals(prev => prev.map(p => p.id === userId ? { ...p, ...changePayload } : p));
+      setProfessionals(prev => {
+        const exists = prev.some(p => p.id === userId);
+        if (exists) return prev.map(p => p.id === userId ? { ...p, ...changePayload } : p);
+        if (isActivatingPro && target) {
+          return [{ ...(target as any), ...changePayload, id: userId, role: 'profissional', categories: target.categories || [] }, ...prev];
+        }
+        return prev;
+      });
 
       if (currentUser.id === userId) {
         setCurrentUser(prev => ({ ...prev, ...changePayload }));
@@ -6660,14 +7241,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       migrateLegacyAccountsPhoneIndexAsync,
       diagnosePhoneLoginAsync,
       generateLegacyAccountsReportAsync,
+      generateLiveDuplicateAuditReportAsync,
       relinkLegacyAccountAsync,
       executeLegacyBatchMigrationAsync,
       executeGlobalSequentialLegacyMigrationAsync,
       sendLegacyAccountPasswordResetAsync,
       sendAdminVerificationEmailAsync,
+      accountRecoveryRequests,
+      phoneLoginIndexSnapshot,
+      submitAccountRecoveryRequestAsync,
+      refreshAccountRecoveryRequestsAsync,
+      setAccountRecoveryStatusAdminAsync,
+      approveAccountRecoveryRequestAdminAsync,
+      verifyResetLinkCodeAsync,
+      confirmPasswordResetAsync,
       changeProPlan,
       subscribeToPlan,
       adminUnlockProPlan,
+      activateProfessionalProfileAsync,
       adminChangeUserAccountType,
       adminUpdateProCategories,
       auditAndFixBuggedCategories,

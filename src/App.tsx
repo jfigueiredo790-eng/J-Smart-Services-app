@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -10,17 +10,23 @@ import { RequestCard } from './components/RequestCard';
 import { ChatView } from './components/ChatView';
 import { ReviewModal } from './components/ReviewModal';
 import { ProfileView } from './components/ProfileView';
-import { AdminDashboard } from './components/AdminDashboard';
 import { ProDashboard } from './components/ProDashboard';
 import { WalletView } from './components/WalletView';
 import { SplashScreen } from './components/SplashScreen';
 import { AuthModal } from './components/AuthModal';
-import { SystemTestSuiteModal } from './components/SystemTestSuiteModal';
 import { SubcategoryModal } from './components/SubcategoryModal';
+
+const AdminDashboard = lazy(() =>
+  import('./components/AdminDashboard').then((m) => ({ default: m.AdminDashboard }))
+);
+const SystemTestSuiteModal = lazy(() =>
+  import('./components/SystemTestSuiteModal').then((m) => ({ default: m.SystemTestSuiteModal }))
+);
 import { RulesAndCodeModal } from './components/RulesAndCodeModal';
 import { WorkFeedView } from './components/WorkFeedView';
 import { SubscriptionExpiredModal } from './components/SubscriptionExpiredModal';
 import { BlockedAccountModal } from './components/BlockedAccountModal';
+import { ResetPasswordModal } from './components/ResetPasswordModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ANGOLA_PROVINCES, ProfessionalProfile, ServiceCategory } from './types';
 import { getProPlanStatus } from './utils/planUtils';
@@ -86,6 +92,8 @@ function MainContent() {
   const [subModalCategory, setSubModalCategory] = useState<ServiceCategory | null>(null);
   const [roleNoticeBanner, setRoleNoticeBanner] = useState<string | null>(null);
   const [deepLinkProId, setDeepLinkProId] = useState<string | null>(null);
+  const [resetPasswordOobCode, setResetPasswordOobCode] = useState<string | null>(null);
+  const [isPostHostedRecoveryReturn, setIsPostHostedRecoveryReturn] = useState(false);
 
   // Enforce canonical domain (www.jsmartservices.com -> https://jsmartservices.com) and detect shared/deep links
   React.useEffect(() => {
@@ -100,7 +108,27 @@ function MainContent() {
         const proParam = params.get('pro');
         const postParam = params.get('post');
 
-        if (
+        const modeParam = params.get('mode');
+        const oobCodeParam = params.get('oobCode');
+        const recoveryResetParam = params.get('recoveryReset');
+
+        if (modeParam === 'resetPassword' && oobCodeParam) {
+          setResetPasswordOobCode(oobCodeParam);
+          setIsPostHostedRecoveryReturn(false);
+          try {
+            window.history.replaceState({}, '', window.location.pathname);
+          } catch {
+            // ignore history restriction
+          }
+        } else if (recoveryResetParam === '1') {
+          setResetPasswordOobCode(null);
+          setIsPostHostedRecoveryReturn(true);
+          try {
+            window.history.replaceState({}, '', window.location.pathname);
+          } catch {
+            // ignore history restriction
+          }
+        } else if (
           params.get('admin') === 'true' || 
           params.get('page') === 'admin' || 
           hash.includes('admin')
@@ -755,7 +783,15 @@ function MainContent() {
           {/* VIEW: ADMIN DASHBOARD (PROTECTED ROUTE GUARD) */}
           {activeTab === 'admin' && (
             isLoggedIn && (currentUser.role === 'admin' || userRole === 'admin') ? (
-              <AdminDashboard />
+              <Suspense
+                fallback={
+                  <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center text-xs font-bold text-slate-500">
+                    A carregar Painel do Administrador...
+                  </div>
+                }
+              >
+                <AdminDashboard />
+              </Suspense>
             ) : (
               <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xl max-w-lg mx-auto my-8 text-center space-y-4">
                 <div className="w-16 h-16 bg-slate-100 text-slate-700 rounded-2xl flex items-center justify-center mx-auto text-2xl font-bold shadow-inner border border-slate-200">
@@ -829,16 +865,35 @@ function MainContent() {
           />
         )}
 
-        {(!isLoggedIn || showAuthModal) && (
+        {(!isLoggedIn || showAuthModal) && !resetPasswordOobCode && !isPostHostedRecoveryReturn && (
           <AuthModal 
             onClose={() => setShowAuthModal(false)}
           />
         )}
 
-        <SystemTestSuiteModal
-          isOpen={isTestSuiteOpen}
-          onClose={() => setIsTestSuiteOpen(false)}
+        <ResetPasswordModal
+          isOpen={Boolean(resetPasswordOobCode) || isPostHostedRecoveryReturn}
+          oobCode={resetPasswordOobCode}
+          isPostHostedReturn={isPostHostedRecoveryReturn}
+          onClose={() => {
+            setResetPasswordOobCode(null);
+            setIsPostHostedRecoveryReturn(false);
+          }}
+          onGoToPhoneLogin={() => {
+            setResetPasswordOobCode(null);
+            setIsPostHostedRecoveryReturn(false);
+            setShowAuthModal(true);
+          }}
         />
+
+        {isTestSuiteOpen && (
+          <Suspense fallback={null}>
+            <SystemTestSuiteModal
+              isOpen={isTestSuiteOpen}
+              onClose={() => setIsTestSuiteOpen(false)}
+            />
+          </Suspense>
+        )}
 
         <RulesAndCodeModal
           isOpen={isRulesModalOpen}

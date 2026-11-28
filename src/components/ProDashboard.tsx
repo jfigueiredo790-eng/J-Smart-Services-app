@@ -20,7 +20,14 @@ import {
   ShieldCheck,
   MessageSquare
 } from 'lucide-react';
-import { ActivePaidPlanKey, getProPlanStatus, ORDERED_PAID_PLANS, getPlanDisplayInfo } from '../utils/planUtils';
+import {
+  ActivePaidPlanKey,
+  getProPlanStatus,
+  ORDERED_PAID_PLANS,
+  getPlanDisplayInfo,
+  isWithinChristmasCampaign,
+  POST_CAMPAIGN_TRIAL_DAYS
+} from '../utils/planUtils';
 
 export const ProDashboard: React.FC = () => {
   const { currentUser, userRole, requests, walletTransactions, updateUserProfile, setActiveTab } = useApp();
@@ -145,45 +152,48 @@ export const ProDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Trial Counter & Automatic Reminder Alerts Banner */}
-      {/* Promotional Growth Phase Banner (Global Subscriptions Inactive) */}
-      {planStatus.isPromotionalPhase && (
-        <div className="bg-gradient-to-r from-emerald-700 via-teal-800 to-slate-900 text-white p-6 rounded-3xl shadow-xl border border-emerald-400/40 space-y-3">
+      {/* Campanha Especial de Natal Banner (Nov 2026 – Jan 2027) */}
+      {planStatus.isChristmasCampaign && planStatus.isActive && (
+        <div className="bg-gradient-to-r from-red-900 via-emerald-950 to-slate-900 text-white p-6 rounded-3xl shadow-xl border border-amber-400/40 space-y-3">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <div className="flex items-start gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-amber-300 shrink-0 shadow-inner">
-                <Sparkles className="w-6 h-6 animate-pulse text-amber-300" />
+              <div className="w-12 h-12 rounded-2xl bg-amber-400/20 border border-amber-300/40 flex items-center justify-center text-amber-300 shrink-0 shadow-inner">
+                <Sparkles className="w-6 h-6 text-amber-300" />
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                    ★ Fase de Crescimento Angola
+                  <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-md uppercase tracking-wider">
+                    Campanha Especial de Natal
                   </span>
-                  <span className="bg-emerald-400/20 text-emerald-200 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-400/30">
-                    100% Gratuito
+                  <span className="bg-emerald-400/20 text-emerald-200 text-[10px] font-extrabold px-2.5 py-0.5 rounded-md border border-emerald-400/30">
+                    Nov 2026 • Dez 2026 • Jan 2027 — 100% Gratuito
                   </span>
                 </div>
                 <h3 className="text-lg font-black text-white mt-1.5">
-                  Acesso Profissional Gratuito
+                  Acesso Profissional Gratuito até 31 de Janeiro de 2027
                 </h3>
                 <p className="text-xs text-emerald-100/90 mt-1 max-w-2xl leading-relaxed">
-                  100% gratuito durante a fase de crescimento. A J Smart Services está actualmente numa fase de crescimento e, neste período, os profissionais podem utilizar gratuitamente as funcionalidades profissionais, sem necessidade de pagamento. A activação das subscrições será anunciada posteriormente.
+                  Durante Novembro, Dezembro e Janeiro utilize todas as funcionalidades profissionais sem subscrição paga. A partir de <strong>01/02/2027</strong>, terá ainda automaticamente <strong>+{POST_CAMPAIGN_TRIAL_DAYS} dias gratuitos</strong> (01/02 a 14/02/2027) antes de precisar de escolher um plano.
                 </p>
+                <div className="flex flex-wrap gap-3 mt-2 text-[11px] font-bold text-amber-200">
+                  <span>Início gratuito: {formatDatePt(planStatus.freePeriodStartIso || planStatus.startedAtIso)}</span>
+                  <span>Fim da campanha: 31/01/2027 ({planStatus.daysRemaining}d restantes)</span>
+                </div>
               </div>
             </div>
             <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/20 text-center shrink-0 self-start md:self-auto">
-              <span className="text-[10px] uppercase font-black text-emerald-300 block tracking-wider">Fase Atual</span>
+              <span className="text-[10px] uppercase font-black text-amber-300 block tracking-wider">Oferta Ativa</span>
               <span className="text-xs font-black text-white flex items-center gap-1.5 justify-center mt-0.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-                Acesso Gratuito
+                3 Meses + 14d Grátis
               </span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Trial Countdown Alert Banner */}
-      {!planStatus.isPromotionalPhase && planStatus.isTrial && planStatus.isActive && (
+      {/* Trial Countdown Alert Banner (14 Dias Gratuitos a partir de 01/02/2027) */}
+      {!planStatus.isChristmasCampaign && !planStatus.isPromotionalPhase && planStatus.isTrial && planStatus.isActive && (
         <div className={`p-5 rounded-3xl shadow-lg border text-white transition-all ${
           planStatus.alertStage === '24_hours'
             ? 'bg-gradient-to-r from-amber-600 via-rose-700 to-slate-900 border-amber-400/50'
@@ -217,11 +227,13 @@ export const ProDashboard: React.FC = () => {
                   )}
                   {planStatus.alertStage === 'normal' && (
                     <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-md uppercase tracking-wider">
-                      Período Experimental Activo
+                      Período Gratuito de {POST_CAMPAIGN_TRIAL_DAYS} Dias
                     </span>
                   )}
                   <span className="text-emerald-200 text-xs font-bold">
-                    {planStatus.trialDurationDays === 30 ? '30 Dias (1 Mês) Grátis' : `${planStatus.trialDurationDays || 30} Dias Grátis`}
+                    {planStatus.wasChristmasCampaignBeneficiary
+                      ? 'Extensão Pós-Campanha de Natal (01/02 a 14/02/2027)'
+                      : `${POST_CAMPAIGN_TRIAL_DAYS} Dias Corridos Grátis`}
                   </span>
                 </div>
 
@@ -229,11 +241,11 @@ export const ProDashboard: React.FC = () => {
                   {planStatus.message}
                 </h3>
                 <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] font-bold text-emerald-100">
-                  <span>📅 Início: {formatDatePt(planStatus.startedAtIso)}</span>
-                  <span>⏳ Término: {formatDatePt(planStatus.expiresAtIso)}</span>
+                  <span>📅 Início: {formatDatePt(planStatus.freePeriodStartIso || planStatus.startedAtIso)}</span>
+                  <span>⏳ Término: {formatDatePt(planStatus.freePeriodEndIso || planStatus.expiresAtIso)}</span>
                 </div>
                 <p className="text-xs text-emerald-100/90 mt-1 leading-relaxed">
-                  Pode publicar serviços no feed, receber pedidos de clientes, conversar no chat e concluir trabalhos gratuitamente durante este período.
+                  Pode publicar serviços no feed, receber pedidos de clientes, conversar no chat profissional e concluir trabalhos gratuitamente durante estes {POST_CAMPAIGN_TRIAL_DAYS} dias.
                 </p>
               </div>
             </div>
@@ -333,13 +345,18 @@ export const ProDashboard: React.FC = () => {
           {/* Reassurance Guarantee Box */}
           <div className="bg-slate-900/90 border border-emerald-500/30 p-4 rounded-2xl flex items-start gap-3 text-xs text-slate-300">
             <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <p className="font-extrabold text-emerald-300 uppercase tracking-wider text-[11px]">
                 ✓ Os seus dados e histórico estão 100% seguros
               </p>
               <p className="text-slate-300 leading-relaxed text-[11px]">
-                A sua conta, perfil profissional, publicações, avaliações acumuladas, conversas e histórico de serviços <strong>NÃO foram apagados</strong>. Escolha um dos planos abaixo (Semanal — 2 semanas, Mensal — 1 mês ou Trimestral — 3 meses) e envie o comprovativo para reativar.
+                A sua conta, perfil profissional, publicações, avaliações acumuladas, conversas e histórico de serviços <strong>NÃO foram apagados</strong>. Escolha um dos planos abaixo (Semanal — 2 semanas, Mensal — 1 mês ou Trimestral — 3 meses) e envie o comprovativo para reativar automaticamente as funcionalidades profissionais.
               </p>
+              {currentUser.accountType === 'duplo' && (
+                <p className="text-emerald-200 font-bold text-[11px] pt-1 border-t border-slate-800">
+                  Conta Dupla: as funcionalidades de Cliente continuam 100% ativas e disponíveis normalmente enquanto a sua subscrição profissional estiver pausada.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -417,14 +434,22 @@ export const ProDashboard: React.FC = () => {
               <h3 className="font-extrabold text-slate-900 text-base">Planos de Subscrição</h3>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Novos profissionais têm <strong>30 dias (1 mês) totalmente grátis</strong>. Escolha um dos 3 planos oficiais e envie o comprovativo para aprovação.
+              {isWithinChristmasCampaign() ? (
+                <>
+                  <strong>Campanha Especial de Natal ativa:</strong> utilização profissional 100% gratuita até 31/01/2027 + {POST_CAMPAIGN_TRIAL_DAYS} dias grátis em Fevereiro. Monetização exclusiva por subscrição (0% comissão).
+                </>
+              ) : (
+                <>
+                  Novos profissionais têm <strong>{POST_CAMPAIGN_TRIAL_DAYS} dias corridos gratuitos</strong> (1 vez por conta). Escolha um dos 3 planos oficiais — monetização exclusiva por subscrição, sem comissões.
+                </>
+              )}
             </p>
           </div>
 
           <div className="text-right self-start sm:self-auto">
-            <span className="text-[11px] text-slate-400 font-bold block">Saldo na Carteira:</span>
-            <span className="text-sm font-black text-emerald-700">
-              {(currentUser.walletBalanceKz || 0).toLocaleString('pt-AO')} Kz
+            <span className="text-[11px] text-slate-400 font-bold block">Modelo de Cobrança:</span>
+            <span className="text-xs font-black text-emerald-700">
+              Subscrição fixa • 0% comissão
             </span>
           </div>
         </div>

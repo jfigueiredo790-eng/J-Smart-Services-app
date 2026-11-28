@@ -34,8 +34,13 @@ interface WorkerOtpSession {
   expiresAt: number;
   attemptsLeft: number;
   verified: boolean;
+  usedAt: number | null;
 }
 const workerOtpSessions = new Map<string, WorkerOtpSession>();
+
+const SIMPLE_EMAIL_REGEX_WORKER = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MANDATORY_RECOVERY_GENERIC_MSG_WORKER =
+  'O seu pedido de recuperação foi recebido. Aguarde a verificação da sua conta pelo administrador da J Smart Services. Receberá uma resposta após a análise do pedido.';
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
@@ -341,7 +346,8 @@ export default {
           hashHex,
           expiresAt: Date.now() + 10 * 60_000,
           attemptsLeft: 3,
-          verified: false
+          verified: false,
+          usedAt: null
         });
 
         try {
@@ -404,10 +410,10 @@ export default {
       const code = typeof body?.code === 'string' ? body.code.replace(/\D/g, '') : '';
 
       const session = workerOtpSessions.get(sessionId);
-      if (!sessionId || code.length !== 6 || !session || Date.now() > session.expiresAt) {
-        if (sessionId) workerOtpSessions.delete(sessionId);
+      if (!sessionId || code.length !== 6 || !session || session.verified || session.usedAt !== null || Date.now() > session.expiresAt) {
+        if (sessionId && session && Date.now() > session.expiresAt) workerOtpSessions.delete(sessionId);
         return new Response(
-          JSON.stringify({ success: false, message: 'O código informado expirou ou é inválido. Solicite um novo código.' }),
+          JSON.stringify({ success: false, message: 'O código informado expirou, já foi utilizado ou é inválido. Solicite um novo código.' }),
           {
             status: 400,
             headers: { ...secHeaders, 'content-type': 'application/json;charset=UTF-8', 'cache-control': 'no-store' }
@@ -443,8 +449,82 @@ export default {
       }
 
       session.verified = true;
+      session.usedAt = Date.now();
       return new Response(
         JSON.stringify({ success: true, message: 'Código validado com sucesso.' }),
+        {
+          status: 200,
+          headers: { ...secHeaders, 'content-type': 'application/json;charset=UTF-8', 'cache-control': 'no-store' }
+        }
+      );
+    }
+
+    // 1.4 Account Recovery System - Public Anti-Enumeration Request Submission
+    if (url.pathname === '/api/v1/auth/recovery-requests' && request.method === 'POST') {
+      let body: any = {};
+      try {
+        body = await request.json();
+      } catch {
+        body = {};
+      }
+      const rawPhone = typeof body?.phone === 'string' ? body.phone.trim() : '';
+      const rawEmail = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+
+      if (!rawPhone && !rawEmail) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            message: 'Preencha o número de telefone (+244 seguido de 9 dígitos) ou o endereço de e-mail utilizado no registo.'
+          }),
+          {
+            status: 400,
+            headers: { ...secHeaders, 'content-type': 'application/json;charset=UTF-8', 'cache-control': 'no-store' }
+          }
+        );
+      }
+
+      const parsedPhone = rawPhone ? validateAngolaPhoneWorker(rawPhone) : null;
+      if (rawPhone && (!parsedPhone || !parsedPhone.isValid)) {
+        return new Response(
+          JSON.stringify({ success: false, message: INVALID_ANGOLA_PHONE_MSG_WORKER }),
+          {
+            status: 400,
+            headers: { ...secHeaders, 'content-type': 'application/json;charset=UTF-8', 'cache-control': 'no-store' }
+          }
+        );
+      }
+
+      if (rawEmail && (rawEmail.length > 200 || rawEmail.endsWith('@phone.jsmartservices.com') || !SIMPLE_EMAIL_REGEX_WORKER.test(rawEmail))) {
+        return new Response(
+          JSON.stringify({ success: false, message: 'Introduza um endereço de e-mail válido.' }),
+          {
+            status: 400,
+            headers: { ...secHeaders, 'content-type': 'application/json;charset=UTF-8', 'cache-control': 'no-store' }
+          }
+        );
+      }
+
+      const idKey = parsedPhone?.e164 || rawEmail || 'unknown';
+      if (!checkRecoveryRateLimitWorker(`req_ip:${clientIp}`) || !checkRecoveryRateLimitWorker(`req_id:${idKey}`)) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            message: 'Demasiadas tentativas de recuperação. Por motivos de segurança, aguarde 15 minutos antes de tentar novamente.'
+          }),
+          {
+            status: 429,
+            headers: { ...secHeaders, 'content-type': 'application/json;charset=UTF-8', 'cache-control': 'no-store' }
+          }
+        );
+      }
+
+      const requestId = `rec_${randomHex(12)}`;
+      return new Response(
+        JSON.stringify({
+          success: true,
+          requestId,
+          message: MANDATORY_RECOVERY_GENERIC_MSG_WORKER
+        }),
         {
           status: 200,
           headers: { ...secHeaders, 'content-type': 'application/json;charset=UTF-8', 'cache-control': 'no-store' }

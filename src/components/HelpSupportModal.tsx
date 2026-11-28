@@ -31,8 +31,8 @@ export const HelpSupportModal: React.FC<HelpSupportModalProps> = ({ onClose }) =
       a: 'A J Smart Services permite usar a mesma conta para procurar profissionais como Cliente e oferecer serviços como Profissional. Pode alternar de modo a qualquer momento no topo da aplicação com apenas 1 clique.'
     },
     {
-      q: 'Como funciona o Período Experimental Gratuito de 30 dias (1 mês)?',
-      a: 'Todos os novos profissionais registados em Angola recebem automaticamente 30 dias (1 mês) totalmente grátis a partir da criação da conta para experimentar a plataforma e receber clientes. Cada utilizador tem direito a 1 período gratuito inicial.'
+      q: 'Como funciona a Campanha Especial de Natal e o Período Gratuito de 14 dias?',
+      a: 'Todos os profissionais e contas duplas têm 3 meses 100% gratuitos durante a Campanha Especial de Natal (Novembro 2026, Dezembro 2026 e Janeiro 2027, até 31/01/2027). A partir de 01/02/2027, os beneficiários da campanha recebem +14 dias gratuitos (01/02 a 14/02/2027) e novos profissionais que entrarem ou ativarem perfil profissional a partir de 01/02/2027 recebem 14 dias corridos gratuitos a contar da ativação (1 vez por conta, sem reinício).'
     },
     {
       q: 'Como funciona o sistema de negociação e pagamento dos serviços?',
@@ -229,7 +229,7 @@ export const HelpSupportModal: React.FC<HelpSupportModalProps> = ({ onClose }) =
               <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
                 <h4 className="font-extrabold text-emerald-400 text-xs">2. Direitos e Deveres do Profissional</h4>
                 <p className="text-[11px] text-slate-400">
-                  Os novos profissionais recebem 30 dias (1 mês) totalmente grátis no registo inicial (1 vez por utilizador). Após o término, devem escolher e pagar um plano ativo — Semanal (2 semanas — 1.500 Kz), Mensal (1 mês — 3.000 Kz) ou Trimestral (3 meses — 8.000 Kz) — enviando o comprovativo privado para aprovação do Administrador. Em caso de expiração, o perfil fica oculto das pesquisas públicas e impedido de publicar ou aceitar novos pedidos até à renovação, mantendo 100% intactos os dados, publicações e avaliações.
+                  Durante a Campanha Especial de Natal (Novembro 2026 a 31 de Janeiro de 2027), todos os profissionais e contas duplas utilizam gratuitamente todas as funcionalidades profissionais. A partir de 01/02/2027, aplica-se o período gratuito de 14 dias corridos (01/02 a 14/02/2027 para beneficiários da campanha, ou 14 dias a partir da data de ativação para novos profissionais, 1 vez por conta sem reinício). Após o término, devem ativar uma subscrição paga — Semanal (14 dias — 1.500 Kz), Mensal (30 dias — 3.000 Kz) ou Trimestral (90 dias — 8.000 Kz), sem qualquer comissão sobre serviços. Em caso de expiração, apenas as funcionalidades profissionais são suspensas até à renovação, mantendo 100% intactos os dados, publicações, conversas, avaliações e todas as funções de Cliente nas contas duplas.
                 </p>
               </div>
 

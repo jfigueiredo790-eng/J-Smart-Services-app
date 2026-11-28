@@ -16,6 +16,7 @@ import {
   sanitizeAngolaPhoneDigitsInput,
   validateStrictAngolaPhone
 } from '../utils/phoneAuthUtils';
+import { isWithinChristmasCampaign, POST_CAMPAIGN_TRIAL_DAYS } from '../utils/planUtils';
 import { 
   User as UserIcon, 
   ShieldCheck, 
@@ -67,7 +68,8 @@ export const ProfileView: React.FC = () => {
     forceSyncWithFirestore,
     isSyncing,
     syncStatus,
-    lastSyncTimestamp
+    lastSyncTimestamp,
+    activateProfessionalProfileAsync
   } = useApp();
 
   const [profileSyncToast, setProfileSyncToast] = useState<string | null>(null);
@@ -103,6 +105,36 @@ export const ProfileView: React.FC = () => {
   const [photoFeedback, setPhotoFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const [avatar, setAvatar] = useState(currentUser.avatar || '');
+  const [showActivateProForm, setShowActivateProForm] = useState(false);
+  const [activateCategories, setActivateCategories] = useState<string[]>([]);
+  const [activateBio, setActivateBio] = useState('');
+  const [activateExperienceYears, setActivateExperienceYears] = useState<number>(1);
+  const [activateFeedback, setActivateFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isActivatingPro, setIsActivatingPro] = useState(false);
+
+  const handleActivateProProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isActivatingPro) return;
+    setActivateFeedback(null);
+    if (activateCategories.length === 0) {
+      setActivateFeedback({ type: 'error', message: 'Selecione pelo menos 1 categoria profissional.' });
+      return;
+    }
+    setIsActivatingPro(true);
+    try {
+      const res = await activateProfessionalProfileAsync({
+        categories: activateCategories,
+        bio: activateBio.trim() || `Profissional disponível em ${currentUser.province || 'Angola'}.`,
+        experienceYears: Math.max(0, Number(activateExperienceYears) || 0)
+      });
+      setActivateFeedback({ type: res.success ? 'success' : 'error', message: res.message });
+      if (res.success) {
+        setShowActivateProForm(false);
+      }
+    } finally {
+      setIsActivatingPro(false);
+    }
+  };
 
   useEffect(() => {
     setName(currentUser.name);
@@ -406,6 +438,97 @@ export const ProfileView: React.FC = () => {
               <span className="text-[10px] text-slate-500">Classificação de 1 a 5 estrelas.</span>
             </div>
           </div>
+
+          {currentUser.accountType === 'cliente' && currentUser.role !== 'admin' && (
+            <div className="mt-3 p-4 rounded-2xl bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white border border-emerald-500/40 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider inline-block">
+                    {isWithinChristmasCampaign()
+                      ? 'Campanha de Natal • Grátis até 31/01/2027'
+                      : `${POST_CAMPAIGN_TRIAL_DAYS} Dias Grátis`}
+                  </span>
+                  <h4 className="font-black text-sm text-white mt-1">
+                    Quer oferecer os seus serviços? Ative o Perfil Profissional (Conta Dupla)
+                  </h4>
+                  <p className="text-[11px] text-emerald-100/90 mt-0.5 leading-relaxed">
+                    {isWithinChristmasCampaign()
+                      ? `Ative agora na mesma conta e usufrua gratuitamente até 31/01/2027 + ${POST_CAMPAIGN_TRIAL_DAYS} dias gratuitos em Fevereiro (01/02 a 14/02/2027), mantendo todas as funções de Cliente.`
+                      : `Ative o modo profissional na mesma conta e receba ${POST_CAMPAIGN_TRIAL_DAYS} dias gratuitos corridos (1 vez por utilizador), mantendo todas as funções de Cliente.`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowActivateProForm(prev => !prev);
+                    setActivateFeedback(null);
+                  }}
+                  className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl transition-all shrink-0"
+                >
+                  {showActivateProForm ? 'Cancelar' : 'Ativar Perfil Profissional'}
+                </button>
+              </div>
+
+              {activateFeedback && (
+                <div className={`p-3 rounded-xl text-xs font-bold ${
+                  activateFeedback.type === 'success'
+                    ? 'bg-emerald-500/20 border border-emerald-400/40 text-emerald-100'
+                    : 'bg-rose-500/20 border border-rose-400/40 text-rose-100'
+                }`}>
+                  {activateFeedback.message}
+                </div>
+              )}
+
+              {showActivateProForm && (
+                <form onSubmit={handleActivateProProfile} className="bg-white text-slate-900 rounded-2xl p-4 space-y-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Categorias em que presta serviços *
+                    </label>
+                    <CategoryMultiSelect
+                      categories={categories}
+                      selectedCategories={activateCategories}
+                      onChange={setActivateCategories}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Descrição dos seus serviços
+                      </label>
+                      <input
+                        type="text"
+                        value={activateBio}
+                        onChange={(e) => setActivateBio(e.target.value)}
+                        placeholder="Ex: Eletricista residencial e comercial em Luanda..."
+                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Anos de experiência
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={60}
+                        value={activateExperienceYears}
+                        onChange={(e) => setActivateExperienceYears(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isActivatingPro}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-black text-xs py-2.5 rounded-xl transition-all"
+                  >
+                    {isActivatingPro ? 'A ativar Conta Dupla...' : 'Confirmar Ativação de Perfil Profissional (Conta Dupla)'}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
         </div>
       ) : userRole === 'profissional' ? (
         <div className="bg-slate-900 text-white rounded-3xl p-5 border border-slate-800 shadow-sm space-y-3">
@@ -440,8 +563,12 @@ export const ProfileView: React.FC = () => {
               <span className="text-[10px] text-slate-400">Histórico e tarefas ativas.</span>
             </div>
             <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800">
-              <span className="font-extrabold text-emerald-300 block">🎁 Teste Grátis 14 Dias</span>
-              <span className="text-[10px] text-slate-400">Sem cobrança antecipada.</span>
+              <span className="font-extrabold text-emerald-300 block">
+                {isWithinChristmasCampaign() ? 'Campanha Natal Grátis' : `Grátis ${POST_CAMPAIGN_TRIAL_DAYS} Dias`}
+              </span>
+              <span className="text-[10px] text-slate-400">
+                {isWithinChristmasCampaign() ? 'Até 31/01/2027 + 14d em Fev.' : 'Sem comissões sobre serviços.'}
+              </span>
             </div>
             <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800">
               <span className="font-extrabold text-emerald-300 block">🖼️ Portefólio</span>

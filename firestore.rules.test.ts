@@ -171,9 +171,9 @@ describe('J Smart Services Security Rules & General Update Verification', () => 
     expect(otp).toMatch(/^\d{6}$/);
   });
 
-  it('14. Enforces 30-day free trial, 3 exact plans, existing-user preservation, and blocks expired actions', () => {
+  it('14. Enforces Christmas Campaign (Nov 2026–Jan 2027), 14-day post-campaign trial, 3 exact plans, and blocks expired actions', () => {
     expect(GLOBAL_SUBSCRIPTIONS_ACTIVE).toBe(true);
-    expect(NEW_TRIAL_DAYS).toBe(30);
+    expect(NEW_TRIAL_DAYS).toBe(14);
     expect(ORDERED_PAID_PLANS).toHaveLength(3);
     expect(PLAN_PRICES.plan_14d.priceKz).toBe(1500);
     expect(PLAN_PRICES.plan_30d.priceKz).toBe(3000);
@@ -183,31 +183,36 @@ describe('J Smart Services Security Rules & General Update Verification', () => 
     expect(isValidPaidPlanKey('plan_90d')).toBe(true);
     expect(isValidPaidPlanKey('plan_7d')).toBe(false);
 
-    const now = new Date('2026-11-22T12:00:00.000Z').getTime();
-
-    // New pro post-cutoff gets 30 days
-    const newPro = getProPlanStatus({
-      id: 'pro-new',
-      role: 'profissional',
-      subscriptionPlan: 'free_trial',
-      trialStartDate: '2026-11-22T12:00:00.000Z',
-      createdAt: '2026-11-22T12:00:00.000Z'
-    }, true, now);
-    expect(newPro.isTrial).toBe(true);
-    expect(newPro.isActive).toBe(true);
-    expect(newPro.trialDurationDays).toBe(30);
-    expect(newPro.daysRemaining).toBe(30);
-
-    // Pre-cutoff legacy user keeps historical 14-day baseline without reset
-    const legacyPro = getProPlanStatus({
-      id: 'pro-legacy',
+    // Inside Christmas Campaign (Nov 2026 – Jan 2027): all pros are active free until 31/01/2027
+    const novNow = new Date('2026-11-22T12:00:00.000Z').getTime();
+    const campaignPro = getProPlanStatus({
+      id: 'pro-natal',
       role: 'profissional',
       subscriptionPlan: 'free_trial',
       trialStartDate: '2026-11-01T12:00:00.000Z',
       createdAt: '2026-11-01T12:00:00.000Z'
-    }, true, now);
-    expect(legacyPro.isExpired).toBe(true);
-    expect(legacyPro.trialDurationDays).toBe(14);
+    }, true, novNow);
+    expect(campaignPro.isActive).toBe(true);
+    expect(campaignPro.isChristmasCampaign).toBe(true);
+    expect(campaignPro.entitlementState).toBe('christmas_campaign');
+
+    // Post-campaign (Feb 2027): new pro gets exactly 14 free days
+    const febNow = new Date('2027-02-05T12:00:00.000Z').getTime();
+    const newFebPro = getProPlanStatus({
+      id: 'pro-feb-new',
+      role: 'profissional',
+      subscriptionPlan: 'free_trial',
+      professionalActivatedAt: '2027-02-05T12:00:00.000Z',
+      christmasCampaignEligible: false,
+      trialStartDate: '2027-02-05T12:00:00.000Z',
+      trialDurationDays: 14,
+      trialEndsAt: '2027-02-19T12:00:00.000Z',
+      createdAt: '2027-02-05T12:00:00.000Z'
+    }, true, febNow);
+    expect(newFebPro.isTrial).toBe(true);
+    expect(newFebPro.isActive).toBe(true);
+    expect(newFebPro.trialDurationDays).toBe(14);
+    expect(newFebPro.daysRemaining).toBe(14);
 
     // Existing paid pro keeps active remaining paid days
     const paidPro = getProPlanStatus({
@@ -216,32 +221,35 @@ describe('J Smart Services Security Rules & General Update Verification', () => 
       subscriptionPlan: 'plan_90d',
       planStartedAt: '2026-11-01T12:00:00.000Z',
       planExpiresAt: '2027-01-30T12:00:00.000Z'
-    }, true, now);
+    }, true, novNow);
     expect(paidPro.isActive).toBe(true);
     expect(paidPro.isTrial).toBe(false);
     expect(paidPro.daysRemaining).toBe(69);
 
-    // Duplicate trial account (trialDurationDays === 0) cannot get a free trial
+    // Duplicate trial account (trialDurationDays === 0) after campaign cannot get a free trial
     const dupTrial = getProPlanStatus({
       id: 'pro-dup',
       role: 'profissional',
       subscriptionPlan: 'free_trial',
-      trialStartDate: '2026-11-22T12:00:00.000Z',
+      professionalActivatedAt: '2027-02-05T12:00:00.000Z',
+      christmasCampaignEligible: false,
+      trialStartDate: '2027-02-05T12:00:00.000Z',
       trialDurationDays: 0,
-      trialEndsAt: '2026-11-22T12:00:00.000Z',
-      createdAt: '2026-11-22T12:00:00.000Z'
-    }, true, now);
+      trialEndsAt: '2027-02-05T12:00:00.000Z',
+      createdAt: '2027-02-05T12:00:00.000Z'
+    }, true, febNow);
     expect(dupTrial.isActive).toBe(false);
     expect(dupTrial.isExpired).toBe(true);
 
-    // Expired pro action validation returns blocked/expired without losing data
+    // Expired pro action validation after Feb 15 2027 returns blocked/expired without losing data
+    const afterCohortNow = new Date('2027-02-20T12:00:00.000Z').getTime();
     const expiredAction = validateProAction({
       id: 'pro-exp',
       role: 'profissional',
       subscriptionPlan: 'free_trial',
       trialStartDate: '2026-10-01T00:00:00.000Z',
       createdAt: '2026-10-01T00:00:00.000Z'
-    });
+    }, afterCohortNow);
     expect(expiredAction.allowed).toBe(false);
     expect(expiredAction.reason).toBe('expired');
   });
@@ -383,10 +391,13 @@ describe('J Smart Services Security Rules & General Update Verification', () => 
     expect(appCtxText).toContain("getDocs(collection(db, 'users'))");
     expect(appCtxText).toContain("getDocs(collection(db, 'professionals'))");
 
-    // AccountRecoveryModal is phone-first and never forces email or exposes OTP codes
-    expect(recoveryModalText).toContain('Número de Telefone da Conta *');
-    expect(recoveryModalText).toContain('Não precisa de introduzir e-mail');
+    // AccountRecoveryModal accepts phone (+244) OR optional Gmail for recovery ONLY, never exposes OTP codes, and keeps login phone-only
+    expect(recoveryModalText).toContain('Número de telefone utilizado no registo');
+    expect(recoveryModalText).toContain('Endereço de e-mail Gmail utilizado no registo');
+    expect(recoveryModalText).toContain('MANDATORY_RECOVERY_GENERIC_MESSAGE');
     expect(recoveryModalText).not.toContain('demoOtp');
+    expect(authModalText).not.toContain('Entrar com Gmail');
+    expect(authModalText).not.toContain('Entrar com Google');
   });
 
   it('20. Secures server-side recovery OTP endpoints with salted scrypt/PBKDF2 hashing and zero OTP exposure', () => {
